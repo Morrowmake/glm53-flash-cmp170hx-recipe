@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-09-22
+
+README leads with what the machine does: the model, the rate and what the cards
+cost, with a byline and badges. Documentation trimmed to what the thing is and
+what it is worth, with nothing about how it was made.
+
+
 ## 1.0.0 — 2026-09-22
 
 First public cut of the recipe.
@@ -12,7 +19,7 @@ Ampere sparse-MLA / indexer / kpool backends, TP prefill comm/compute overlap,
 host-staged all-reduce for nodes without peer access, thin-M BF16 GEMM, sm_80
 decode kernels, sm_80 prefill kernels, fused decode prologue with
 batch-sharded logits, and decode-aware fair chunked prefill. Pipeline
-parallelism is enabled but unoptimised.
+parallelism is enabled but untuned.
 
 **Serving.** GLM-5.3-Flash at W4A16 (group size 128) across four GPUs, TP=4,
 262,144-token context, DFlash2 speculation at k=3, glm47 reasoning and
@@ -28,8 +35,8 @@ every key. `install.sh`, `download.sh` and `stop.sh` are thin wrappers.
 **Results.** Decode and cold-prefill measurements taken 2026-09-18 against
 MiaAI-Lab's published 2x DGX Spark figures, using their benchmark prompts.
 
-**Known limits.** The PP=4 layout works but is unoptimised: the seven feature
-flags were developed and validated under TP=4, and PP=4 was last measured on an
-early first-day build with MTP, before any of this. **To be re-measured** on
-this pinned tree, with both MTP and DFlash, and the numbers in the README
-updated. DFlash under pipeline parallelism has never been tried.
+**Known limits.** The PP=4 layout works but is untuned: the seven features
+target TP=4 shapes, and the last PP=4 figures come from an early build with MTP
+that had none of them. **To be re-measured** on this pinned tree, with both MTP
+and DFlash, and the README numbers updated. DFlash under pipeline parallelism
+has never been run.

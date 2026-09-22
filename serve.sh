@@ -72,7 +72,7 @@ export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:T
 # TP=4 assumes wide links between the cards: it moves ~9.4 MB per layer during
 # prefill and ~100 small collectives per decode step. On narrow links (x4) use
 # PP=4 TP=1, which only passes activations between stages. The PP path works
-# but is unoptimised here -- see the README section on link width.
+# but is untuned here -- see the README section on link width.
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
 # MLA tensors, so it uses the non-MTP split.

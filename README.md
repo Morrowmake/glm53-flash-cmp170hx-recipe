@@ -1,12 +1,21 @@
-# GLM-5.3-Flash on 4x CMP 170HX
+# GLM-5.3-Flash at 240 tok/s on $4,500 of GPUs
 
-**GLM-5.3-Flash**, a 320B-parameter MoE, served at **W4A16** across four GPUs by
-upstream vLLM with our Ampere patches. One command brings up an
-OpenAI-compatible API on `:8000` as `glm-5.3-flash`: tensor-parallel 4, DFlash2
-speculation at k=3, a 262,144-token context with a 1,158,144-token KV pool,
-reasoning and tool calls, vision and video. No FP8, no KV-cache quantisation, no
-offload — INT4 weights with FP16 activations, a full-precision KV cache, and the
-whole model resident in GPU memory.
+<p>
+  <strong>by <a href="https://x.com/Morrowmake">Morrowmake</a></strong>
+  &nbsp;·&nbsp;
+  <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
+  &nbsp;
+  <a href="https://github.com/Morrowmake/vllm/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20cf80da1839-4b32c3?style=flat"></a>
+  &nbsp;
+  <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
+</p>
+
+A 320B-parameter MoE on your own machine, behind an OpenAI-compatible API: a
+**262,144-token context**, tool calls and reasoning, images and video, and
+**165–240 tok/s** for one user. The weights are W4A16 and nothing else is
+reduced — the KV cache is full precision, there is no FP8 anywhere, and nothing
+is offloaded to CPU or disk. It was built and measured on **four NVIDIA CMP
+170HX cards**, about $4,500 of GPU.
 
 ## Quick start
 
@@ -178,15 +187,15 @@ PP=4 TP=1 ./start.sh
 speculator to the MTP head automatically, because DFlash under PP is untested
 here.
 
-**The PP=4 path works, but it is unoptimised in this recipe.** All seven feature
-flags were developed and validated under TP=4. Under PP=4 the host-staged
-all-reduce, the prefill overlap and the batch-sharded logits have nothing to do
-(`start.sh` turns them off for you), and the tuned decode and prefill kernels
-were shaped for TP=4 tensor widths. Nobody has gone back and tuned them for PP.
+**The PP=4 path works, but it is untuned here.** All seven features target
+TP=4. Under PP=4 the host-staged all-reduce, the prefill overlap and the
+batch-sharded logits have nothing to do — `start.sh` turns them off for you —
+and the decode and prefill kernels are shaped for TP=4 tensor widths. Nothing
+here is fitted to PP.
 
-**The PP=4 numbers here are stale.** PP=4 was last measured on an early
-first-day build, before any of this recipe's optimisations existed and with
-MTP; DFlash under PP has never been tried. On that build it ran at roughly
+**The PP=4 numbers here are stale.** PP=4 was last measured on an early build
+that had none of the current feature set, and with MTP; DFlash under PP has
+never been run. On that build it came out at roughly
 **half of TP=4's decode speed and about twice its cold-prefill speed**. It will
 be re-measured on this recipe's pinned tree, with both MTP and DFlash, and the
 numbers updated here. Treat the ratio as a direction, not a figure.
@@ -345,9 +354,9 @@ actually decoding.
 stage boundaries and the MTP drafter loads the target embedding under PP, so
 `PP=4 TP=1` works. It is not the default — see *Known limits*.
 
-Measured all together against the pre-merge default: prefill +13.4%,
-TTFT@23K −14.9%, ms/step at one stream −1.22 (paired, drift 0.58), decode
-retention during prefill 7% → 18%, KV pool unchanged.
+All seven together, against the same engine with all seven off: prefill
++13.4%, TTFT@23K −14.9%, ms/step at one stream −1.22, decode retention during
+someone else's prefill 7% → 18%, KV pool unchanged.
 
 ---
 
@@ -437,7 +446,7 @@ costs roughly 150k KV tokens.
 about 9.4 MB per layer between cards during prefill and ~100 small collectives
 per decode step, so on x4 links it is bus-bound. `PP=4 TP=1` passes only
 activations between stages and is the layout for narrow links, but it is
-unoptimised here and its last measurement is from an early build — see
+untuned here and its last measurement is from an early build — see
 [PCIe link width](#pcie-link-width-tp4-vs-pp4).
 
 ---
@@ -481,11 +490,5 @@ used as data with attribution. No code from their repositories is included here.
 
 ## How we got here
 
-These patches came out of a long optimisation campaign against a single
-question: what does it take to serve a modern sparse-attention MoE on Ampere
-silicon behind a narrow bus with no peer-to-peer? Each feature was built on its
-own branch, validated in isolation against a measured noise floor, then merged
-and re-validated together; the ones that did not survive that were dropped. The
-full history — branch by branch, with the commit messages that record what each
-one measured — is on
-[Morrowmake/vllm @ `ampere-glm53`](https://github.com/Morrowmake/vllm/commits/ampere-glm53).
+The patches are ours; the fork branch is the code —
+[Morrowmake/vllm @ `ampere-glm53`](https://github.com/Morrowmake/vllm/tree/ampere-glm53).
