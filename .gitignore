@@ -1,0 +1,15 @@
+# Checkpoints (~180 GB) -- fetch with ./download.sh
+models/
+
+# Environment built by ./install.sh
+venv/
+vllm-src/
+
+# Server output
+logs/*
+!logs/.gitkeep
+*.log
+
+__pycache__/
+*.pyc
+.DS_Store

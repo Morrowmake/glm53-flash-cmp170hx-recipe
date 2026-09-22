@@ -1,0 +1,23 @@
+# Pin the CMP 170HX cards to persistence mode and a 180 W board limit at boot.
+#
+# 180 W is a thermal/VRM choice for these cards in a dense chassis, not a
+# hardware maximum. Raise or lower it to suit your cooling; everything in this
+# recipe was measured at 180 W.
+#
+# Install:
+#   sudo cp hardware/cmp-power-limit.service /etc/systemd/system/
+#   sudo systemctl enable --now cmp-power-limit.service
+
+[Unit]
+Description=Set NVIDIA CMP 170HX power limits to 180 W
+After=nvidia-persistenced.service
+ConditionPathExists=/usr/bin/nvidia-smi
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nvidia-smi --persistence-mode=1
+ExecStart=/usr/bin/nvidia-smi --power-limit=180
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
