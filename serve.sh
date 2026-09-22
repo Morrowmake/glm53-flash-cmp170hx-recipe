@@ -21,7 +21,7 @@
 #   VLLM_PP_LAYER_PARTITION, EXTRA_ARGS.
 #
 # ===== sm_80 feature flags ==================================================
-# Seven features, validated individually and then together.
+# Eight features, validated individually and then together.
 # All are OFF by default IN THE CODE; the block below is the only thing that
 # turns them on, so each one is a one-variable kill switch -- set it to 0 in
 # the environment and restart, no rebuild and no revert:
@@ -34,6 +34,7 @@
 #   VLLM_GLM5_THIN_GEMM=0         sm_80 thin-M BF16 GEMM           [thin-gemm]
 #   FAIR_PREFILL=0                decode-aware prefill chunking    [fair-prefill]
 #   VLLM_GLM5_HOST_ALLREDUCE=0    host-staged no-P2P all-reduce    [pcie-allreduce]
+#   VLLM_GLM5_SHARED_EXPERT_REORDER=0  MoE shared experts after routed dispatch  [shared-expert-stream]
 #
 # Measured together vs the pre-merge default: prefill +13.4%, TTFT@23K -14.9%,
 # ms/step c1 -1.22 (paired, drift 0.58), decode retention during someone
@@ -131,6 +132,19 @@ if [ "$TP" -gt 1 ]; then
 else
   export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-0}
 fi
+# [shared-expert-stream] enqueue the routed experts first, then submit the MoE
+# shared experts to the aux stream, so the two actually run at the same time.
+# With the upstream order the shared experts were submitted before the gate and
+# had retired before the routed Marlin kernels were queued behind them.
+# Measured alongside the sparse-MLA decode retune: shared-expert GEMM time
+# overlapping the routed Marlin kernels 0.01% -> 73.3% on a rank-0 decode
+# trace; ms/step c1 17.155 -> 17.010 and c4 32.27 -> 32.10 against a
+# base-to-base drift of 0.03 and 0.04; cold prefill, KV cache size, TTFT and
+# gsm8k unchanged, logprob drift inside the same-server floor.
+# Decode only: the 256-token shared-experts stream threshold keeps the
+# 1152-token prefill chunks off this path entirely.
+# Kill switch: set it to 0 and restart, no rebuild.
+export VLLM_GLM5_SHARED_EXPERT_REORDER=${VLLM_GLM5_SHARED_EXPERT_REORDER:-1}
 # [fair-prefill] decode-aware chunking, passed as real serve args below rather
 # than through EXTRA_ARGS so EXTRA_ARGS stays free for callers.
 FAIR_ARGS=()

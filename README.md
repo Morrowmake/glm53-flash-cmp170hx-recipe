@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2069c33802d0-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20434dea1a1b-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -133,12 +133,16 @@ The configuration in this repo, as it runs day to day:
 | Decode, 1 user, prose | 165.1 tok/s |
 | Decode, 4 users, aggregate | 360–498 tok/s by prompt type |
 | Decode, 8 users, aggregate | 470–670 tok/s by prompt type |
-| Cold prefill | 2,243 tok/s |
+| Cold prefill | ~2,238 tok/s |
 | Cold prefill, 250K prompt | 2,076 tok/s |
-| TTFT, 23,255-token prompt | 9.77 s (2,380 prompt tok/s) |
+| TTFT, 6.2K-token prompt | 2.59 s |
+| TTFT, 23,255-token prompt | 9.74 s (2,388 prompt tok/s) |
 | KV pool at `--max-model-len 262144` | 1,160,192 tokens (4.43x concurrency) |
-| GSM8K, n=50 at concurrency 8 | 0.980 |
+| GSM8K, n=50 at concurrency 8 | 0.98–1.00 |
 | Independent run | [localmaxxing.com](https://www.localmaxxing.com/en/runs/cmu6l4y49081alq01svunzaqb) |
+
+A 262,143-token prompt — the largest this 262,144-token context will accept —
+is served in 126 s; a 200,043-token prompt in 94 s.
 
 Prefill, TTFT, KV and GSM8K are from the pinned engine; the decode rows and
 the 250K prefill rung are the 2026-09-18 sweep reproduced in the comparison
@@ -158,7 +162,7 @@ despite being the same model on the same cards.
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `69c33802d0` |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `434dea1a1b` |
 | Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
@@ -227,6 +231,7 @@ rebuild, no revert:
 | `VLLM_GLM5_DECODE_KERNELS` | sm_80 decode kernels |
 | `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
 | `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce for nodes without peer access |
+| `VLLM_GLM5_SHARED_EXPERT_REORDER` | MoE shared experts overlapped with the routed dispatch |
 | `FAIR_PREFILL` | decode-aware prefill chunking |
 
 If output quality is ever in question, turn `VLLM_GLM5_DECODE_KERNELS` off
@@ -283,7 +288,7 @@ not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
 ## What is in the patches
 
 The fork is [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx), branch
-`ampere-glm53`, pinned in `start.sh` to commit `69c33802d0`. Every patch is
+`ampere-glm53`, pinned in `start.sh` to commit `434dea1a1b`. Every patch is
 Python, Triton or TileLang — nothing touches vLLM's CUDA or C++ sources. Each
 feature is **off by default in the code** and turned on only by `serve.sh`, so
 every one of them is a single-variable kill switch.
@@ -326,6 +331,23 @@ kernel, and each rank samples its own `1/TP` slice of the batch instead of every
 rank all-gathering full-vocab logits — a meaningful saving when the all-gather
 crosses PCIe Gen 2.
 
+**Shared-expert stream re-ordering** (`VLLM_GLM5_SHARED_EXPERT_REORDER`). The
+MoE shared experts are submitted to the aux stream *after* the routed dispatch
+rather than before it, so the two actually run at the same time. With the
+upstream ordering the shared experts had already retired by the time the routed
+Marlin kernels were queued behind them. Shared-expert GEMM time overlapping the
+routed kernels goes from 0.01% to 73.3% on a rank-0 decode trace. Decode only —
+the 256-token threshold keeps prefill chunks off this path.
+
+**Retuned sparse-MLA decode schedule.** A wider KV tile, two pipeline stages and
+a head tile sized to the rank. `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1` restores
+the previous schedule.
+
+**Correctness fixes.** 64-bit KV row offsets in the sparse-attention kernels,
+which removes a silent-corruption risk above roughly 4.2M KV tokens; a
+vocabulary clamp in three sampler kernels; and a 512 MiB transient freed in the
+indexer's chunk loop.
+
 **Fair chunked prefill** (`FAIR_PREFILL`). A decode-aware prefill budget: while
 requests are decoding, prefill chunks are capped so a long prompt cannot starve
 them. Decode retention during someone else's prefill went from 7% to 18% of
@@ -338,7 +360,7 @@ engine supports a pipeline layout. This recipe does not — it is tuned for TP=4
 throughout. For a pipeline-parallel recipe on these cards, see
 [JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
 
-All seven together, against the same engine with all seven off: prefill
+All the feature flags together, against the same engine with them off: prefill
 +13.4%, TTFT@23K −14.9%, ms/step at one stream −1.22, decode retention during
 someone else's prefill 7% → 18%, KV pool unchanged.
 
@@ -395,10 +417,10 @@ takes one to two hours.
     healthy
     served models: glm-5.3-flash
 ==> chat request
-    usage: prompt=28 completion=200 wall=1.44s  ->  138.5 tok/s
+    usage: prompt=28 completion=200 wall=1.41s  ->  142.2 tok/s
 ==> tool-call request
-    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
-    usage: prompt=199 completion=66 wall=0.48s  ->  138.3 tok/s
+    tool_call: get_weather({"city": "Reykjavik"})
+    usage: prompt=199 completion=40 wall=0.37s  ->  109 tok/s
 ==> KV cache
     GPU KV cache size: 1,160,192 tokens, Maximum concurrency for 262,144 tokens per request: 4.43x
 ```

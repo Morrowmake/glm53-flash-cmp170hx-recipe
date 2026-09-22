@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.2.0 — 2026-09-22
+
+**Engine pin moves to `434dea1a1b`** (42 commits on upstream `496c6472cb`).
+Installed version `0.29.1rc1.dev561+g434dea1a1.precompiled`.
+
+**Correctness.** 64-bit KV row offsets in the sparse-attention kernels, closing
+a silent-corruption risk above roughly 4.2M KV tokens; a vocabulary clamp in
+three sampler kernels; a 512 MiB transient freed in the indexer's chunk loop.
+
+**Performance.** The sparse-MLA decode schedule is retuned — wider KV tile, two
+pipeline stages, head tile sized to the rank — with the old schedule available
+as `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1`. A new flag,
+`VLLM_GLM5_SHARED_EXPERT_REORDER` (default 1, kill switch 0), submits the MoE
+shared experts after the routed dispatch so the two overlap: shared-expert GEMM
+time overlapping the routed kernels 0.01% -> 73.3% on a rank-0 decode trace.
+
+Measured against the previous pin with alternating restarts: ms/step at one
+stream 17.16 -> 17.01 (-0.85%), at four streams 32.27 -> 32.10 (-0.53%), cold
+prefill flat at ~2,238 tok/s, TTFT 2.59 s at 6.2K and 9.74 s at 23K, GSM8K
+0.98-1.00, KV pool 1,160,192 tokens (4.43x). A 262,143-token prompt — the
+largest a 262,144-token context accepts — is served in 126 s, and a
+200,043-token prompt in 94 s. Single-stream decode on this commit's parent
+tree averaged 169.5, 167.5 and 172.0 tok/s over three runs; the decode rows in
+the README come from a different protocol and are unchanged.
+
+
 ## 1.1.1 — 2026-09-22
 
 Fork repository renamed to `vllm-cmp170hx`; no code change. Every clone URL
