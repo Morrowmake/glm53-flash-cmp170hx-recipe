@@ -492,7 +492,7 @@ used as data with attribution. No code from their repositories is included here.
   and the **[vLLM](https://github.com/vllm-project/vllm)** project for the
   engine these patches sit on top of.
 
-## How we got here
+## Source
 
 The patches are ours; the fork branch is the code —
 [Morrowmake/vllm @ `ampere-glm53`](https://github.com/Morrowmake/vllm/tree/ampere-glm53).
