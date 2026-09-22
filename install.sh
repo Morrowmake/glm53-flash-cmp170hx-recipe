@@ -9,6 +9,7 @@
 #
 # Env overrides:
 #   VENV                venv directory                  (default ./venv)
+#   VENV_CLEAR          1 = rebuild the venv from scratch instead of reusing it
 #   VLLM_SRC            fork checkout directory         (default ./vllm-src)
 #   VLLM_REPO           git remote                      (default the Morrowmake fork)
 #   VLLM_BRANCH         branch to fetch                 (default ampere-glm53)
@@ -90,8 +91,12 @@ git -C "$VLLM_SRC" checkout -B "$VLLM_BRANCH" "$VLLM_COMMIT"
 git -C "$VLLM_SRC" submodule update --init --recursive --depth 1
 echo "    HEAD: $(git -C "$VLLM_SRC" log --oneline -1)"
 
-log "Creating venv at $VENV (Python $PYTHON_VERSION)"
-uv venv --python "$PYTHON_VERSION" "$VENV"
+if [ -x "$VENV/bin/python" ] && [ "${VENV_CLEAR:-0}" != "1" ]; then
+  log "Reusing venv at $VENV (set VENV_CLEAR=1 to rebuild it from scratch)"
+else
+  log "Creating venv at $VENV (Python $PYTHON_VERSION)"
+  uv venv --clear --python "$PYTHON_VERSION" "$VENV"
+fi
 export VIRTUAL_ENV="$VENV"
 
 PIP_ARGS=(--extra-index-url https://flashinfer.ai/whl/)
