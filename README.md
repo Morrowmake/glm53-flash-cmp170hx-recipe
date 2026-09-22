@@ -1,4 +1,4 @@
-# GLM-5.3-Flash at 240 tok/s on $4,500 of GPUs
+# GLM-5.3-Flash on 4× NVIDIA CMP 170HX
 
 <p>
   <strong>by <a href="https://x.com/Morrowmake">Morrowmake</a></strong>
@@ -10,12 +10,16 @@
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
-A 320B-parameter MoE on your own machine, behind an OpenAI-compatible API: a
-**262,144-token context**, tool calls and reasoning, images and video, and
-**165–240 tok/s** for one user. The weights are W4A16 and nothing else is
+**320B MoE at 165–240 tok/s, 256K context, OpenAI-compatible — on four ~$1,100
+mining cards.**
+
+This is everything needed to run **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
+cards** with our **[vLLM fork](https://github.com/Morrowmake/vllm/tree/ampere-glm53)**.
+You get a 320B-parameter MoE on your own machine behind an OpenAI-compatible
+API: a **262,144-token context**, tool calls and reasoning, images and video,
+and **165–240 tok/s** for one user. The weights are W4A16 and nothing else is
 reduced — the KV cache is full precision, there is no FP8 anywhere, and nothing
-is offloaded to CPU or disk. It was built and measured on **four NVIDIA CMP
-170HX cards**, about $4,500 of GPU.
+is offloaded to CPU or disk.
 
 ## Quick start
 

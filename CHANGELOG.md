@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 — 2026-09-22
+
+Title names the model and the cards so the repo can be found by either; the
+hook moves to a subtitle under the byline.
+
+
 ## 1.0.1 — 2026-09-22
 
 README leads with what the machine does: the model, the rate and what the cards
