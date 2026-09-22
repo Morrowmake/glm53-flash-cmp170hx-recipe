@@ -1,58 +1,37 @@
 # GLM-5.3-Flash on 4x CMP 170HX
 
-Everything needed to serve **GLM-5.3-Flash** — a 320B-parameter MoE — at
-**W4A16** across four **NVIDIA CMP 170HX** cards, using upstream vLLM with our
-Ampere patches.
+**GLM-5.3-Flash**, a 320B-parameter MoE, served at **W4A16** across four GPUs by
+upstream vLLM with our Ampere patches. One command brings up an
+OpenAI-compatible API on `:8000` as `glm-5.3-flash`: tensor-parallel 4, DFlash2
+speculation at k=3, a 262,144-token context with a 1,158,144-token KV pool,
+reasoning and tool calls, vision and video. No FP8, no KV-cache quantisation, no
+offload — INT4 weights with FP16 activations, a full-precision KV cache, and the
+whole model resident in GPU memory.
 
-There is no FP8 anywhere, no KV-cache quantisation, and no CPU or disk offload.
-The weights are INT4 with FP16 activations (group size 128), the KV cache is
-full precision, and the whole model lives in HBM2e across the four cards. The
-patches are what make an sm_80 GPU run GLM-5.3-Flash's DeepSeek-style sparse
-attention at all, and what make tensor parallelism survive a PCIe Gen 2 bus with
-no peer-to-peer.
+## Quick start
 
-Four cards, 256 GB of HBM2e, a 262,144-token context with a 1.15M-token KV pool,
-**165–240 tok/s** of decode for one user and **~2,200 tok/s** of cold prefill.
-
-```
-./install.sh      # venv + the patched vLLM fork, pinned
-./download.sh     # ~180 GB of checkpoints
-./serve.sh        # OpenAI-compatible server on :8000
-./smoke.sh        # one chat request, one tool call
+```bash
+git clone https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe.git
+cd glm53-flash-cmp170hx-recipe
+cp .env.example .env          # optional: ./start.sh does this on first run
+./start.sh                    # preflight, install, download, launch, wait for /health
 ```
 
----
+`./start.sh` runs every step and skips the ones already done, so running it
+twice is safe and the second run just launches. First time through it builds the
+venv (about six minutes), fetches ~180 GB of checkpoints, then starts the
+server; weight load and CUDA-graph capture take a few more minutes.
 
-## Tested on
+A prefix env assignment beats `.env` for every key:
 
-| | |
-|---|---|
-| GPUs | 4x NVIDIA CMP 170HX — GA100, sm_80; our cards expose 64 GB HBM2e each |
-| Interconnect | PCIe Gen 2 x16, no peer-to-peer |
-| CPU | AMD EPYC 7663 |
-| RAM | 247 GB |
-| OS | Ubuntu 26.04 |
-| Driver | NVIDIA 610.57 |
-| CUDA | 13.3 |
+```bash
+MAX_LEN=131072 ./start.sh restart
+VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
+SPEC_MODE=mtp ./start.sh restart
+```
 
-Results were measured at a 180 W power limit.
-
-Peer-to-peer was unavailable on this machine — `nvidia-smi topo -p2p r` answers
-`GPU not supported` on every pair — so vLLM's `CustomAllreduce` switches itself
-off and NCCL falls back to a shared-memory ring costing `2(N-1)` sequential host
-hops per message. Much of the serve configuration below exists to work around
-that, and `VLLM_GLM5_HOST_ALLREDUCE` is the patch that replaces it.
-
-## Requirements
-
-- **4 CUDA GPUs with roughly 60 GB or more each.** The W4A16 weights take about
-  45 GB per card at TP=4, and the KV cache takes what is left.
-- **sm_80 or newer.** The Ampere patches are exercised on sm_80; newer parts run
-  fine, and the Ampere-specific backends are only selected where they are
-  needed.
-- **CUDA 13.x toolkit.**
-- **Python 3.12.**
-- **About 185 GB of disk** for the two checkpoints.
+**If your cards are not on x16 links**, use pipeline parallelism instead —
+`PP=4 TP=1 ./start.sh`. See [PCIe link width: TP=4 vs PP=4](#pcie-link-width-tp4-vs-pp4).
 
 ---
 
@@ -61,8 +40,6 @@ that, and `VLLM_GLM5_HOST_ALLREDUCE` is the patch that replaces it.
 ### Against 2x DGX Spark
 
 ![GLM-5.3-Flash on 4x CMP 170HX versus 2x DGX Spark](assets/glm53-cmp170hx-vs-dgx-spark-full-2026-09-18.jpg)
-
-![Three-bar summary](assets/glm53-vs-dgx-spark-simple-2026-09-18.jpg)
 
 The published figures and the benchmark prompts on the DGX Spark side are
 [MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks),
@@ -157,6 +134,161 @@ despite being the same model on the same cards.
 
 ---
 
+## What runs
+
+| | |
+|---|---|
+| API | OpenAI-compatible, `http://127.0.0.1:8000/v1` |
+| Model id | `glm-5.3-flash` |
+| Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
+| Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
+| Engine | [Morrowmake/vllm](https://github.com/Morrowmake/vllm) `ampere-glm53` @ `cf80da1839` |
+| Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — on x4 links use `PP=4 TP=1`, see [below](#pcie-link-width-tp4-vs-pp4) |
+| Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
+| Context | 262,144 tokens |
+| KV cache | 1,158,144 tokens at `--gpu-memory-utilization 0.95`; 4.42x concurrency at full context; **not quantised** |
+| Prefix caching | on |
+| Speculation | DFlash2 ([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) at k=3; `SPEC_MODE=mtp` or `none` to change |
+| Tools + reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
+| CUDA graphs | captured at the default power-of-two decode batch shapes |
+| Vision | image and video on, uncapped by default (`MM_CAP=1` to bound them) |
+
+---
+
+## PCIe link width: TP=4 vs PP=4
+
+Every number above was measured with the four cards on **PCIe Gen2 x16** links.
+Our cards run at x16; stock CMP 170HX cards run at x4.
+
+That matters because of what the two layouts put on the bus. **Tensor
+parallelism** splits each layer across all four cards, so it moves about
+**9.4 MB per layer** between them during prefill and roughly **100 small
+collectives per decode step**. At x4 — about a quarter of the bandwidth — TP=4
+is bus-bound and will be much slower than the figures above.
+
+**Pipeline parallelism** splits the model by layer instead, so the only thing
+crossing the bus is the activation tensor at each stage boundary. On narrow
+links that is the layout to use:
+
+```bash
+PP=4 TP=1 ./start.sh
+```
+
+`serve.sh` keeps the balanced layer partition and `start.sh` switches the
+speculator to the MTP head automatically, because DFlash under PP is untested
+here.
+
+**The PP=4 path works, but it is unoptimised in this recipe.** All seven feature
+flags were developed and validated under TP=4. Under PP=4 the host-staged
+all-reduce, the prefill overlap and the batch-sharded logits have nothing to do
+(`start.sh` turns them off for you), and the tuned decode and prefill kernels
+were shaped for TP=4 tensor widths. Nobody has gone back and tuned them for PP.
+
+**The PP=4 numbers here are stale.** PP=4 was last measured on an early
+first-day build, before any of this recipe's optimisations existed and with
+MTP; DFlash under PP has never been tried. On that build it ran at roughly
+**half of TP=4's decode speed and about twice its cold-prefill speed**. It will
+be re-measured on this recipe's pinned tree, with both MTP and DFlash, and the
+numbers updated here. Treat the ratio as a direction, not a figure.
+
+---
+
+## Configuration
+
+Everything lives in `.env`, copied from `.env.example` on first run and
+gitignored. Read [`.env.example`](.env.example) for the full annotated set; the
+headlines are:
+
+| Key | Default | |
+|---|---|---|
+| `VLLM_COMMIT` | *(commented out)* | engine pin. Left to `start.sh`'s default so a `git pull` can move it |
+| `PP` / `TP` | `1` / `4` | layout; `PP*TP` must equal your GPU count |
+| `MAX_LEN` | `262144` | context ceiling; lowering it raises KV concurrency |
+| `MAX_SEQS` | `8` | concurrent sequences |
+| `MAX_BATCHED` | `2048` | batched tokens per scheduler step |
+| `GPU_UTIL` | `0.95` | memory target. 0.97 was too tight here |
+| `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculator and draft depth; `mtp` or `none` |
+| `PORT` / `SERVED_MODEL_NAME` | `8000` / `glm-5.3-flash` | |
+| `REASONING_PARSER` / `TOOL_PARSER` | `glm47` / `glm47` | |
+| `PREFILL_CAP` | `0` | upstream's **unconditional** chunk cap. Leave it 0 |
+| `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | decode-aware chunking — the cap you actually want |
+| `MM_CAP` | `0` | `1` bounds vision and video, buying back ~150k KV tokens |
+| `READY_TIMEOUT` | `1800` | seconds to wait for `/health` |
+| `BUILD_FROM_SOURCE` | `0` | `1` compiles the CUDA extensions instead of using upstream's |
+
+`PREFILL_CAP` is not a gentler `FAIR_PREFILL`. It applies unconditionally, cost
+−15.3% prefill and +16.5% TTFT@23K here, and as a side effect drops chunks below
+the two prefill gates, silently disabling the overlap and the prefill kernels.
+`FAIR_PREFILL` only bites while requests are actually decoding.
+
+### Kill switches
+
+All seven features are off by default in the engine and turned on only by
+`serve.sh`, so each one is a single variable you can set to `0` and restart — no
+rebuild, no revert:
+
+| Key | Feature |
+|---|---|
+| `VLLM_GLM5_PREFILL_OVERLAP` | TP prefill comm/compute overlap |
+| `VLLM_GLM5_PREFILL_KERNELS` | sm_80 prefill kernels |
+| `VLLM_GLM5_PROLOGUE_FUSE` | fused eager decode prologue |
+| `VLLM_GLM5_LOCAL_LOGITS` | batch-sharded logits and sampling |
+| `VLLM_GLM5_DECODE_KERNELS` | sm_80 decode kernels |
+| `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
+| `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce for nodes without peer access |
+| `FAIR_PREFILL` | decode-aware prefill chunking |
+
+If output quality is ever in question, turn `VLLM_GLM5_DECODE_KERNELS` off
+first. Exactness moved slightly outside its noise floor when the seven were
+merged (0.4119 against floors of 0.2007 and 0.2984) and GSM8K went 1.000 → 0.980
+at n=50; the decode kernels own that movement.
+
+```bash
+VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
+```
+
+---
+
+## Operating
+
+| Command | |
+|---|---|
+| `./start.sh` | preflight → install → download → launch → wait for `/health` |
+| `./start.sh install` | build the venv and the pinned fork only |
+| `./start.sh download` | fetch the two checkpoints only |
+| `./start.sh stop` | stop the server this checkout started |
+| `./start.sh restart` | stop, then start |
+| `./start.sh status` | process, `/health`, KV line, install and checkpoint state |
+| `./start.sh logs` | follow `logs/serve.log` |
+| `./start.sh update` | `git pull`, reinstall if the pin moved, restart |
+| `./start.sh smoke` | one chat request and one tool call |
+| `./start.sh help` | the header of `start.sh` |
+
+`install.sh`, `download.sh` and `stop.sh` are one-line wrappers around the
+matching subcommand. `serve.sh` is the internal launcher `start.sh` execs; you
+can run it in the foreground yourself, and `DRY=1 ./start.sh` prints the command
+it would run.
+
+Lifecycle commands on a checkout are serialised by a `flock` on
+`logs/lifecycle.lock`. `stop` only ever signals the PID in `logs/vllm.pid`, and
+only after confirming that process is the server this checkout launched — it
+never searches by process name, so another vLLM on the same machine is never
+touched.
+
+### Updating and rolling back
+
+```bash
+./start.sh update                          # pull, reinstall if the pin moved, restart
+VLLM_COMMIT=<older sha> ./start.sh update  # roll back to a known-good engine
+```
+
+`update` re-executes itself after a pull that changed this repo, so it acts on
+the new pin rather than the one it started with. The pin lives in `start.sh`,
+not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
+`.env` if you would rather freeze it.
+
+---
+
 ## What is in the patches
 
 The fork is [Morrowmake/vllm](https://github.com/Morrowmake/vllm), branch
@@ -219,13 +351,19 @@ retention during prefill 7% → 18%, KV pool unchanged.
 
 ---
 
-## Install
+## Installing by hand
 
-You need a working NVIDIA driver, a CUDA 13.x toolkit and
-[uv](https://docs.astral.sh/uv/getting-started/installation/).
+`./start.sh` does all of this for you. If you want the pieces:
 
-**CUDA 13.3.** NVIDIA had no working `ubuntu2604` repository index when we built
-this, so we used the `ubuntu2404` one, which installs cleanly:
+```bash
+./install.sh     # venv + the pinned fork, verified imports
+./download.sh    # the two checkpoints
+./serve.sh       # launch in the foreground
+./smoke.sh       # one chat request, one tool call
+```
+
+**CUDA.** You need a 13.x toolkit. NVIDIA had no working `ubuntu2604`
+repository index when we built this, so we used the `ubuntu2404` one:
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
@@ -234,66 +372,23 @@ sudo apt-get update
 sudo apt-get install -y cuda-toolkit-13-3 git-lfs
 ```
 
-Then:
+**Why the install is quick.** By default it uses upstream's **precompiled**
+extensions rather than compiling them, which takes minutes instead of hours.
+That is not a shortcut: the diff between `ampere-glm53` and upstream touches no
+`.cu`, `.cpp` or `CMakeLists` file, so the compiled objects are identical to
+upstream's, and upstream's wheels already carry sm_80 cubins. To compile them
+yourself, `BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` — it pins
+`TORCH_CUDA_ARCH_LIST=8.0`, needs the full toolkit and ~60 GB of scratch, and
+takes one to two hours.
 
-```bash
-git clone https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe.git
-cd glm53-flash-cmp170hx-recipe
-./install.sh
-```
-
-`install.sh` creates `./venv` on Python 3.12, clones the fork into `./vllm-src`
-at the pinned commit, installs torch 2.13.0+cu130, installs the fork editable,
-adds flashinfer 0.6.18.post1, TileLang 0.1.12 and ninja, and then verifies that
-`torch`, `vllm`, the compiled extensions, Triton, TileLang, flashinfer and the
-sm_80 patch modules all import.
-
-It takes about six minutes, because by default it uses upstream's **precompiled**
-extensions rather than compiling them. That is not a shortcut: the diff between
-`ampere-glm53` and upstream touches no `.cu`, `.cpp` or `CMakeLists` file, so the
-compiled objects are identical to upstream's, and upstream's wheels already carry
-sm_80 cubins. It is exactly how our production environment was built. If you
-would rather compile everything yourself:
-
-```bash
-BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh
-```
-
-which pins `TORCH_CUDA_ARCH_LIST=8.0`, needs the full toolkit and ~60 GB of
-scratch, and takes one to two hours.
-
-Then fetch the checkpoints — about 180 GB, so give it a while:
-
-```bash
-./download.sh
-```
+**Checkpoints.**
 
 | Repository | Size | Role |
 |---|---:|---|
 | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) | ~178 GB, 21 files | target model |
 | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) | ~2.2 GB, 5 files | DFlash2 drafter |
 
----
-
-## Run
-
-```bash
-./serve.sh              # DFlash2 drafter, k=3 — the default
-./serve.sh mtp          # MTP drafter instead
-./serve.sh none         # no speculative decoding
-DRY=1 ./serve.sh        # print the command instead of running it
-```
-
-Model load plus CUDA-graph capture takes several minutes. When it is up you have
-an OpenAI-compatible server on `:8000` serving `glm-5.3-flash`, with the glm47
-reasoning and tool-call parsers enabled.
-
-```bash
-./smoke.sh
-```
-
-sends one chat request and one tool call, prints tok/s from each usage block,
-and echoes the KV line from the log:
+**Smoke test output**, against a running server:
 
 ```
 ==> waiting for http://127.0.0.1:8000/health (up to 900s)
@@ -306,95 +401,6 @@ and echoes the KV line from the log:
     usage: prompt=199 completion=66 wall=0.48s  ->  136.3 tok/s
 ==> KV cache
     GPU KV cache size: 1,158,144 tokens, Maximum concurrency for 262,144 tokens per request: 4.42x
-```
-
-`smoke.sh` reads `./logs/serve.log` for that last line; point `SERVE_LOG` at
-wherever you actually sent the server's output.
-
----
-
-## Configuration
-
-Every knob is an environment variable read by `serve.sh`. The defaults are what
-produced the numbers above; the header comment in `serve.sh` is the full
-reference.
-
-### Paths
-
-| Variable | Default | |
-|---|---|---|
-| `VENV` | `./venv` | environment built by `install.sh` |
-| `MODEL` | `./models/GLM-5.3-Flash-W4A16-MTP` | target model |
-| `DFLASH_MODEL` | `./models/GLM-5.3-Flash-DFlash2` | drafter |
-| `CUDA_HOME` | `/usr/local/cuda-13.3` | toolkit root |
-
-### Engine
-
-| Variable | Default | |
-|---|---|---|
-| `TP` | `4` | tensor-parallel size |
-| `PP` | `1` | pipeline-parallel size; `PP*TP` must be 4 |
-| `MAX_LEN` | `262144` | context ceiling |
-| `MAX_SEQS` | `8` | concurrent sequences |
-| `MAX_BATCHED` | `2048` | batched tokens per step |
-| `GPU_UTIL` | `0.95` | memory target. 0.97 was judged too risky here |
-| `PORT` | `8000` | |
-| `SERVED_NAME` | `glm-5.3-flash` | |
-| `SPEC_N` | `3` | speculative tokens (DFlash2 k) |
-| `REASONING_PARSER` | `glm47` | |
-| `TOOL_PARSER` | `glm47` | |
-| `EXTRA_ARGS` | *(empty)* | appended verbatim; a `--speculative-config` here wins |
-| `VLLM_PP_LAYER_PARTITION` | mode-dependent | only under `PP=4` |
-
-### Prefill
-
-| Variable | Default | |
-|---|---|---|
-| `PREFILL_CAP` | `0` | upstream's **unconditional** long-prefill chunk cap. **Leave it 0** — see below |
-| `FAIR_PREFILL` | `1` | decode-aware chunking |
-| `FAIR_CHUNK` | `384` | chunk size while something is decoding |
-| `FAIR_PARTIAL` | `2` | concurrent partial prefills |
-| `VLLM_GLM5_PREFILL_MIN_TOKENS` | `384` | gate for the prefill kernels |
-
-`PREFILL_CAP` is not a gentler version of `FAIR_PREFILL`. It applies
-unconditionally, cost −15.3% prefill and +16.5% TTFT@23K in production, and as a
-side effect drops chunks below the two prefill gates, silently disabling the
-overlap and the prefill kernels. `FAIR_PREFILL` is the one you want: it only
-bites while requests are actually decoding.
-
-### Multimodal
-
-| Variable | Default | |
-|---|---|---|
-| `MM_CAP` | `0` | `0` leaves vision and video uncapped, which makes the memory profiler reserve for a context-filling video and costs ~150k KV tokens. `1` bounds both the profiler dummy and real inputs |
-| `MM_IMAGES` | `4` | images per prompt when `MM_CAP=1` |
-| `MM_FRAMES` | `32` | video frames when `MM_CAP=1` |
-| `MM_MAX_PIXELS` | `1003520` | pixel budget when `MM_CAP=1` |
-
-### Kill switches
-
-All seven features are on by default in `serve.sh` and off by default in the
-code. Set any of these to `0` and restart — no rebuild, no revert, one variable
-changed:
-
-| Variable | Feature |
-|---|---|
-| `VLLM_GLM5_PREFILL_OVERLAP` | TP prefill comm/compute overlap |
-| `VLLM_GLM5_PREFILL_KERNELS` | sm_80 prefill kernels |
-| `VLLM_GLM5_PROLOGUE_FUSE` | fused eager decode prologue |
-| `VLLM_GLM5_LOCAL_LOGITS` | batch-sharded logits and sampling |
-| `VLLM_GLM5_DECODE_KERNELS` | sm_80 decode kernels |
-| `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
-| `VLLM_GLM5_HOST_ALLREDUCE` | host-staged no-P2P all-reduce |
-| `FAIR_PREFILL` | decode-aware prefill chunking |
-
-If output quality is ever in question, turn off `VLLM_GLM5_DECODE_KERNELS`
-first. Exactness moved slightly outside its noise floor when the seven were
-merged (0.4119 against floors of 0.2007 and 0.2984) and GSM8K went 1.000 → 0.980
-at n=50; the decode kernels own that movement.
-
-```bash
-VLLM_GLM5_DECODE_KERNELS=0 ./serve.sh
 ```
 
 ---
@@ -427,28 +433,59 @@ concurrency at full context. Raising `MAX_LEN` lowers that multiplier; with
 `MM_CAP=0` the memory profiler also reserves for a context-filling video, which
 costs roughly 150k KV tokens.
 
-**TP=4 is the default for a reason.** `PP=4 TP=1` gives faster long-prompt TTFT
-(about 5.0 s against 11.8 s at 23K) and a larger KV pool, but roughly half the
-single-stream decode rate (80–85 against 135–145 tok/s at the time it was
-measured). Pick by workload.
+**TP=4 is the default, and it assumes wide links.** Tensor parallelism moves
+about 9.4 MB per layer between cards during prefill and ~100 small collectives
+per decode step, so on x4 links it is bus-bound. `PP=4 TP=1` passes only
+activations between stages and is the layout for narrow links, but it is
+unoptimised here and its last measurement is from an early build — see
+[PCIe link width](#pcie-link-width-tp4-vs-pp4).
 
 ---
 
 ## License
 
-This recipe — the scripts, the documentation and the figures — is MIT, © 2026
-Morrowmake. See [LICENSE](LICENSE).
+**This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
+See [LICENSE](LICENSE).
 
-The vLLM fork it installs is Apache-2.0, like upstream vLLM. The model
-checkpoints carry their own licenses from their respective publishers.
+**The vLLM fork** it installs is Apache-2.0, like upstream vLLM; our patches are
+contributed under that licence.
+
+**The weights** are MIT: the quantisation
+[`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)
+and the base model
+[`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash).
+
+**The DFlash2 drafter**
+([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2))
+is **CC BY-NC-ND 4.0** — research and evaluation only, non-commercial, no
+derivatives. It is the default speculator here, so read that before you deploy
+this anywhere commercial. `SPEC_MODE=mtp` serves the MTP head inside the MIT
+target checkpoint instead and does not use it at all.
+
+**The benchmark prompts and the published DGX Spark figures** are quoted from
+MiaAI-Lab's repository (AGPL-3.0) and their sparkDash prompt constants (MIT),
+used as data with attribution. No code from their repositories is included here.
+
+## Credits
+
+- **[MiaAI-Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)**
+  for publishing their 2x DGX Spark figures and their benchmark prompts, which
+  are the entire comparison column above. Thank you for publishing both.
+- **[incoai](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)** for the
+  DFlash2 drafter checkpoint.
+- **[canada-quant](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)**
+  for the W4A16 quantisation.
+- **[Z.ai](https://huggingface.co/zai-org/GLM-5.3-Flash)** for GLM-5.3-Flash,
+  and the **[vLLM](https://github.com/vllm-project/vllm)** project for the
+  engine these patches sit on top of.
 
 ## How we got here
 
 These patches came out of a long optimisation campaign against a single
-question: what does it take to serve a modern sparse-attention MoE on GA100
-silicon behind a PCIe Gen 2 bus with no peer-to-peer? Each feature was built on
-its own branch, validated in isolation against a measured noise floor, then
-merged and re-validated together; the ones that did not survive that were
-dropped. The full history — branch by branch, with the commit messages that
-record what each one measured — is on
+question: what does it take to serve a modern sparse-attention MoE on Ampere
+silicon behind a narrow bus with no peer-to-peer? Each feature was built on its
+own branch, validated in isolation against a measured noise floor, then merged
+and re-validated together; the ones that did not survive that were dropped. The
+full history — branch by branch, with the commit messages that record what each
+one measured — is on
 [Morrowmake/vllm @ `ampere-glm53`](https://github.com/Morrowmake/vllm/commits/ampere-glm53).

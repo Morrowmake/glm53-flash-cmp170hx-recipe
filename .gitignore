@@ -1,3 +1,6 @@
+# Local configuration, copied from .env.example on first run
+.env
+
 # Checkpoints (~180 GB) -- fetch with ./download.sh
 models/
 
@@ -5,10 +8,9 @@ models/
 venv/
 vllm-src/
 
-# Server output
+# Server output, pid and lock files
 logs/*
 !logs/.gitkeep
-*.log
 
 __pycache__/
 *.pyc

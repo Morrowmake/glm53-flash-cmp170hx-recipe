@@ -69,6 +69,10 @@ export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 # Layout: default TENSOR-PARALLEL 4 (c1 135-145 tok/s vs PP4 80-85; PP4 keeps faster long-prompt TTFT,
 # 5.0 s vs 11.8 s at 23K, and more KV). Switch with PP=4 TP=1.
+# TP=4 assumes wide links between the cards: it moves ~9.4 MB per layer during
+# prefill and ~100 small collectives per decode step. On narrow links (x4) use
+# PP=4 TP=1, which only passes activations between stages. The PP path works
+# but is unoptimised here -- see the README section on link width.
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
 # MLA tensors, so it uses the non-MTP split.
@@ -97,7 +101,13 @@ export VLLM_GLM5_PREFILL_MIN_TOKENS=${VLLM_GLM5_PREFILL_MIN_TOKENS:-384}
 # [decode-prologue] fuse the eager prologue, and sample a 1/TP slice of the
 # batch per rank instead of all-gathering full-vocab logits everywhere.
 export VLLM_GLM5_PROLOGUE_FUSE=${VLLM_GLM5_PROLOGUE_FUSE:-1}
-export VLLM_GLM5_LOCAL_LOGITS=${VLLM_GLM5_LOCAL_LOGITS:-1}
+# Batch-sharded sampling only means anything when there is more than one TP
+# rank to shard across, so it defaults off under PP-only.
+if [ "$TP" -gt 1 ]; then
+  export VLLM_GLM5_LOCAL_LOGITS=${VLLM_GLM5_LOCAL_LOGITS:-1}
+else
+  export VLLM_GLM5_LOCAL_LOGITS=${VLLM_GLM5_LOCAL_LOGITS:-0}
+fi
 # [decode-small-kernels] sm_80 mHC fused post+pre, MoE routing/align, KDA decode.
 # The per-family switches and token bounds keep their committed defaults --
 # in particular VLLM_GLM5_DECODE_MOE_MAX_TOKENS is 8. Do not set them here.
@@ -115,7 +125,12 @@ export VLLM_GLM5_THIN_GEMM=${VLLM_GLM5_THIN_GEMM:-1}
 # Messages above 512 KiB stay on NCCL (VLLM_GLM5_HOST_ALLREDUCE_MAX_SIZE) --
 # prefill already runs near PCIe wire speed on the ring. Also gains 4,033 KV
 # tokens. Kill switch: set it to 0 and restart.
-export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
+# There are no TP all-reduces to replace under PP-only, so it defaults off there.
+if [ "$TP" -gt 1 ]; then
+  export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
+else
+  export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-0}
+fi
 # [fair-prefill] decode-aware chunking, passed as real serve args below rather
 # than through EXTRA_ARGS so EXTRA_ARGS stays free for callers.
 FAIR_ARGS=()
