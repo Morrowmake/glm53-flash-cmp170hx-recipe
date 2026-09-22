@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install.sh — build the venv and the pinned vLLM fork.
 #
-# Creates ./venv on Python 3.12, clones https://github.com/Morrowmake/vllm at
+# Creates ./venv on Python 3.12, clones https://github.com/Morrowmake/vllm-cmp170hx at
 # the commit pinned in .env (or start.sh's default), installs it editable with
 # torch 2.13.0+cu130 and the runtime extras, then verifies every import.
 #

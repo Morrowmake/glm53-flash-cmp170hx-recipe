@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2069c33802d0-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2069c33802d0-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -14,7 +14,7 @@
 mining cards.**
 
 This is everything needed to run **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
-cards** with our **[vLLM fork](https://github.com/Morrowmake/vllm/tree/ampere-glm53)**.
+cards** with our **[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53)**.
 You get a 320B-parameter MoE on your own machine behind an OpenAI-compatible
 API: a **262,144-token context**, tool calls and reasoning, images and video,
 and **165–240 tok/s** for one user. The weights are W4A16 and nothing else is
@@ -158,7 +158,7 @@ despite being the same model on the same cards.
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Engine | [Morrowmake/vllm](https://github.com/Morrowmake/vllm) `ampere-glm53` @ `69c33802d0` |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `69c33802d0` |
 | Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
@@ -282,7 +282,7 @@ not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
 
 ## What is in the patches
 
-The fork is [Morrowmake/vllm](https://github.com/Morrowmake/vllm), branch
+The fork is [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx), branch
 `ampere-glm53`, pinned in `start.sh` to commit `69c33802d0`. Every patch is
 Python, Triton or TileLang — nothing touches vLLM's CUDA or C++ sources. Each
 feature is **off by default in the code** and turned on only by `serve.sh`, so
@@ -480,4 +480,4 @@ used as data with attribution. No code from their repositories is included here.
 ## Source
 
 The patches are ours; the fork branch is the code —
-[Morrowmake/vllm @ `ampere-glm53`](https://github.com/Morrowmake/vllm/tree/ampere-glm53).
+[Morrowmake/vllm-cmp170hx @ `ampere-glm53`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53).

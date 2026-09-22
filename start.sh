@@ -98,7 +98,7 @@ load_env_defaults "$SCRIPT_DIR/.env"
 # ---------------------------- configuration --------------------------------
 VENV="${VENV:-$SCRIPT_DIR/venv}"
 VLLM_SRC="${VLLM_SRC:-$SCRIPT_DIR/vllm-src}"
-VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm.git}"
+VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm-cmp170hx.git}"
 VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
 VLLM_COMMIT="${VLLM_COMMIT:-69c33802d0}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"

@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.1 — 2026-09-22
+
+Fork repository renamed to `vllm-cmp170hx`; no code change. Every clone URL
+and link now names it directly rather than leaning on GitHub's redirect from
+the old path. The commit pin is unchanged at `69c33802d0`, so an existing
+install is already correct and does not need rebuilding — only a checkout's
+`origin` remote is worth repointing.
+
+
 ## 1.1.0 — 2026-09-22
 
 **Engine pin moves to `69c33802d0`.** The fork branch was rebased onto upstream
@@ -53,7 +62,7 @@ what it is worth, with nothing about how it was made.
 
 First public cut of the recipe.
 
-**Engine.** Pinned to [Morrowmake/vllm](https://github.com/Morrowmake/vllm)
+**Engine.** Pinned to [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx)
 `ampere-glm53` at commit `cf80da1839`, "[GLM-5.3-Flash] Host-staged all-reduce
 for PCIe-only nodes without P2P". Seven sm_80 features, each off by default in
 the engine and turned on by `serve.sh`, each with a one-variable kill switch:
