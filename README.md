@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20cf80da1839-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2069c33802d0-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -133,12 +133,16 @@ The configuration in this repo, as it runs day to day:
 | Decode, 1 user, prose | 165.1 tok/s |
 | Decode, 4 users, aggregate | 360–498 tok/s by prompt type |
 | Decode, 8 users, aggregate | 470–670 tok/s by prompt type |
-| Cold prefill, 8K–128K | 2,149–2,224 tok/s |
-| Cold prefill, 250K | 2,076 tok/s |
-| TTFT, 23,255-token prompt | 9.79 s (2,375 prompt tok/s) |
-| KV pool at `--max-model-len 262144` | 1,158,144 tokens (4.42x concurrency) |
+| Cold prefill | 2,243 tok/s |
+| Cold prefill, 250K prompt | 2,076 tok/s |
+| TTFT, 23,255-token prompt | 9.77 s (2,380 prompt tok/s) |
+| KV pool at `--max-model-len 262144` | 1,160,192 tokens (4.43x concurrency) |
 | GSM8K, n=50 at concurrency 8 | 0.980 |
 | Independent run | [localmaxxing.com](https://www.localmaxxing.com/en/runs/cmu6l4y49081alq01svunzaqb) |
+
+Prefill, TTFT, KV and GSM8K are from the pinned engine; the decode rows and
+the 250K prefill rung are the 2026-09-18 sweep reproduced in the comparison
+above.
 
 Decode speculation is DFlash2 at k=3. Accept ratios run 0.91–0.98 on structured
 and code prompts and 0.58–0.63 on prose, which is why prose decodes slower
@@ -154,11 +158,11 @@ despite being the same model on the same cards.
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Engine | [Morrowmake/vllm](https://github.com/Morrowmake/vllm) `ampere-glm53` @ `cf80da1839` |
+| Engine | [Morrowmake/vllm](https://github.com/Morrowmake/vllm) `ampere-glm53` @ `69c33802d0` |
 | Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
-| KV cache | 1,158,144 tokens at `--gpu-memory-utilization 0.95`; 4.42x concurrency at full context; **not quantised** |
+| KV cache | 1,160,192 tokens at `--gpu-memory-utilization 0.95`; 4.43x concurrency at full context; **not quantised** |
 | Prefix caching | on |
 | Speculation | DFlash2 ([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) at k=3; `SPEC_MODE=mtp` or `none` to change |
 | Tools + reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
@@ -279,7 +283,7 @@ not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
 ## What is in the patches
 
 The fork is [Morrowmake/vllm](https://github.com/Morrowmake/vllm), branch
-`ampere-glm53`, pinned in `install.sh` to commit `cf80da1839`. Every patch is
+`ampere-glm53`, pinned in `start.sh` to commit `69c33802d0`. Every patch is
 Python, Triton or TileLang — nothing touches vLLM's CUDA or C++ sources. Each
 feature is **off by default in the code** and turned on only by `serve.sh`, so
 every one of them is a single-variable kill switch.
@@ -361,6 +365,13 @@ sudo apt-get update
 sudo apt-get install -y cuda-toolkit-13-3 git-lfs
 ```
 
+**Changing the pin means reinstalling.** `start.sh` records the installed
+commit in `venv/.recipe-stamp` and re-runs the install when `VLLM_COMMIT`
+changes, which is what you want: the compiled extensions have to match the
+upstream commit the branch sits on, and upstream's ABI does move. Updating the
+checkout by hand without reinstalling gives you a mismatched extension and an
+engine that dies on startup.
+
 **Why the install is quick.** By default it uses upstream's **precompiled**
 extensions rather than compiling them, which takes minutes instead of hours.
 That is not a shortcut: the diff between `ampere-glm53` and upstream touches no
@@ -384,12 +395,12 @@ takes one to two hours.
     healthy
     served models: glm-5.3-flash
 ==> chat request
-    usage: prompt=28 completion=200 wall=1.64s  ->  121.7 tok/s
+    usage: prompt=28 completion=200 wall=1.44s  ->  138.5 tok/s
 ==> tool-call request
     tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
-    usage: prompt=199 completion=66 wall=0.48s  ->  136.3 tok/s
+    usage: prompt=199 completion=66 wall=0.48s  ->  138.3 tok/s
 ==> KV cache
-    GPU KV cache size: 1,158,144 tokens, Maximum concurrency for 262,144 tokens per request: 4.42x
+    GPU KV cache size: 1,160,192 tokens, Maximum concurrency for 262,144 tokens per request: 4.43x
 ```
 
 ---
@@ -417,7 +428,7 @@ MTP head that ships inside the target checkpoint, or `./serve.sh none` for no
 speculation — both are slower.
 
 **Context and KV are a trade.** At `--max-model-len 262144` and
-`--gpu-memory-utilization 0.95` the KV pool is 1,158,144 tokens, which is 4.42x
+`--gpu-memory-utilization 0.95` the KV pool is 1,160,192 tokens, which is 4.43x
 concurrency at full context. Raising `MAX_LEN` lowers that multiplier; with
 `MM_CAP=0` the memory profiler also reserves for a context-filling video, which
 costs roughly 150k KV tokens.

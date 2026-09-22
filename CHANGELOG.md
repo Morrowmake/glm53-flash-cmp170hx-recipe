@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.1.0 — 2026-09-22
+
+**Engine pin moves to `69c33802d0`.** The fork branch was rebased onto upstream
+main (`496c6472cb`), carrying 32 commits, and picked up two drafter
+cache-handling fixes along the way. Installed version string is now
+`0.29.1rc1.dev551+g69c33802d.precompiled` — taken from a clean install of the
+pin, not from a running server, because a server can be ahead of what the fork
+publishes.
+
+Validated on four sm_80 cards against the previous pin: ms/step at one stream
+17.11 vs 17.61, at four streams 32.04 vs 32.86, cold prefill 2,243 tok/s,
+TTFT on a 23,255-token prompt 9.77 s, GSM8K 0.980 at n=50, KV pool 1,160,192
+tokens at a 262,144-token context.
+
+`./start.sh install` needs no change for the new pin, but **a pin bump is not
+a `git checkout`**. The fork adds no C++ of its own, so the compiled
+extensions always come from upstream — but upstream's own ABI moved across
+this rebase (`_moe_C::moe_align_block_size` gained a `scatter_idx` argument),
+so extensions built for the old base will not run the new Python. `start.sh`
+handles this: it records the installed commit in `venv/.recipe-stamp`, so a
+changed pin re-runs the install and downloads the extensions for the new base
+commit. Updating the checkout without reinstalling fails at engine start with
+`expected at most 7 argument(s) but received 8`.
+
+
 ## 1.0.4 — 2026-09-22
 
 Tensor-parallel only. The pipeline-parallel material is replaced by one
