@@ -1,8 +1,8 @@
 # GLM-5.3-Flash on 4x CMP 170HX
 
 Everything needed to serve **GLM-5.3-Flash** — a 320B-parameter MoE — at
-**W4A16** on four unlocked **NVIDIA CMP 170HX** mining cards, using upstream
-vLLM with our Ampere patches.
+**W4A16** across four **NVIDIA CMP 170HX** cards, using upstream vLLM with our
+Ampere patches.
 
 There is no FP8 anywhere, no KV-cache quantisation, and no CPU or disk offload.
 The weights are INT4 with FP16 activations (group size 128), the KV cache is
@@ -23,30 +23,36 @@ Four cards, 256 GB of HBM2e, a 262,144-token context with a 1.15M-token KV pool,
 
 ---
 
-## Hardware
+## Tested on
 
 | | |
 |---|---|
-| GPUs | 4x NVIDIA CMP 170HX — GA100 / sm_80, **64 GB HBM2e each after [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker)** |
-| Interconnect | PCIe Gen 2 x16, all on one NUMA node, **no peer-to-peer** |
-| Power | 180 W per card, persistence mode on |
-| CPU | AMD EPYC 7663, 56 cores / 112 threads |
+| GPUs | 4x NVIDIA CMP 170HX — GA100, sm_80; our cards expose 64 GB HBM2e each |
+| Interconnect | PCIe Gen 2 x16, no peer-to-peer |
+| CPU | AMD EPYC 7663 |
 | RAM | 247 GB |
-| OS | Ubuntu 26.04 LTS, kernel 7.0 |
-| Driver | 610.57.04, NVIDIA open kernel module patched by cmpunlocker |
-| CUDA | 13.3 toolkit at `/usr/local/cuda-13.3` |
+| OS | Ubuntu 26.04 |
+| Driver | NVIDIA 610.57 |
+| CUDA | 13.3 |
 
-A stock CMP 170HX presents about 8 GB and a fraction of its real FP16 rate. This
-recipe assumes cards that have already been unlocked to the full 64 GB — see
-[`hardware/README.md`](hardware/README.md) for module options, the power-limit
-unit, topology output, and a clear statement that unlocking is your own
-responsibility and out of scope here.
+Results were measured at a 180 W power limit.
 
-The missing peer-to-peer is the defining constraint. `nvidia-smi topo -p2p r`
-answers `GPU not supported` on every pair, so vLLM's `CustomAllreduce` switches
-itself off and NCCL falls back to a shared-memory ring costing `2(N-1)`
-sequential host hops per message. Most of the serve configuration below exists
-to work around that.
+Peer-to-peer was unavailable on this machine — `nvidia-smi topo -p2p r` answers
+`GPU not supported` on every pair — so vLLM's `CustomAllreduce` switches itself
+off and NCCL falls back to a shared-memory ring costing `2(N-1)` sequential host
+hops per message. Much of the serve configuration below exists to work around
+that, and `VLLM_GLM5_HOST_ALLREDUCE` is the patch that replaces it.
+
+## Requirements
+
+- **4 CUDA GPUs with roughly 60 GB or more each.** The W4A16 weights take about
+  45 GB per card at TP=4, and the KV cache takes what is left.
+- **sm_80 or newer.** The Ampere patches are exercised on sm_80; newer parts run
+  fine, and the Ampere-specific backends are only selected where they are
+  needed.
+- **CUDA 13.x toolkit.**
+- **Python 3.12.**
+- **About 185 GB of disk** for the two checkpoints.
 
 ---
 
@@ -215,7 +221,7 @@ retention during prefill 7% → 18%, KV pool unchanged.
 
 ## Install
 
-You need Ubuntu 26.04 or similar, unlocked cards, driver 610.x, and
+You need a working NVIDIA driver, a CUDA 13.x toolkit and
 [uv](https://docs.astral.sh/uv/getting-started/installation/).
 
 **CUDA 13.3.** NVIDIA had no working `ubuntu2604` repository index when we built
@@ -302,8 +308,8 @@ and echoes the KV line from the log:
     GPU KV cache size: 1,158,144 tokens, Maximum concurrency for 262,144 tokens per request: 4.42x
 ```
 
-To run it as a service, edit the two paths and the user in
-[`systemd/glm53-vllm.service`](systemd/glm53-vllm.service) and install it.
+`smoke.sh` reads `./logs/serve.log` for that last line; point `SERVE_LOG` at
+wherever you actually sent the server's output.
 
 ---
 
@@ -395,19 +401,16 @@ VLLM_GLM5_DECODE_KERNELS=0 ./serve.sh
 
 ## Known limits
 
-**Ampere only.** Every kernel here is written for sm_80. On Hopper or Blackwell
-you want upstream vLLM, which has better kernels for those parts. The patches
-are gated on the flags, not on the architecture, so turning them on elsewhere is
-untested and pointless.
+**The backends here target sm_80.** Every kernel in the patches is written for
+Ampere. On newer architectures upstream vLLM's own kernels are better, and the
+Ampere paths are only selected where they are needed. The flags gate the
+features, not the architecture, so forcing them on elsewhere is untested.
 
-**Peer-to-peer is refused.** The driver will not grant peer access on these
-cards, whatever the topology says. `VLLM_GLM5_HOST_ALLREDUCE` exists because of
-that, and it is why per-stream decode does not scale with card count the way it
-would over NVLink.
-
-**180 W.** All numbers were measured with the cards capped at 180 W, a
-thermal choice for a dense passive-card chassis rather than a hardware maximum.
-Different cooling gives different numbers.
+**The no-P2P path is only worth it without P2P.** `VLLM_GLM5_HOST_ALLREDUCE`
+replaces NCCL's shared-memory ring for small collectives, which is a large win
+when peer access is unavailable and pointless when it is not. Where P2P works,
+leave it off. It is also why per-stream decode here does not scale with device
+count the way it would over a fast fabric.
 
 **The prefill chunk observer validated at 1152.** The overlap was measured and
 tuned at a 1152-token chunk; other chunk sizes work but were not characterised,
@@ -418,16 +421,16 @@ no argument wants `./models/GLM-5.3-Flash-DFlash2`. Use `./serve.sh mtp` for the
 MTP head that ships inside the target checkpoint, or `./serve.sh none` for no
 speculation — both are slower.
 
+**Context and KV are a trade.** At `--max-model-len 262144` and
+`--gpu-memory-utilization 0.95` the KV pool is 1,158,144 tokens, which is 4.42x
+concurrency at full context. Raising `MAX_LEN` lowers that multiplier; with
+`MM_CAP=0` the memory profiler also reserves for a context-filling video, which
+costs roughly 150k KV tokens.
+
 **TP=4 is the default for a reason.** `PP=4 TP=1` gives faster long-prompt TTFT
 (about 5.0 s against 11.8 s at 23K) and a larger KV pool, but roughly half the
 single-stream decode rate (80–85 against 135–145 tok/s at the time it was
 measured). Pick by workload.
-
-**Unlocking the cards is out of scope.** See
-[`hardware/README.md`](hardware/README.md), and
-[cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) for the tool itself.
-It is firmware-level modification of hardware NVIDIA sold with those features
-disabled; the risk is entirely yours.
 
 ---
 

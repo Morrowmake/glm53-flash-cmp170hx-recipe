@@ -32,13 +32,12 @@
 #
 # Set BUILD_FROM_SOURCE=1 if you would rather compile everything yourself; it
 # needs the full CUDA 13.3 toolkit, ~60 GB of scratch and 1-2 hours. It pins
-# TORCH_CUDA_ARCH_LIST=8.0 so nvcc only emits sm_80, which is all these cards
-# need and keeps the build as short as it can be.
+# TORCH_CUDA_ARCH_LIST=8.0 so nvcc only emits sm_80, which keeps the build as
+# short as it can be; override it for other architectures.
 #
 # --- Prerequisites ------------------------------------------------------------
-#   * Ubuntu 26.04 (or similar), NVIDIA driver 610.x with the CMP unlock in
-#     place -- see hardware/README.md.
-#   * uv            https://docs.astral.sh/uv/   (curl -LsSf https://astral.sh/uv/install.sh | sh)
+#   * A working NVIDIA driver and 4 CUDA GPUs with ~60 GB or more each.
+#   * uv           https://docs.astral.sh/uv/   (curl -LsSf https://astral.sh/uv/install.sh | sh)
 #   * git, git-lfs
 #   * CUDA 13.3 toolkit at /usr/local/cuda-13.3. NVIDIA had no working
 #     ubuntu2604 index when we built this, so we used the ubuntu2404 repo:
