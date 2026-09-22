@@ -43,8 +43,7 @@ VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 SPEC_MODE=mtp ./start.sh restart
 ```
 
-**If your cards are not on x16 links**, use pipeline parallelism instead —
-`PP=4 TP=1 ./start.sh`. See [PCIe link width: TP=4 vs PP=4](#pcie-link-width-tp4-vs-pp4).
+This recipe is tensor-parallel only — see [Link width](#link-width).
 
 ---
 
@@ -156,7 +155,7 @@ despite being the same model on the same cards.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Engine | [Morrowmake/vllm](https://github.com/Morrowmake/vllm) `ampere-glm53` @ `cf80da1839` |
-| Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — on x4 links use `PP=4 TP=1`, see [below](#pcie-link-width-tp4-vs-pp4) |
+| Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
 | KV cache | 1,158,144 tokens at `--gpu-memory-utilization 0.95`; 4.42x concurrency at full context; **not quantised** |
@@ -168,41 +167,16 @@ despite being the same model on the same cards.
 
 ---
 
-## PCIe link width: TP=4 vs PP=4
+## Link width
 
-Every number above was measured with the four cards on **PCIe Gen2 x16** links.
-Our cards run at x16; stock CMP 170HX cards run at x4.
+This recipe assumes four cards on **PCIe Gen2 x16** links, which is what ours
+run. Tensor parallelism splits every layer across all four cards, so it leans
+on those links hard: about 9.4 MB per layer during prefill and roughly 100
+small collectives per decode step. On stock x4 links — a quarter of the
+bandwidth — TP=4 is bus-bound and will be far slower than the numbers above.
 
-That matters because of what the two layouts put on the bus. **Tensor
-parallelism** splits each layer across all four cards, so it moves about
-**9.4 MB per layer** between them during prefill and roughly **100 small
-collectives per decode step**. At x4 — about a quarter of the bandwidth — TP=4
-is bus-bound and will be much slower than the figures above.
-
-**Pipeline parallelism** splits the model by layer instead, so the only thing
-crossing the bus is the activation tensor at each stage boundary. On narrow
-links that is the layout to use:
-
-```bash
-PP=4 TP=1 ./start.sh
-```
-
-`serve.sh` keeps the balanced layer partition and `start.sh` switches the
-speculator to the MTP head automatically, because DFlash under PP is untested
-here.
-
-**The PP=4 path works, but it is untuned here.** All seven features target
-TP=4. Under PP=4 the host-staged all-reduce, the prefill overlap and the
-batch-sharded logits have nothing to do — `start.sh` turns them off for you —
-and the decode and prefill kernels are shaped for TP=4 tensor widths. Nothing
-here is fitted to PP.
-
-**The PP=4 numbers here are stale.** PP=4 was last measured on an early build
-that had none of the current feature set, and with MTP; DFlash under PP has
-never been run. On that build it came out at roughly
-**half of TP=4's decode speed and about twice its cold-prefill speed**. It will
-be re-measured on this recipe's pinned tree, with both MTP and DFlash, and the
-numbers updated here. Treat the ratio as a direction, not a figure.
+For x4 cards, a pipeline-parallel recipe for the same hardware lives at
+[JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
 
 ---
 
@@ -355,8 +329,10 @@ baseline. Unlike upstream's unconditional cap it only applies when something is
 actually decoding.
 
 **Pipeline parallelism enablement.** Deferred mHC post state is materialised at
-stage boundaries and the MTP drafter loads the target embedding under PP, so
-`PP=4 TP=1` works. It is not the default — see *Known limits*.
+stage boundaries and the MTP drafter loads the target embedding under PP, so the
+engine supports a pipeline layout. This recipe does not — it is tuned for TP=4
+throughout. For a pipeline-parallel recipe on these cards, see
+[JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
 
 All seven together, against the same engine with all seven off: prefill
 +13.4%, TTFT@23K −14.9%, ms/step at one stream −1.22, decode retention during
@@ -446,12 +422,10 @@ concurrency at full context. Raising `MAX_LEN` lowers that multiplier; with
 `MM_CAP=0` the memory profiler also reserves for a context-filling video, which
 costs roughly 150k KV tokens.
 
-**TP=4 is the default, and it assumes wide links.** Tensor parallelism moves
-about 9.4 MB per layer between cards during prefill and ~100 small collectives
-per decode step, so on x4 links it is bus-bound. `PP=4 TP=1` passes only
-activations between stages and is the layout for narrow links, but it is
-untuned here and its last measurement is from an early build — see
-[PCIe link width](#pcie-link-width-tp4-vs-pp4).
+**TP=4 only, and it assumes wide links.** Tensor parallelism moves about
+9.4 MB per layer between cards during prefill and ~100 small collectives per
+decode step, so on x4 links it is bus-bound. This recipe does not support a
+pipeline layout — see [Link width](#link-width).
 
 ---
 

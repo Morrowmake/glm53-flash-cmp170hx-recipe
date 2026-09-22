@@ -115,8 +115,8 @@ PORT="${PORT:-8000}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-glm-5.3-flash}"
 PP="${PP:-1}"; TP="${TP:-4}"
 export PP TP
-# DFlash under pipeline parallelism is untested here, so a PP-only layout
-# defaults to the MTP head that ships inside the target checkpoint.
+# PP is unsupported by this recipe, but if someone sets it anyway, default to
+# the MTP head: DFlash under pipeline parallelism has not been run here.
 if [ "$PP" -gt 1 ] && [ "$TP" = "1" ]; then
     SPEC_MODE="${SPEC_MODE:-mtp}"
 else
@@ -207,10 +207,10 @@ preflight() {
             log "  PCIe link width: $(printf '%s' "$widths" | tr -d ' ' | paste -sd, -)"
             narrow="$(printf '%s\n' "$widths" | awk '$1+0 > 0 && $1+0 < 16' | grep -c . || true)"
             if [ "${narrow:-0}" -gt 0 ] && [ "$TP" -gt 1 ]; then
-                warn "  $narrow card(s) are below x16 and TP=$TP. Tensor parallelism moves ~9.4 MB per layer"
-                warn "  during prefill and ~100 small collectives per decode step, so TP will be much slower"
-                warn "  than the published numbers on narrow links. Consider: PP=4 TP=1 ./start.sh"
-                warn "  (see \"PCIe link width: TP=4 vs PP=4\" in the README). Continuing anyway."
+                warn "  $narrow card(s) are below x16 and TP=$TP. Tensor parallelism moves ~9.4 MB per"
+                warn "  layer during prefill and ~100 small collectives per decode step, so TP will be"
+                warn "  far slower than the published numbers on narrow links. This recipe is TP-only;"
+                warn "  see \"Link width\" in the README. Continuing anyway."
             fi
         fi
     else

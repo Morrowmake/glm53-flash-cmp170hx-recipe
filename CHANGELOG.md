@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.4 — 2026-09-22
+
+Tensor-parallel only. The pipeline-parallel material is replaced by one
+statement about link width and a pointer to a recipe that covers it.
+
+
 ## 1.0.3 — 2026-09-22
 
 Renamed the closing README heading to "Source".
@@ -30,7 +36,7 @@ Ampere sparse-MLA / indexer / kpool backends, TP prefill comm/compute overlap,
 host-staged all-reduce for nodes without peer access, thin-M BF16 GEMM, sm_80
 decode kernels, sm_80 prefill kernels, fused decode prologue with
 batch-sharded logits, and decode-aware fair chunked prefill. Pipeline
-parallelism is enabled but untuned.
+parallelism is enabled in the engine but not supported by this recipe.
 
 **Serving.** GLM-5.3-Flash at W4A16 (group size 128) across four GPUs, TP=4,
 262,144-token context, DFlash2 speculation at k=3, glm47 reasoning and
@@ -46,8 +52,7 @@ every key. `install.sh`, `download.sh` and `stop.sh` are thin wrappers.
 **Results.** Decode and cold-prefill measurements taken 2026-09-18 against
 MiaAI-Lab's published 2x DGX Spark figures, using their benchmark prompts.
 
-**Known limits.** The PP=4 layout works but is untuned: the seven features
-target TP=4 shapes, and the last PP=4 figures come from an early build with MTP
-that had none of them. **To be re-measured** on this pinned tree, with both MTP
-and DFlash, and the README numbers updated. DFlash under pipeline parallelism
-has never been run.
+**Known limits.** Tensor-parallel only. The seven features target TP=4 shapes
+and the recipe assumes PCIe Gen2 x16 links between the cards; for a
+pipeline-parallel recipe on the same hardware see
+[JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).

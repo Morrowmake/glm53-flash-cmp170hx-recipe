@@ -67,12 +67,12 @@ export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 
 # Avoid caching-allocator fragmentation during MoE weight loading (middle stages filled 64 GB on first run).
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
-# Layout: default TENSOR-PARALLEL 4 (c1 135-145 tok/s vs PP4 80-85; PP4 keeps faster long-prompt TTFT,
-# 5.0 s vs 11.8 s at 23K, and more KV). Switch with PP=4 TP=1.
-# TP=4 assumes wide links between the cards: it moves ~9.4 MB per layer during
-# prefill and ~100 small collectives per decode step. On narrow links (x4) use
-# PP=4 TP=1, which only passes activations between stages. The PP path works
-# but is untuned here -- see the README section on link width.
+# Layout: TENSOR-PARALLEL 4. TP=4 assumes PCIe Gen2 x16 links between the cards:
+# it moves ~9.4 MB per layer during prefill and ~100 small collectives per decode
+# step, so on stock x4 links it is bus-bound. PP is left as a knob because the
+# engine supports it, but PP=4 is UNSUPPORTED HERE -- nothing below is tuned for
+# it. Pipeline-parallel recipe for the same cards:
+#   https://github.com/JJ48/glm53-flash-170hx-serving
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
 # MLA tensors, so it uses the non-MTP split.
