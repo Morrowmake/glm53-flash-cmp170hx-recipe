@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.3.0 — 2026-09-24
+
+**Engine pin moves to `ff4750db5d`** (54 commits on upstream `496c6472cb`).
+Installed version `0.29.1rc1.dev573+gff4750db5.precompiled`.
+
+**Optional PCIe peer-to-peer.** Where the driver advertises peer access, the TP
+all-reduce can run in device memory rather than staging through the host:
+`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE`, with `VLLM_CUSTOM_ALLREDUCE_ALGO` and
+the caching-allocator choice tied to the same variable. Worth -5.8% ms/step at
+one stream and -10.8% at four, cold prefill unchanged, about 21,500 more KV
+tokens. **It ships at 0 here**, because it needs peer-to-peer enabled at the
+driver level; at 0 the recipe behaves exactly as 1.2.0 with no driver change.
+See "Optional: PCIe peer-to-peer" in the README.
+
+**Prefill overlap beside a live CustomAllreduce.** The overlap no longer stands
+down when a CustomAllreduce is present; its split collectives ride NCCL
+(`VLLM_GLM5_PREFILL_OVERLAP_BACKEND`, code default `nccl`). That is what
+removes the prefill cost the peer-to-peer path used to carry.
+
+**Determinism instruments**, both default 0 and documented as available:
+`VLLM_GLM5_TOPK_CANONICAL` and `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN` (0/1/2).
+
+The seven launcher variables are now declared in the engine, so starting the
+server no longer prints unknown-variable warnings.
+
+Measured in the shipped configuration, peer-to-peer gate off: 17.03 ms/step at
+one stream, 32.26 at four, cold prefill 2,222 tok/s, KV pool 1,160,192 tokens
+(4.43x of 262,144), TTFT about 2.6 s at 6.2K and 9.8 s at 23.3K. With the gate
+on those become 15.88 and 28.18 ms/step (176.9 tok/s at one stream, 1.83
+accepted tokens per step), 2,260 tok/s and 1,181,696 tokens (4.51x).
+
+Long context: needle retrieval 30/30 out to 262K, a verbatim copy at 262K
+returned byte-exact, and no content crossing between concurrent requests.
+
+<!-- PENDING 1.3.0: quality rows (perplexity, HumanEval, full GSM8K) -->
+
+
 ## 1.2.0 — 2026-09-22
 
 **Engine pin moves to `434dea1a1b`** (42 commits on upstream `496c6472cb`).

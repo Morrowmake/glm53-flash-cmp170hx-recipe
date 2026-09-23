@@ -5,7 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20434dea1a1b-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20ff4750db5d-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -128,25 +128,35 @@ The configuration in this repo, as it runs day to day:
 
 | | |
 |---|---:|
+| Decode step time, 1 user | 17.03 ms/step |
+| Decode step time, 4 users | 32.26 ms/step |
 | Decode, 1 user, structured | 238.7 tok/s |
 | Decode, 1 user, code | 232.4 tok/s |
 | Decode, 1 user, prose | 165.1 tok/s |
 | Decode, 4 users, aggregate | 360–498 tok/s by prompt type |
 | Decode, 8 users, aggregate | 470–670 tok/s by prompt type |
-| Cold prefill | ~2,238 tok/s |
+| Cold prefill | 2,222 tok/s |
 | Cold prefill, 250K prompt | 2,076 tok/s |
-| TTFT, 6.2K-token prompt | 2.59 s |
-| TTFT, 23,255-token prompt | 9.74 s (2,388 prompt tok/s) |
+| TTFT, 6.2K-token prompt | ~2.6 s |
+| TTFT, 23.3K-token prompt | ~9.8 s |
 | KV pool at `--max-model-len 262144` | 1,160,192 tokens (4.43x concurrency) |
 | GSM8K, n=50 at concurrency 8 | 0.98–1.00 |
 | Independent run | [localmaxxing.com](https://www.localmaxxing.com/en/runs/cmu6l4y49081alq01svunzaqb) |
 
 A 262,143-token prompt — the largest this 262,144-token context will accept —
-is served in 126 s; a 200,043-token prompt in 94 s.
+is served in 126 s; a 200,043-token prompt in 94 s. Needle retrieval is 30/30
+out to 262K, a verbatim copy at 262K comes back byte-exact, and no content
+crosses between concurrent requests.
 
-Prefill, TTFT, KV and GSM8K are from the pinned engine; the decode rows and
-the 250K prefill rung are the 2026-09-18 sweep reproduced in the comparison
-above.
+**Which configuration these are.** Everything above is the configuration this
+recipe ships, with the optional
+[PCIe peer-to-peer gate](#optional-pcie-peer-to-peer) **off**. Turning that gate
+on is faster; the measured gain is in that section and nowhere else on this
+page.
+
+The four-user and eight-user aggregate rows and the 250K prefill rung are the
+2026-09-18 sweep reproduced in the comparison above, and the structured, code
+and prose rows are that sweep's protocol.
 
 Decode speculation is DFlash2 at k=3. Accept ratios run 0.91–0.98 on structured
 and code prompts and 0.58–0.63 on prose, which is why prose decodes slower
@@ -162,7 +172,7 @@ despite being the same model on the same cards.
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `434dea1a1b` |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `ff4750db5d` |
 | Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
@@ -185,6 +195,54 @@ bandwidth — TP=4 is bus-bound and will be far slower than the numbers above.
 
 For x4 cards, a pipeline-parallel recipe for the same hardware lives at
 [JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
+
+---
+
+## Optional: PCIe peer-to-peer
+
+**The recipe does not need this and does not turn it on.** With the gate at 0 —
+the default — everything runs exactly as the previous release, with no driver
+change of any kind. This section is only for people who already have
+peer-to-peer working on their cards.
+
+A stock CMP 170HX refuses GPU peer access: `nvidia-smi topo -p2p r` answers
+`GNS` on every pair, which is why the host-staged all-reduce exists. Where peer
+access *is* available, the TP all-reduce can run in device memory instead of
+staging through the host. Measured on four cards, alternating legs:
+
+| | ms/step, 1 stream | ms/step, 4 streams | Cold prefill | KV pool |
+|---|---:|---:|---:|---:|
+| Gate 0 — host-staged (**the default**) | 17.03 | 32.26 | 2,222 tok/s | 1,160,192 (4.43x) |
+| Gate 1 — PCIe P2P, `ALGO=2stage` | **15.88** | **28.18** | **2,260 tok/s** | **1,181,696 (4.51x)** |
+
+About 7% off the step time at one stream and 13% at four, with roughly 21,500
+more KV tokens and cold prefill no worse. At one stream that is 176.9 tok/s, at
+1.83 accepted tokens per step.
+
+To enable it, peer-to-peer has to be advertised by the driver. We run a
+[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) build — that fork
+merged onto driver 610.57.04, with official cmpunlocker's `cmp-sku-mask.patch`
+added as patch 0010 — installed with `install.sh --p2p`. Read that project's
+own documentation; none of it is ours and none of it is in scope here.
+
+It is **topology-dependent**. We verified it on this machine: four cards on
+EPYC root ports, all pairs. [bayley/cmpunlocker](https://github.com/bayley/cmpunlocker)
+reports the mailbox path dead behind PLX switches on a Xeon, so a different
+board may simply not have it.
+
+Then check and switch on:
+
+```bash
+nvidia-smi topo -p2p r                          # every pair must say OK, not GNS
+VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 ./start.sh restart
+```
+
+`serve.sh` ties the rest to that one variable: `VLLM_CUSTOM_ALLREDUCE_ALGO`
+becomes live at `2stage` (the built-in crossover is NVLink-tuned and wrong on
+Gen2 x16), and the caching allocator switches to `expandable_segments:False`,
+because CustomAllreduce registers its captured graph buffers through legacy
+CUDA IPC handles that the VMM allocator cannot provide. Setting the variable
+back to 0 restores all three.
 
 ---
 
@@ -232,6 +290,12 @@ rebuild, no revert:
 | `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
 | `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce for nodes without peer access |
 | `VLLM_GLM5_SHARED_EXPERT_REORDER` | MoE shared experts overlapped with the routed dispatch |
+
+Two more are available and **off** by default — determinism instruments for
+reproducing exact outputs rather than levers on throughput:
+`VLLM_GLM5_TOPK_CANONICAL` (0/1) and `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN`
+(0/1/2). And one optional gate, also off, in
+[Optional: PCIe peer-to-peer](#optional-pcie-peer-to-peer).
 | `FAIR_PREFILL` | decode-aware prefill chunking |
 
 If output quality is ever in question, turn `VLLM_GLM5_DECODE_KERNELS` off
@@ -288,7 +352,7 @@ not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
 ## What is in the patches
 
 The fork is [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx), branch
-`ampere-glm53`, pinned in `start.sh` to commit `434dea1a1b`. Every patch is
+`ampere-glm53`, pinned in `start.sh` to commit `ff4750db5d`. Every patch is
 Python, Triton or TileLang — nothing touches vLLM's CUDA or C++ sources. Each
 feature is **off by default in the code** and turned on only by `serve.sh`, so
 every one of them is a single-variable kill switch.

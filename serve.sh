@@ -21,7 +21,8 @@
 #   VLLM_PP_LAYER_PARTITION, EXTRA_ARGS.
 #
 # ===== sm_80 feature flags ==================================================
-# Eight features, validated individually and then together.
+# Eight features plus an optional PCIe peer-to-peer gate, validated
+# individually and then together.
 # All are OFF by default IN THE CODE; the block below is the only thing that
 # turns them on, so each one is a one-variable kill switch -- set it to 0 in
 # the environment and restart, no rebuild and no revert:
@@ -35,6 +36,20 @@
 #   FAIR_PREFILL=0                decode-aware prefill chunking    [fair-prefill]
 #   VLLM_GLM5_HOST_ALLREDUCE=0    host-staged no-P2P all-reduce    [pcie-allreduce]
 #   VLLM_GLM5_SHARED_EXPERT_REORDER=0  MoE shared experts after routed dispatch  [shared-expert-stream]
+#   VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1  device-memory custom all-reduce over
+#                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
+#                                 needs peer-to-peer enabled at the driver level
+#                                 -- see the optional section in the README.
+#                                 Worth -5.8% ms/step at c1 and -10.8% at c4,
+#                                 cold prefill unchanged, KV +21.5k tokens.
+#                                 0 keeps the host-staged path.  [pcie-p2p-gate]
+#   VLLM_CUSTOM_ALLREDUCE_ALGO=   which CustomAllreduce kernel; 2stage here
+#                                 because the built-in crossover is NVLink-tuned
+#                                 and 1stage measured worse on Gen2 x16. Inert
+#                                 unless the gate above is 1. Unset = upstream.
+#   VLLM_GLM5_PREFILL_OVERLAP_BACKEND=  which communicator carries the prefill
+#                                 overlap's split collectives. NOT set here: the
+#                                 code default is nccl, which measured fastest.
 #
 # Measured together vs the pre-merge default: prefill +13.4%, TTFT@23K -14.9%,
 # ms/step c1 -1.22 (paired, drift 0.58), decode retention during someone
@@ -66,8 +81,11 @@ CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.3}"
 export CUDA_HOME
 export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 
-# Avoid caching-allocator fragmentation during MoE weight loading (middle stages filled 64 GB on first run).
-export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
+# The caching allocator is chosen further down, together with the PCIe-P2P gate:
+# CustomAllreduce needs legacy CUDA IPC handles, which the expandable_segments
+# (VMM) allocator cannot provide. Record whether the caller set it explicitly so
+# that choice can win.
+ALLOC_CONF_EXPLICIT=${PYTORCH_CUDA_ALLOC_CONF+1}
 # Layout: TENSOR-PARALLEL 4. TP=4 assumes PCIe Gen2 x16 links between the cards:
 # it moves ~9.4 MB per layer during prefill and ~100 small collectives per decode
 # step, so on stock x4 links it is bus-bound. PP is left as a knob because the
@@ -93,6 +111,9 @@ if [ "$TP" -gt 1 ]; then export VLLM_GLM5_REPLICATED_EMBED=${VLLM_GLM5_REPLICATE
 # only; S=4 measured worse than S=2. _MIN_TOKENS stays at its 512 default and
 # _CROSS_LAYER stays off (in tree, never validated on a GPU).
 if [ "$TP" -gt 1 ]; then export VLLM_GLM5_PREFILL_OVERLAP=${VLLM_GLM5_PREFILL_OVERLAP:-1}; export VLLM_GLM5_PREFILL_OVERLAP_SPLITS=${VLLM_GLM5_PREFILL_OVERLAP_SPLITS:-2}; fi
+# The overlap now runs beside a live CustomAllreduce and carries its split
+# collectives on NCCL (VLLM_GLM5_PREFILL_OVERLAP_BACKEND, code default nccl),
+# which is why the PCIe-P2P gate no longer costs prefill. Left unset here.
 # [prefill-kernels] sm_80 mHC pre-norm projection + sparse-MLA DSA attention.
 export VLLM_GLM5_PREFILL_KERNELS=${VLLM_GLM5_PREFILL_KERNELS:-1}
 # 384, not the code default 512: FAIR_PREFILL caps the chunk at 384 while
@@ -132,6 +153,41 @@ if [ "$TP" -gt 1 ]; then
 else
   export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-0}
 fi
+# [pcie-p2p-gate] device-memory CustomAllreduce over PCIe peer-to-peer, instead
+# of staging every collective through the host.
+#   0 (default here) -- host-staged path serves. This is what the recipe ships,
+#                       because peer-to-peer has to be enabled at the driver
+#                       level first and most cards do not have it.
+#   1                -- CustomAllreduce owns the TP all-reduce over PCIe P2P.
+#                       Only set this if peer-to-peer is actually available:
+#                       `nvidia-smi topo -p2p r` must report OK, not GNS.
+# Measured on four cards with peer-to-peer available, alternating legs:
+#   gate 0: ms/step c1 17.03, c4 32.26, cold prefill 2222 tok/s, KV 1,160,192
+#   gate 1 with ALGO=2stage: c1 16.03, c4 29.25, prefill 2082, KV 1,181,696
+# The gate ties both decisions together, so 0 is a complete fallback rather
+# than a drop to NCCL: VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
+export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
+# 2stage, not the built-in crossover: that crossover takes one-shot below
+# 512 KiB, which is tuned for NVLink and wrong on Gen2 x16. Forcing 1stage
+# everywhere measured worse than either (c1 16.83 / c4 33.00). Unset it to get
+# upstream's crossover back. Read only while a CustomAllreduce is actually
+# serving, so it is inert when the gate above is 0.
+export VLLM_CUSTOM_ALLREDUCE_ALGO=${VLLM_CUSTOM_ALLREDUCE_ALGO:-2stage}
+# CustomAllreduce registers its captured graph buffers through legacy CUDA IPC
+# handles, which the expandable_segments (VMM) allocator cannot provide, so the
+# gate also picks the allocator. Not a safety net -- the engine detects the VMM
+# allocator itself and stands the gate down with a warning rather than crashing
+# -- but with expandable_segments on, setting the gate would simply do nothing.
+# An explicit PYTORCH_CUDA_ALLOC_CONF in the environment wins.
+if [ -n "${ALLOC_CONF_EXPLICIT:-}" ]; then
+  export PYTORCH_CUDA_ALLOC_CONF
+elif [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ]; then
+  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
+else
+  # Avoids caching-allocator fragmentation during MoE weight loading.
+  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+fi
+
 # [shared-expert-stream] enqueue the routed experts first, then submit the MoE
 # shared experts to the aux stream, so the two actually run at the same time.
 # With the upstream order the shared experts were submitted before the gate and
