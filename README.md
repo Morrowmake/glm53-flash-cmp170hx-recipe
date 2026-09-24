@@ -1,188 +1,141 @@
-# GLM-5.3-Flash on 4× NVIDIA CMP 170HX
+<h1 align="center">GLM-5.3-Flash on 4× NVIDIA CMP 170HX</h1>
 
-<p>
+<p align="center">
   <strong>by <a href="https://x.com/Morrowmake">Morrowmake</a></strong>
-  &nbsp;·&nbsp;
+  <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <!-- TODO(1.3.0 release): badge, Engine row and patches section move to the merged, validated commit -->
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20ff4750db5d-4b32c3?style=flat"></a>
+  <!-- TODO(1.3.0 release): badge, Engine row and the pin in "What runs" move to the merged, validated commit -->
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20PENDING-4b32c3?style=flat"></a>
+  &nbsp;
+  <img alt="release" src="https://img.shields.io/badge/release-1.3.0-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
-**320B MoE at 165–240 tok/s, 256K context, OpenAI-compatible — on four ~$1,100
-mining cards.**
+**A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
+cards at PENDING(1.3.0 single-user decode, tok/s, structured / code / prose,
+peer-to-peer off) tok/s for one user. The weights are W4A16 and nothing else is
+cut: the KV cache is full precision, there is no FP8 anywhere, and nothing is
+offloaded to CPU or disk.**
 
-This is everything needed to run **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
-cards** with our **[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53)**.
-You get a 320B-parameter MoE on your own machine behind an OpenAI-compatible
-API: a **262,144-token context**, tool calls and reasoning, images and video,
-and **165–240 tok/s** for one user. The weights are W4A16 and nothing else is
-reduced — the KV cache is full precision, there is no FP8 anywhere, and nothing
-is offloaded to CPU or disk.
+This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
+cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
+video, and a **DFlash2** speculative drafter. Upstream vLLM's sparse-attention
+path needs a Hopper GPU; the CMP 170HX is Ampere (sm_80). Our
+[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53) adds
+the Ampere kernels that make the model run at all, then spends the rest of its
+patches on making it fast and making it repeatable.
 
-## Quick start
+One command sets it up and starts it:
 
 ```bash
 git clone https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe.git
 cd glm53-flash-cmp170hx-recipe
-cp .env.example .env          # optional: ./start.sh does this on first run
-./start.sh                    # preflight, install, download, launch, wait for /health
+./start.sh
 ```
 
-`./start.sh` runs every step and skips the ones already done, so running it
-twice is safe and the second run just launches. First time through it builds the
-venv (about six minutes), fetches ~180 GB of checkpoints, then starts the
-server; weight load and CUDA-graph capture take a few more minutes.
-
-A prefix env assignment beats `.env` for every key:
-
-```bash
-MAX_LEN=131072 ./start.sh restart
-VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
-SPEC_MODE=mtp ./start.sh restart
-LAYOUT=pp4 ./start.sh restart     # pipeline-parallel, experimental in this release
-```
-
-Two layouts: **tensor-parallel** (`LAYOUT=tp4`, the default) for one or two
-interactive agents, and **pipeline-parallel** (`LAYOUT=pp4`, experimental in
-this release) for many agents at once — see [Choosing a layout](#choosing-a-layout).
+What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 
 ---
 
 ## Results
 
-### Against 2x DGX Spark
+### Release 1.3.0
+
+Tensor-parallel 4, DFlash2 at k=3, 262,144-token context, the defaults in this
+repository. Two columns: the default, with the cards talking through the host,
+and the optional [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path.
+
+| | Peer-to-peer off (default) | Peer-to-peer on (optional) |
+|---|---:|---:|
+| Decode step, 1 / 4 / 6 / 8 users | PENDING(ms/step c1/c4/c6/c8, release pin, P2P off) | PENDING(ms/step c1/c4/c6/c8, release pin, P2P on) |
+| Decode, 1 user, structured / code / prose | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
+| Decode, 8 users, aggregate | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
+| Cold prefill | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
+| Time to first token, 6.2K / 23.3K-token prompt | PENDING(TTFT, P2P off) | PENDING(TTFT, P2P on) |
+| KV pool at 262,144 context | PENDING(KV tokens and concurrency, P2P off) | PENDING(KV tokens and concurrency, P2P on) |
+| Perplexity, fixed 60-document set | PENDING(perplexity, release pin) | PENDING(perplexity, release pin, P2P on) |
+| GSM8K, all 1,319 problems | PENDING(GSM8K full, release pin) | PENDING(GSM8K full, release pin, P2P on) |
+| HumanEval, pass@1 | PENDING(HumanEval 164, release pin) | PENDING(HumanEval 164, release pin, P2P on) |
+
+### Measured while building this release
+
+These come from development runs on the same four cards. They are not the
+release table above; each line says what it was measured against.
+
+- **About a quarter off each decode step.** One user: 20.5 ms per decode step
+  with every optional optimisation in the fork switched off, about 15.1 ms with
+  the release candidate engine and peer-to-peer on.
+- **Second-generation decode kernels**, measured together with peer-to-peer
+  on: step time −7.4% at one and four users, −17.6% at six, −5.4% at eight,
+  cold prefill flat.
+- **The same answer every time.** A request on its own now returns the same
+  first token and the same log-probabilities on every repeat, across restarts
+  (16 of 16 test prompts, 8 repeats over 2 boots). The fixes cost under 1% of
+  step time.
+- **More KV for free.** +39,626 KV tokens (+3.45%) from right-sized
+  workspaces and a drafter table split across the cards, with outputs
+  bit-identical and no step-time cost.
+- **Fast does not mean different.** On the previous engine, perplexity with
+  every optimisation on and every optimisation off differed by less than
+  run-to-run noise.
+- **Long context holds up.** On the previous engine: needle retrieval 30/30
+  from 8K to 262K tokens, a verbatim copy of a passage at 262,000 tokens
+  returned byte-exact, and nothing leaked between concurrent requests.
+- **Checked against fp32.** On the release candidate engine, every
+  sparse-attention, indexer and key-pool kernel matched an fp32 reference
+  exactly or to within bf16/fp8 rounding.
+
+### Against 2× DGX Spark (release 1.0.0)
 
 ![GLM-5.3-Flash on 4x CMP 170HX versus 2x DGX Spark](assets/glm53-cmp170hx-vs-dgx-spark-full-2026-09-18.jpg)
 
-The published figures and the benchmark prompts on the DGX Spark side are
+Measured 2026-09-18 on release 1.0.0 with peer-to-peer off, before most of the
+work in this release. Re-run on 1.3.0: PENDING(Spark protocol re-run on the
+release pin).
+
+The DGX Spark figures and the benchmark prompts are
 [MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks),
-quoted from their README — thank you to them for publishing both.
+quoted from their README — thank you for publishing both.
 
-- **Theirs:** 2x DGX Spark, EXL3 quant, DFlash2 k=7, 850K–1M declared context, as published.
-- **Ours:** 4x CMP 170HX, vLLM W4A16, DFlash2 k=3, 262,144 context, measured 2026-09-18, thinking off, temperature 0, median of 5.
+- **Theirs:** 2× DGX Spark, EXL3 quant, DFlash2 k=7, 850K–1M declared context, as published.
+- **Ours:** 4× CMP 170HX, vLLM W4A16, DFlash2 k=3, 262,144 context, thinking off, temperature 0, median of 5.
 
-#### Decode
-
-400 max tokens, median of 5. `Stream tok/s` is per request,
-`(completion_tokens - 1) / (end - first token)`; `Agg tok/s` is
+**Decode**, 400 max tokens. `Stream` is per request,
+`(completion_tokens − 1) / (end − first token)`; `Agg` is
 `sum(completion_tokens) / wall` across all streams. Our runs prepend a unique
-nonce so nothing hits the prefix cache, which makes our TTFT column pessimistic
-against theirs; the warm column reruns their exact prompt with no nonce.
+nonce so nothing hits the prefix cache.
 
-| Prompt type | Conc | Theirs stream | Ours stream | Theirs agg | Ours agg | Theirs TTFT | Ours TTFT (cold) | Ours TTFT (warm) | Ours accept |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | 62.9 | **238.7** | 62.9 | **238.7** | 719 ms | 65 ms | 60 ms | 0.977 |
-|  | ×2 | 51.7 | **185.7** | 103.3 | **348.8** | 6620 ms | 116 ms | — | 0.972 |
-|  | ×3 | not published | **133.6** | not published | **368.0** | not published | 250 ms | — | 0.957 |
-|  | ×4 | 37.1 | **137.5** | 146.5 | **497.9** | 6300 ms | 255 ms | — | 0.942 |
-|  | ×8 | not published | **94.5** | not published | **669.8** | not published | 341 ms | — | 0.934 |
-| Code (clamp_00…clamp_49) | ×1 | 62.9 | **232.4** | 62.9 | **232.4** | 719 ms | 159 ms | 158 ms | 0.968 |
-|  | ×2 | 51.7 | **167.0** | 103.3 | **301.5** | 6620 ms | 249 ms | — | 0.908 |
-|  | ×3 | not published | **124.5** | not published | **335.2** | not published | 354 ms | — | 0.921 |
-|  | ×4 | 37.1 | **127.3** | 146.5 | **437.7** | 6300 ms | 399 ms | — | 0.917 |
-|  | ×8 | not published | **87.4** | not published | **603.4** | not published | 624 ms | — | 0.928 |
-| Prose (hash map) | ×1 | 36.1 | **165.1** | 37.1 | **165.1** | 333 ms | 69 ms | 60 ms | 0.584 |
-|  | ×2 | 25.0 | **130.5** | 51.1 | **239.6** | 365 ms | 164 ms | — | 0.611 |
-|  | ×3 | 22.3 | **95.5** | 65.8 | **265.5** | 405 ms | 254 ms | — | 0.628 |
-|  | ×4 | 19.4 | **98.3** | 75.3 | **360.4** | 401 ms | 259 ms | — | 0.627 |
-|  | ×8 | not published | **65.5** | not published | **469.7** | not published | 343 ms | — | 0.605 |
+| Prompt type | Users | Theirs stream | Ours stream | Theirs agg | Ours agg | Theirs TTFT | Ours TTFT (cold) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Structured (count 1→200) | ×1 | 62.9 | **238.7** | 62.9 | **238.7** | 719 ms | 65 ms |
+|  | ×2 | 51.7 | **185.7** | 103.3 | **348.8** | 6620 ms | 116 ms |
+|  | ×4 | 37.1 | **137.5** | 146.5 | **497.9** | 6300 ms | 255 ms |
+|  | ×8 | not published | **94.5** | not published | **669.8** | not published | 341 ms |
+| Code (clamp_00…clamp_49) | ×1 | 62.9 | **232.4** | 62.9 | **232.4** | 719 ms | 159 ms |
+|  | ×2 | 51.7 | **167.0** | 103.3 | **301.5** | 6620 ms | 249 ms |
+|  | ×4 | 37.1 | **127.3** | 146.5 | **437.7** | 6300 ms | 399 ms |
+|  | ×8 | not published | **87.4** | not published | **603.4** | not published | 624 ms |
+| Prose (hash map) | ×1 | 36.1 | **165.1** | 37.1 | **165.1** | 333 ms | 69 ms |
+|  | ×2 | 25.0 | **130.5** | 51.1 | **239.6** | 365 ms | 164 ms |
+|  | ×4 | 19.4 | **98.3** | 75.3 | **360.4** | 401 ms | 259 ms |
+|  | ×8 | not published | **65.5** | not published | **469.7** | not published | 343 ms |
 
-Their 3x Spark (TP=3) prose table, for reference — 512 tokens, not 400, so it is
-a reference block rather than a row above:
+**Cold prefill**, unique uncached text, `max_tokens=1`, median of 2,
+`prompt tokens / TTFT` measured client side.
 
-| Conc | Theirs TP3 stream | Theirs TP3 agg | Theirs TP3 TTFT | Ours prose stream | Ours prose agg |
-|---:|---:|---:|---:|---:|---:|
-| ×1 | 40.1 | 40.1 | 255 ms | 165.1 | 165.1 |
-| ×2 | 28.7 | 56.6 | 411 ms | 130.5 | 239.6 |
-| ×3 | 25.5 | 75.5 | 323 ms | 95.5 | 265.5 |
-| ×4 | 22.8 | 88.4 | 351 ms | 98.3 | 360.4 |
-
-Their lab `tests/bench_decode.py` medians against our warm ×1 on their exact
-prompt:
-
-| Prompt | Theirs lab tok/s | Theirs accept | Ours warm ×1 tok/s | Ours accept |
-|---|---:|---:|---:|---:|
-| structured | 65.1 | 0.959 | 238.4 | 0.980 |
-| prose | 27.1 | 0.341 | 172.2 | 0.617 |
-
-#### Cold prefill
-
-Unique uncached text, `max_tokens=1`, median of 2. `Prefill tok/s` is
-`prompt tokens / TTFT`, measured client side. Prefix-cache hit deltas from
-`/metrics` were 0 on every rung, confirming nothing was warm.
-
-| Rung | Theirs prompt tok | Theirs TTFT | Theirs tok/s | Ours prompt tok | Ours TTFT | Ours tok/s |
+| Rung | Theirs prompt | Theirs TTFT | Theirs tok/s | Ours prompt | Ours TTFT | Ours tok/s |
 |---|---:|---:|---:|---:|---:|---:|
 | ~8k | 8,221 | 5.51 s | 1492.1 | 7,977 | 3.61 s | **2208.7** |
-| ~16k | 16,411 | 10.56 s | 1553.7 | 15,979 | 7.19 s | **2223.8** |
 | ~32k | 32,797 | 22.96 s | 1428.2 | 31,925 | 14.63 s | **2182.9** |
-| ~64k | 65,566 | 41.31 s | 1587.0 | 64,056 | 29.23 s | **2191.4** |
 | ~128k | 131,101 | 83.95 s | 1561.7 | 127,587 | 59.36 s | **2149.4** |
 | ~250k | 262,173 | 172.84 s | 1516.8 | 250,281 | 120.54 s | **2076.3** |
 
 Their top rung is 262,173 tokens, which does not fit under our 262,144 ceiling,
-so our top rung is ~250k against their longer prompt.
-
-### Our production numbers
-
-The configuration in this repo, as it runs day to day:
-
-| | |
-|---|---:|
-| Decode step time, 1 user | 17.03 ms/step |
-| Decode step time, 4 users | 32.26 ms/step |
-| Decode, 1 user, structured | 238.7 tok/s |
-| Decode, 1 user, code | 232.4 tok/s |
-| Decode, 1 user, prose | 165.1 tok/s |
-| Decode, 4 users, aggregate | 360–498 tok/s by prompt type |
-| Decode, 8 users, aggregate | 470–670 tok/s by prompt type |
-| Cold prefill | 2,222 tok/s |
-| Cold prefill, 250K prompt | 2,076 tok/s |
-| TTFT, 6.2K-token prompt | ~2.6 s |
-| TTFT, 23.3K-token prompt | ~9.8 s |
-| KV pool at `--max-model-len 262144` | 1,160,192 tokens (4.43x concurrency) |
-| GSM8K, n=50 at concurrency 8 | 0.98–1.00 |
-| Independent run | [localmaxxing.com](https://www.localmaxxing.com/en/runs/cmu6l4y49081alq01svunzaqb) |
-
-A 262,143-token prompt — the largest this 262,144-token context will accept —
-is served in 126 s; a 200,043-token prompt in 94 s. Needle retrieval is 30/30
-out to 262K, a verbatim copy at 262K comes back byte-exact, and no content
-crosses between concurrent requests.
-
-**Which configuration these are.** Everything above is the configuration this
-recipe ships, with the optional
-[PCIe peer-to-peer gate](#optional-pcie-peer-to-peer) **off**. Turning that gate
-on is faster; the measured gain is in that section and nowhere else on this
-page.
-
-The four-user and eight-user aggregate rows and the 250K prefill rung are the
-2026-09-18 sweep reproduced in the comparison above, and the structured, code
-and prose rows are that sweep's protocol.
-
-Decode speculation is DFlash2 at k=3. Accept ratios run 0.91–0.98 on structured
-and code prompts and 0.58–0.63 on prose, which is why prose decodes slower
-despite being the same model on the same cards.
-
-<!-- PENDING 1.3.0: re-measure the table above on the release pin, or label it with the engine and settings it was taken on. -->
-
-### This release's defaults (tensor-parallel)
-
-This release changes the default prefill chunk to 3,456 tokens and adds a
-second generation of decode kernels. Measured on the release configuration,
-peer-to-peer gate off:
-
-| | |
-|---|---:|
-| Decode step time, 1 / 4 / 6 / 8 users | PENDING |
-| Cold prefill | PENDING |
-| TTFT, 6.2K / 23.3K-token prompt | PENDING |
-| KV pool at `--max-model-len 262144` | PENDING |
-| Perplexity, fixed 60-document set | PENDING |
-| GSM8K, full 1,319 at concurrency 8 | PENDING |
-| HumanEval, pass@1 | PENDING |
+so our top rung is ~250k. Prose decodes slower than structured or code text on
+the same model because the drafter's guesses are accepted less often (0.58–0.63
+against 0.91–0.98).
 
 ---
 
@@ -194,334 +147,256 @@ peer-to-peer gate off:
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `ff4750db5d` |
-| Layout | TP=4, PP=1 by default (`LAYOUT=tp4`, assumes PCIe Gen2 x16 between the cards); PP=4 with `LAYOUT=pp4`, experimental — see [Choosing a layout](#choosing-a-layout) |
-| Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
+| Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ PENDING(release pin) |
+| Layout | tensor-parallel 4 (`TP=4`, `PP=1`); assumes PCIe Gen2 x16 between the cards — see [Link width](#link-width) |
 | Context | 262,144 tokens |
-| KV cache | at `--gpu-memory-utilization 0.95`: PENDING for this release's defaults (1,160,192 tokens, 4.43x at full context, on ff4750db5d with 1,152-token chunks); **not quantised** |
+| KV cache | full precision, **not quantised**; PENDING(KV pool tokens at 262,144 context, release defaults) |
+| Prefill | 3,456-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
-| Prefill chunks | 3,456 tokens under `tp4`, 2,304 under `pp4` (`MAX_BATCHED`) |
-| Speculation | DFlash2 ([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) at k=3; `SPEC_MODE=mtp` or `none` to change |
-| Tools + reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
-| CUDA graphs | captured at the default power-of-two decode batch shapes |
-| Vision | image and video on, uncapped by default (`MM_CAP=1` to bound them) |
+| Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
+| Vision | images and video on |
+| Memory target | `--gpu-memory-utilization 0.95` |
 
 ---
 
-## Choosing a layout
+## What makes it fast, and correct
 
-Both layouts run the same engine, the same weights and the same DFlash2
-speculation at k=3. They split the model across the four cards differently,
-and that decides what each is good at.
+All of this is in the fork. The Ampere backends and the correctness fixes are
+always on; every performance feature ships off in the engine code and is
+switched on by this repository's `serve.sh`, so each one can be turned off with
+a single variable (see [Kill switches](#kill-switches)).
 
-| | `LAYOUT=tp4` (default) | `LAYOUT=pp4` (experimental) |
-|---|---|---|
-| Split | every layer across all four cards | a quarter of the layers on each card |
-| Best for | one or two interactive agents: the fastest response per request | many agents in parallel, long prefills, more KV |
-| Links between cards | assumes PCIe Gen2 x16 | needs far less link bandwidth |
-| Decode, 1 user | the tables above | PENDING |
-| Decode, 8 users, aggregate | the tables above | PENDING |
-| Cold prefill | the tables above | PENDING |
-| KV pool at 262,144 context | PENDING | PENDING |
-| Status | validated | PENDING validation |
+- **Ampere sparse attention.** GLM-5.3-Flash uses DeepSeek-style sparse
+  attention, whose upstream kernels need Hopper. The fork adds an Ampere
+  sparse-MLA backend, an Ampere path for the attention indexer and its FP8
+  stores, and Ampere versions of the key-pool compression. Without these the
+  model does not run on these cards at all.
+- **Fused decode kernels.** The mHC mixing, MoE routing and block alignment,
+  and the linear-attention (KDA) decode each run as fused kernels built for the
+  small batches decode actually sees. This release adds a second generation:
+  the MoE gate, top-k and alignment in one launch, a faster mHC decode, KDA
+  decode with its gate projections fused, and the indexer's decode glue folded
+  into fewer kernels.
+- **Tuned small-batch GEMMs.** W4A16 leaves some layers in BF16, where cuBLAS is
+  slow with very few rows. A thin-batch kernel with per-shape tuning covers
+  batches up to 32 rows, now including 24-row batches.
+- **Retuned sparse-attention decode schedule**, and MoE shared experts that
+  genuinely overlap the routed experts instead of finishing before them.
+- **Host-staged all-reduce.** Stock CMP 170HX cards refuse GPU peer access, so
+  every tensor-parallel collective would take NCCL's slow multi-hop path
+  through the host. The fork does each small all-reduce in one round trip
+  through shared host memory: −7.7% step time at one user and −15% at four when
+  it landed.
+- **PCIe peer-to-peer all-reduce, optional.** Where the driver does allow peer
+  access, the all-reduce runs in device memory instead — see
+  [PCIe peer-to-peer](#pcie-peer-to-peer-optional).
+- **Prefill overlap.** During prefill each layer's all-reduces run on a side
+  stream while the MoE computes, and it keeps working alongside the
+  peer-to-peer path.
+- **Fair prefill.** A long prompt no longer starves users who are mid-answer:
+  while anyone is decoding, prefill is taken in small slices. Decode speed
+  during someone else's long prompt went from 7% to 18% of normal.
+- **Bigger prefill chunks.** 3,456-token chunks instead of 1,152: +8.0% cold
+  prefill going to 2,304, and +2.4% more going to 3,456.
+- **Repeatable output for a single request.** Four sources of run-to-run
+  variation are fixed: MoE block alignment in a fixed order, CUDA-graph padding
+  rows kept out of the MoE, and the indexer's top-k made consistent on ties and
+  returned in a fixed order.
+- **A real correctness fix in the key pool.** With speculative decoding, a
+  rejected draft could overwrite the tail of the sparse-attention key pool,
+  leaving a wrong key in the indexer cache once a conversation passed 2,048
+  tokens. The tail is now sized for the draft depth, at no memory cost.
+- **KV headroom.** Workspaces sized to what a step can actually use, and the
+  drafter's selector tables split across the cards, return memory to the KV
+  pool (+39,626 tokens) without changing a single output bit.
+- **64-bit KV row offsets** in the sparse-attention kernels, closing a silent
+  corruption risk in very large KV pools, and a vocabulary clamp in the sampler
+  kernels.
 
-**Tensor-parallel** splits every layer across all four cards, so each token
-finishes soonest, but it leans on the links hard: about 9.4 MB per layer during
-prefill and roughly 100 small collectives per decode step. On stock x4 links —
-a quarter of the bandwidth — it is bus-bound and far slower than the numbers
-above.
+---
 
-**Pipeline-parallel** puts a quarter of the layers on each card and passes
-only activations from one card to the next, so it needs far less link
-bandwidth and leaves more memory for KV. One request moves through the stages
-in turn, so a single stream is slower; with many requests in flight every
-card stays busy. `serve.sh` sets the pipeline-specific parts for you: the
-layer split, a 4,608-token KV block (so the DFlash2 drafter shares the KV
-layout on the last stage), 2,304-token prefill chunks, and the tensor-parallel
-features off.
+## How to use this repo
+
+### What you need
+
+| | |
+|---|---|
+| GPUs | 4× NVIDIA CMP 170HX, each on a PCIe Gen2 x16 link ([Link width](#link-width)); the preflight wants 60 GiB or more per card |
+| OS and driver | Linux with a working NVIDIA driver (`nvidia-smi` lists all four cards) |
+| CUDA | a 13.x toolkit at `/usr/local/cuda-13.3`, or set `CUDA_HOME` ([CUDA](#cuda)) |
+| Tools | `uv`, `git`, `curl`, Python 3.12, and `jq` for the smoke test |
+| Disk | about 185 GB for the two checkpoints |
+
+### Step by step
+
+`./start.sh` on its own does steps 1–3 in order and skips anything already
+done, so running it twice is safe. The same steps one at a time:
 
 ```bash
-LAYOUT=pp4 ./start.sh restart
+./install.sh       # 1. build ./venv and the pinned vLLM fork (about six minutes)
+./download.sh      # 2. fetch the model (~178 GB) and the drafter (~2.2 GB) into ./models
+./start.sh         # 3. launch in the background, wait for /health, print the KV pool size
+./start.sh smoke   # 4. one chat request and one tool call against the running server
+./start.sh stop    # stop it; weights and venv stay, so the next start is quick
 ```
 
-<!-- TODO(1.3.0 release): LAYOUT=pp4 needs the pipeline-parallel engine changes in the pinned commit and its own validation; fill in the pp4 column, then drop "experimental" if it passes. -->
+Weight loading and CUDA-graph capture take a few minutes after the download.
+`./serve.sh` runs the server in the foreground instead of step 3 if you prefer;
+it reads its settings from the environment, not from `.env`.
 
-Another pipeline-parallel recipe for these cards is
-[JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
-
----
-
-## Optional: PCIe peer-to-peer
-
-**The recipe does not need this and does not turn it on.** With the gate at 0 —
-the default — the cards talk through the host-staged all-reduce exactly as in
-the previous release, with no driver change of any kind. This section is only for people who already have
-peer-to-peer working on their cards.
-
-A stock CMP 170HX refuses GPU peer access: `nvidia-smi topo -p2p r` answers
-`GNS` on every pair, which is why the host-staged all-reduce exists. Where peer
-access *is* available, the TP all-reduce can run in device memory instead of
-staging through the host. Measured on four cards, alternating legs:
-
-| | ms/step, 1 stream | ms/step, 4 streams | Cold prefill | KV pool |
-|---|---:|---:|---:|---:|
-| Gate 0 — host-staged (**the default**) | 17.03 | 32.26 | 2,222 tok/s | 1,160,192 (4.43x) |
-| Gate 1 — PCIe P2P, `ALGO=2stage` | **15.88** | **28.18** | **2,260 tok/s** | **1,181,696 (4.51x)** |
-
-<!-- PENDING 1.3.0: this table is engine ff4750db5d with 1,152-token chunks; re-measure both gates on the release pin and defaults. -->
-
-About 7% off the step time at one stream and 13% at four, with roughly 21,500
-more KV tokens and cold prefill no worse. At one stream that is 176.9 tok/s, at
-1.83 accepted tokens per step.
-
-To enable it, peer-to-peer has to be advertised by the driver. We run a
-[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) build — that fork
-merged onto driver 610.57.04, with official cmpunlocker's `cmp-sku-mask.patch`
-added as patch 0010 — installed with `install.sh --p2p`. Read that project's
-own documentation; none of it is ours and none of it is in scope here.
-
-It is **topology-dependent**. We verified it on this machine: four cards on
-EPYC root ports, all pairs. [bayley/cmpunlocker](https://github.com/bayley/cmpunlocker)
-reports the mailbox path dead behind PLX switches on a Xeon, so a different
-board may simply not have it.
-
-Then check and switch on:
+### Talk to it
 
 ```bash
-nvidia-smi topo -p2p r                          # every pair must say OK, not GNS
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "glm-5.3-flash",
+       "messages": [{"role": "user", "content": "Write a haiku about PCIe."}],
+       "max_tokens": 400}'
+```
+
+Any OpenAI-compatible client works with base URL `http://127.0.0.1:8000/v1`
+and model `glm-5.3-flash`. The model's reasoning comes back in the `reasoning`
+field of the message and the answer in `content`. `reasoning_effort` of `low`,
+`high` or `max` sets how much it thinks. Do not send `reasoning_effort: "none"`
+or `"chat_template_kwargs": {"enable_thinking": false}`: the model still thinks,
+and its reasoning then lands inside `content`.
+
+### Settings
+
+Everything lives in `.env`, copied from [`.env.example`](.env.example) on first
+run. A value on the command line beats `.env` for that run:
+
+```bash
+MAX_LEN=131072 ./start.sh restart
+```
+
+| Key | Default | What it does |
+|---|---|---|
+| `MAX_LEN` | `262144` | context ceiling; lower it for more concurrent full-length requests |
+| `MAX_SEQS` | `8` | concurrent requests |
+| `GPU_UTIL` | `0.95` | share of each card's memory the engine may use |
+| `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculative drafter and draft depth; `mtp` uses the MTP head in the model checkpoint, `none` turns speculation off |
+| `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | `0` | the [peer-to-peer](#pcie-peer-to-peer-optional) switch |
+| `MAX_BATCHED` | `3460` (commented) | sets the prefill chunk: 3,456 tokens; `2048` gives 1,152 |
+| `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | fair prefill and its slice size while others decode |
+| `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it cost 15% prefill here and turns the prefill features off |
+| `MM_CAP` | `0` | `1` bounds image and video inputs, which returns roughly 150k KV tokens |
+| `PORT` / `SERVED_MODEL_NAME` | `8000` / `glm-5.3-flash` | where and under what name it serves |
+| `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
+
+An `.env` copied from an earlier release pins `MAX_BATCHED=2048`; delete that
+line to get this release's 3,456-token chunks.
+
+### PCIe peer-to-peer (optional)
+
+**What it is.** The four cards exchange data after every layer. By default that
+goes through host memory, because a stock CMP 170HX refuses GPU peer access:
+`nvidia-smi topo -p2p r` answers `GNS` on every pair. Where peer access *is*
+available, the all-reduce can run card to card in device memory instead, which
+is faster.
+
+**The default is off.** With `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0` the recipe
+needs no driver change of any kind and uses the host-staged path described
+above. If you do nothing, this is what you run.
+
+**Who should turn it on.** Only people who already have peer-to-peer working on
+their cards. It has to be advertised by the driver. We run a
+[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) build — that fork
+merged onto driver 610.57.04, with official cmpunlocker's `cmp-sku-mask.patch`
+added as patch 0010 — installed with `install.sh --p2p`. Read that project's own
+documentation; none of it is ours and none of it is in scope here.
+
+It is **topology-dependent**. We verified it on our machine: four cards on
+EPYC root ports, all pairs.
+[bayley/cmpunlocker](https://github.com/bayley/cmpunlocker) reports the mailbox
+path dead behind PLX switches on a Xeon, so a different board may simply not
+have it.
+
+**What you gain.** On this release: PENDING(P2P on vs off, ms/step c1/c4/c6/c8,
+cold prefill, KV pool, release pin) — the two columns of the
+[results table](#release-130). Measured during development on an earlier
+engine: −5.8% step time at one user and −10.8% at four, cold prefill unchanged,
+and more room for KV.
+
+**Turn it on.**
+
+```bash
+nvidia-smi topo -p2p r              # every pair must say OK, not GNS
+# then set VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 in .env, or for one run:
 VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 ./start.sh restart
 ```
 
-`serve.sh` ties the rest to that one variable: `VLLM_CUSTOM_ALLREDUCE_ALGO`
-becomes live at `2stage` (the built-in crossover is NVLink-tuned and wrong on
-Gen2 x16), and the caching allocator switches to `expandable_segments:False`,
-because CustomAllreduce registers its captured graph buffers through legacy
-CUDA IPC handles that the VMM allocator cannot provide. Setting the variable
-back to 0 restores all three.
+`serve.sh` ties the rest to that one variable: it selects the `2stage`
+all-reduce kernel (upstream's default crossover is tuned for NVLink) and the
+caching-allocator mode the peer-to-peer path needs.
 
----
+**Check it works.**
 
-## Configuration
+```bash
+grep "all-reduce backends" logs/serve.log | grep "tp:0"
+```
 
-Everything lives in `.env`, copied from `.env.example` on first run and
-gitignored. Read [`.env.example`](.env.example) for the full annotated set; the
-headlines are:
+With peer-to-peer on, the list starts with `CUSTOM`: `['CUSTOM', 'PYNCCL']`.
+With it off, or if the driver does not actually grant peer access, it reads
+`['HOSTSHM', 'PYNCCL']` — the engine falls back to the host-staged path on its
+own rather than failing. Then run `./start.sh smoke`.
 
-| Key | Default | |
-|---|---|---|
-| `VLLM_COMMIT` | *(commented out)* | engine pin. Left to `start.sh`'s default so a `git pull` can move it |
-| `LAYOUT` | `tp4` | `tp4` or `pp4` (experimental); wins over `PP`/`TP` — see [Choosing a layout](#choosing-a-layout) |
-| `PP` / `TP` | `1` / `4` | raw layout, read only when `LAYOUT` is unset; `PP*TP` must equal your GPU count |
-| `MAX_LEN` | `262144` | context ceiling; lowering it raises KV concurrency |
-| `MAX_SEQS` | `8` | concurrent sequences |
-| `MAX_BATCHED` | `3460` (`tp4`) / `2312` (`pp4`) | batched tokens per scheduler step; sets the prefill chunk. `2048` restores 1.2.0's 1,152-token chunks |
-| `GPU_UTIL` | `0.95` | memory target. 0.97 was too tight here |
-| `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculator and draft depth; `mtp` or `none` |
-| `PORT` / `SERVED_MODEL_NAME` | `8000` / `glm-5.3-flash` | |
-| `REASONING_PARSER` / `TOOL_PARSER` | `glm47` / `glm47` | |
-| `PREFILL_CAP` | `0` | upstream's **unconditional** chunk cap. Leave it 0 |
-| `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | decode-aware chunking — the cap you actually want |
-| `MM_CAP` | `0` | `1` bounds vision and video, buying back ~150k KV tokens |
-| `READY_TIMEOUT` | `1800` | seconds to wait for `/health` |
-| `BUILD_FROM_SOURCE` | `0` | `1` compiles the CUDA extensions instead of using upstream's |
-
-`PREFILL_CAP` is not a gentler `FAIR_PREFILL`. It applies unconditionally, cost
-−15.3% prefill and +16.5% TTFT@23K here, and as a side effect drops chunks below
-the two prefill gates, silently disabling the overlap and the prefill kernels.
-`FAIR_PREFILL` only bites while requests are actually decoding.
-
-The prefill chunk is `floor((MAX_BATCHED − SPEC_N) / 1152) × 1152`, because the
-KDA state page puts chunk ends on 1,152-token blocks and DFlash2 reserves its
-draft slots out of the budget. `3460` gives 3,456-token chunks: +2.4% to +3.6%
-cold prefill against 2,304-token chunks, for about 35,600 fewer KV tokens (−3%),
-with decode step time unchanged. If you raise `SPEC_N` above 4, raise
-`MAX_BATCHED` to `3456 + SPEC_N` to keep them. An `.env` copied from an earlier
-release pins `MAX_BATCHED=2048`; delete that line to get the new default.
+**Turn it off.** Set `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0` in `.env` (or
+delete the line) and `./start.sh restart`. That restores the host-staged path
+and the default allocator in one step.
 
 ### Kill switches
 
-All seven features are off by default in the engine and turned on only by
-`serve.sh`, so each one is a single variable you can set to `0` and restart — no
-rebuild, no revert:
-
-| Key | Feature |
-|---|---|
-| `VLLM_GLM5_PREFILL_OVERLAP` | TP prefill comm/compute overlap |
-| `VLLM_GLM5_PREFILL_KERNELS` | sm_80 prefill kernels |
-| `VLLM_GLM5_PROLOGUE_FUSE` | fused eager decode prologue |
-| `VLLM_GLM5_LOCAL_LOGITS` | batch-sharded logits and sampling |
-| `VLLM_GLM5_DECODE_KERNELS` | sm_80 decode kernels |
-| `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
-| `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce for nodes without peer access |
-| `VLLM_GLM5_SHARED_EXPERT_REORDER` | MoE shared experts overlapped with the routed dispatch |
-| `FAIR_PREFILL` | decode-aware prefill chunking |
-
-<!-- TODO(1.3.0 release): once the pin carries them, add the five tp4 decode flags as kill switches here:
-VLLM_GLM5_DECODE_IDX_GLUE, VLLM_GLM5_DECODE_KDA_V2, VLLM_GLM5_DECODE_MOE_ROUTE_V2, VLLM_GLM5_DECODE_MHC_V2, VLLM_GLM5_DRAFTER_ROPE_FIT -->
-
-Two more are available and **off** by default — determinism instruments for
-reproducing exact outputs rather than levers on throughput:
-`VLLM_GLM5_TOPK_CANONICAL` (0/1) and `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN`
-(0/1/2). And one optional gate, also off, in
-[Optional: PCIe peer-to-peer](#optional-pcie-peer-to-peer).
-
-If output quality is ever in question, turn `VLLM_GLM5_DECODE_KERNELS` off
-first. Exactness moved slightly outside its noise floor when the seven were
-merged (0.4119 against floors of 0.2007 and 0.2984) and GSM8K went 1.000 → 0.980
-at n=50; the decode kernels own that movement.
+Each feature is one variable. Set it to `0` and restart; no rebuild, no revert:
 
 ```bash
 VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 ```
 
----
+| Variable | Feature |
+|---|---|
+| `VLLM_GLM5_PREFILL_OVERLAP` | prefill overlap |
+| `VLLM_GLM5_PREFILL_KERNELS` | Ampere prefill kernels |
+| `VLLM_GLM5_PROLOGUE_FUSE` | fused decode prologue |
+| `VLLM_GLM5_LOCAL_LOGITS` | batch-sharded logits and sampling |
+| `VLLM_GLM5_DECODE_KERNELS` | fused decode kernels |
+| `VLLM_GLM5_DECODE_IDX_GLUE`, `VLLM_GLM5_DECODE_KDA_V2`, `VLLM_GLM5_DECODE_MOE_ROUTE_V2`, `VLLM_GLM5_DECODE_MHC_V2` | second-generation decode kernels |
+| `VLLM_GLM5_DRAFTER_ROPE_FIT` | drafter position table sized to the context (more KV) |
+| `VLLM_GLM5_THIN_GEMM` | small-batch GEMMs |
+| `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce |
+| `VLLM_GLM5_SHARED_EXPERT_REORDER` | shared experts overlapped with the routed experts |
+| `FAIR_PREFILL` | fair prefill |
 
-## Operating
+PENDING(release pin: the determinism and KV headroom switches, with their
+names and defaults as ported into `serve.sh`).
+
+### Day to day
 
 | Command | |
 |---|---|
 | `./start.sh` | preflight → install → download → launch → wait for `/health` |
-| `./start.sh install` | build the venv and the pinned fork only |
-| `./start.sh download` | fetch the two checkpoints only |
-| `./start.sh stop` | stop the server this checkout started |
-| `./start.sh restart` | stop, then start |
+| `./start.sh restart` | stop, then start (picks up `.env` changes) |
 | `./start.sh status` | process, `/health`, KV line, install and checkpoint state |
 | `./start.sh logs` | follow `logs/serve.log` |
-| `./start.sh update` | `git pull`, reinstall if the pin moved, restart |
 | `./start.sh smoke` | one chat request and one tool call |
-| `./start.sh help` | the header of `start.sh` |
+| `./start.sh stop` | stop the server this checkout started |
+| `./start.sh update` | `git pull`, reinstall if the engine pin moved, restart |
+| `VLLM_COMMIT=<older sha> ./start.sh update` | roll back to an earlier engine |
+| `DRY=1 ./start.sh` | print the launch command instead of running it |
 
-`install.sh`, `download.sh` and `stop.sh` are one-line wrappers around the
-matching subcommand. `serve.sh` is the internal launcher `start.sh` execs; you
-can run it in the foreground yourself, and `DRY=1 ./start.sh` prints the command
-it would run.
+`stop` only signals the process in `logs/vllm.pid`, after confirming it is the
+server this checkout launched; it never searches by process name, so another
+vLLM on the same machine is never touched.
 
-Lifecycle commands on a checkout are serialised by a `flock` on
-`logs/lifecycle.lock`. `stop` only ever signals the PID in `logs/vllm.pid`, and
-only after confirming that process is the server this checkout launched — it
-never searches by process name, so another vLLM on the same machine is never
-touched.
+The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
+reinstalls whenever it changes: the compiled extensions must match the upstream
+commit the fork sits on. Uncomment `VLLM_COMMIT` in `.env` to freeze it.
 
-### Updating and rolling back
+### CUDA
 
-```bash
-./start.sh update                          # pull, reinstall if the pin moved, restart
-VLLM_COMMIT=<older sha> ./start.sh update  # roll back to a known-good engine
-```
-
-`update` re-executes itself after a pull that changed this repo, so it acts on
-the new pin rather than the one it started with. The pin lives in `start.sh`,
-not in your `.env`, precisely so a pull can move it; uncomment `VLLM_COMMIT` in
-`.env` if you would rather freeze it.
-
----
-
-## What is in the patches
-
-The fork is [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx), branch
-`ampere-glm53`, pinned in `start.sh` to commit `ff4750db5d`. Every patch is
-Python, Triton or TileLang — nothing touches vLLM's CUDA or C++ sources. Each
-feature is **off by default in the code** and turned on only by `serve.sh`, so
-every one of them is a single-variable kill switch.
-
-**Ampere sparse-MLA, indexer and kpool backends.** GLM-5.3-Flash uses
-DeepSeek-style sparse attention, whose upstream kernels want Hopper. We added a
-`TRITON_MLA_SPARSE` backend, a non-DeepGEMM logits path for the DSA indexer with
-sm_80-safe FP8 stores, a Triton e4m3 dequant that does the conversion in PTX
-where sm_80 has no instruction for it, and sm_80 variants of the kpool
-compression. Without these the model does not run on these cards at all; the
-rest of the list is performance.
-
-**TP prefill comm/compute overlap** (`VLLM_GLM5_PREFILL_OVERLAP`). Each mHC
-layer's post-attention section is split into token micro-batches so its two
-all-reduces fly on a side stream while the MoE computes. Two splits measured
-best; four were worse.
-
-**Host-staged all-reduce for PCIe without P2P** (`VLLM_GLM5_HOST_ALLREDUCE`).
-With peer access refused, NCCL's shared-memory ring pays `2(N-1)` sequential
-host hops per message. This path does one round trip through a shared `/dev/shm`
-segment instead: 2.09x faster per all-reduce in a decode trace (78.6 → 37.6 µs
-mean), ms/step 19.10 → 17.63 at one stream and 37.6 → 31.8 at four. Messages
-over 512 KiB stay on NCCL, where prefill already runs near wire speed.
-
-**Thin-batch GEMM** (`VLLM_GLM5_THIN_GEMM`). W4A16 leaves some linears
-unquantized, and cuBLAS is poor at BF16 GEMMs with very few rows. A thin-M sm_80
-kernel covers `M <= 32`, which is also a CUDA-graph capture size.
-
-**Decode kernels** (`VLLM_GLM5_DECODE_KERNELS`). sm_80 implementations of the
-fused mHC post+pre norm, MoE routing and block alignment, and KDA decode, bounded
-to the small token counts decode actually sees.
-
-**Prefill kernels** (`VLLM_GLM5_PREFILL_KERNELS`). sm_80 mHC pre-norm projection
-and sparse-MLA DSA attention for the prefill shapes, gated at a minimum chunk
-size so they do not fire on the tiny chunks fair prefill produces.
-
-**Fused prologue and batch-sharded logits** (`VLLM_GLM5_PROLOGUE_FUSE`,
-`VLLM_GLM5_LOCAL_LOGITS`). The eager decode prologue collapses into one fused
-kernel, and each rank samples its own `1/TP` slice of the batch instead of every
-rank all-gathering full-vocab logits — a meaningful saving when the all-gather
-crosses PCIe Gen 2.
-
-**Shared-expert stream re-ordering** (`VLLM_GLM5_SHARED_EXPERT_REORDER`). The
-MoE shared experts are submitted to the aux stream *after* the routed dispatch
-rather than before it, so the two actually run at the same time. With the
-upstream ordering the shared experts had already retired by the time the routed
-Marlin kernels were queued behind them. Shared-expert GEMM time overlapping the
-routed kernels goes from 0.01% to 73.3% on a rank-0 decode trace. Decode only —
-the 256-token threshold keeps prefill chunks off this path.
-
-**Retuned sparse-MLA decode schedule.** A wider KV tile, two pipeline stages and
-a head tile sized to the rank. `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1` restores
-the previous schedule.
-
-**Correctness fixes.** 64-bit KV row offsets in the sparse-attention kernels,
-which removes a silent-corruption risk above roughly 4.2M KV tokens; a
-vocabulary clamp in three sampler kernels; and a 512 MiB transient freed in the
-indexer's chunk loop.
-
-**Fair chunked prefill** (`FAIR_PREFILL`). A decode-aware prefill budget: while
-requests are decoding, prefill chunks are capped so a long prompt cannot starve
-them. Decode retention during someone else's prefill went from 7% to 18% of
-baseline. Unlike upstream's unconditional cap it only applies when something is
-actually decoding.
-
-**Pipeline parallelism.** Deferred mHC post state is materialised at stage
-boundaries and the MTP drafter loads the target embedding under PP, so the
-engine supports a pipeline layout. `LAYOUT=pp4` is offered as experimental in
-this release — see [Choosing a layout](#choosing-a-layout).
-
-**Second-generation decode kernels** (PENDING — ship with the next engine pin,
-tensor-parallel only, each off in the code and turned on by `serve.sh`). The
-sparse-attention indexer's decode glue folded into fewer kernels
-(`VLLM_GLM5_DECODE_IDX_GLUE`); KDA decode with its gate projections fused
-(`VLLM_GLM5_DECODE_KDA_V2`); the MoE gate, top-k and block alignment in one
-kernel (`VLLM_GLM5_DECODE_MOE_ROUTE_V2`); a faster mHC decode
-(`VLLM_GLM5_DECODE_MHC_V2`); thin-GEMM rows for 24-row batches; and the DFlash2
-drafter's RoPE cache sized to the context rather than a million positions
-(`VLLM_GLM5_DRAFTER_ROPE_FIT`, output-identical, +12,288 KV tokens). Measured
-together with the peer-to-peer gate on: ms/step 16.26 → 15.05 at one stream,
-29.98 → 27.76 at four, 42.00 → 34.62 at six, 43.92 → 41.55 at eight, cold
-prefill flat. With the gate off, as this recipe ships: PENDING.
-
-All the feature flags together, against the same engine with them off: prefill
-+13.4%, TTFT@23K −14.9%, ms/step at one stream −1.22, decode retention during
-someone else's prefill 7% → 18%, KV pool unchanged.
-
----
-
-## Installing by hand
-
-`./start.sh` does all of this for you. If you want the pieces:
-
-```bash
-./install.sh     # venv + the pinned fork, verified imports
-./download.sh    # the two checkpoints
-./serve.sh       # launch in the foreground
-./smoke.sh       # one chat request, one tool call
-```
-
-**CUDA.** You need a 13.x toolkit. NVIDIA had no working `ubuntu2604`
-repository index when we built this, so we used the `ubuntu2404` one:
+You need a 13.x toolkit. NVIDIA had no working `ubuntu2604` repository index
+when we built this, so we used the `ubuntu2404` one:
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
@@ -530,31 +405,23 @@ sudo apt-get update
 sudo apt-get install -y cuda-toolkit-13-3 git-lfs
 ```
 
-**Changing the pin means reinstalling.** `start.sh` records the installed
-commit in `venv/.recipe-stamp` and re-runs the install when `VLLM_COMMIT`
-changes, which is what you want: the compiled extensions have to match the
-upstream commit the branch sits on, and upstream's ABI does move. Updating the
-checkout by hand without reinstalling gives you a mismatched extension and an
-engine that dies on startup.
+The install uses upstream's **precompiled** CUDA extensions, which is why it
+takes minutes: the fork's patches are Python, Triton and TileLang and touch no
+CUDA or C++ source, so the compiled objects are the same, and upstream's
+already carry sm_80 code. To compile them yourself:
+`BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` (full toolkit, ~60 GB of
+scratch, one to two hours).
 
-**Why the install is quick.** By default it uses upstream's **precompiled**
-extensions rather than compiling them, which takes minutes instead of hours.
-That is not a shortcut: the diff between `ampere-glm53` and upstream touches no
-`.cu`, `.cpp` or `CMakeLists` file, so the compiled objects are identical to
-upstream's, and upstream's wheels already carry sm_80 cubins. To compile them
-yourself, `BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` — it pins
-`TORCH_CUDA_ARCH_LIST=8.0`, needs the full toolkit and ~60 GB of scratch, and
-takes one to two hours.
+### Link width
 
-**Checkpoints.**
-
-| Repository | Size | Role |
-|---|---:|---|
-| [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) | ~178 GB, 21 files | target model |
-| [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) | ~2.2 GB, 5 files | DFlash2 drafter |
+Tensor parallelism moves about 9.4 MB per layer between the cards during
+prefill and roughly 100 small collectives per decode step. It assumes PCIe Gen2
+x16 links; on x4 links it is bus-bound and far slower than the numbers above.
+`./start.sh` prints each card's link width in its preflight and warns if any is
+narrower than x16. For narrower links, see the [roadmap](#status-and-roadmap).
 
 <!-- TODO(1.3.0 release): replace the sample below with ./start.sh smoke output from the release pin and defaults. -->
-**Smoke test output**, against a running server:
+**Smoke test output** looks like this (sample from an earlier release):
 
 ```
 ==> waiting for http://127.0.0.1:8000/health (up to 900s)
@@ -571,44 +438,45 @@ takes one to two hours.
 
 ---
 
-## Known limits
+## Status and roadmap
 
-**The backends here target sm_80.** Every kernel in the patches is written for
-Ampere. On newer architectures upstream vLLM's own kernels are better, and the
-Ampere paths are only selected where they are needed. The flags gate the
-features, not the architecture, so forcing them on elsewhere is untested.
-
-**The no-P2P path is only worth it without P2P.** `VLLM_GLM5_HOST_ALLREDUCE`
-replaces NCCL's shared-memory ring for small collectives, which is a large win
-when peer access is unavailable and pointless when it is not. Where P2P works,
-leave it off. It is also why per-stream decode here does not scale with device
-count the way it would over a fast fabric.
-
-**Prefill chunk sizes.** The overlap was tuned at 1,152-token chunks and
-measured at 2,304 and 3,456; other sizes work but were not characterised, and
-the prefill kernels will not engage below `VLLM_GLM5_PREFILL_MIN_TOKENS`.
-
-**The DFlash2 checkpoint is required for the default mode.** `./serve.sh` with
-no argument wants `./models/GLM-5.3-Flash-DFlash2`. Use `./serve.sh mtp` for the
-MTP head that ships inside the target checkpoint, or `./serve.sh none` for no
-speculation — both are slower.
-
-**Context and KV are a trade.** At `--max-model-len 262144` and
-`--gpu-memory-utilization 0.95` the KV pool was 1,160,192 tokens with 1,152-token
-chunks, which is 4.43x concurrency at full context; 3,456-token chunks cost
-about 35,600 of those (this release's figure: PENDING). Raising `MAX_LEN` lowers that multiplier; with
-`MM_CAP=0` the memory profiler also reserves for a context-filling video, which
-costs roughly 150k KV tokens.
-
-**Tensor-parallel assumes wide links; pipeline-parallel is experimental.**
-Tensor parallelism moves about 9.4 MB per layer between cards during prefill
-and ~100 small collectives per decode step, so on x4 links it is bus-bound.
-`LAYOUT=pp4` needs far less link bandwidth but is not yet validated in this
-release — see [Choosing a layout](#choosing-a-layout).
+- **Tensor-parallel 4 is the supported layout in 1.3.0.** It gives each request
+  the fastest answer and suits one or two interactive users or agents.
+- **Pipeline-parallel 4 is in active development** for systems without the x16
+  capacitor modification, whose cards run on narrower PCIe links. Each card
+  holds a quarter of the layers and passes only activations to the next, so it
+  needs far less link bandwidth and leaves more memory for KV. It is aimed at
+  many parallel agents and long prompts, and it comes in a later release with
+  its own validation and numbers. Until then, another pipeline-parallel recipe
+  for these cards is
+  [JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
+- **Optimisation continues** on both layouts; every change ships with a kill
+  switch and measured numbers.
 
 ---
 
-## License
+## Known limits
+
+- **Ampere only.** Every kernel in the fork is written for sm_80. On newer GPUs
+  upstream vLLM's own kernels are better, and forcing these features on
+  elsewhere is untested.
+- **Wide links for tensor-parallel.** See [Link width](#link-width).
+- **Repeatable per request, not per batch.** A request on its own gives the
+  same result every time. When requests share a batch, the result can differ
+  slightly from the same request alone, by about as much as with every
+  optimisation switched off.
+- **Context and KV are a trade.** Raising `MAX_LEN` lowers how many full-length
+  requests fit at once. With `MM_CAP=0` (the default) the memory profiler also
+  reserves room for a context-filling video, roughly 150k KV tokens.
+- **The DFlash2 checkpoint is needed for the default mode.** `SPEC_MODE=mtp`
+  uses the MTP head inside the model checkpoint, and `none` turns speculation
+  off; both are slower.
+- **Host-staged all-reduce is only for cards without peer access.** Where
+  peer-to-peer works, it stands aside for the device-memory path.
+
+---
+
+## Licence
 
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
@@ -626,7 +494,7 @@ and the base model
 is **CC BY-NC-ND 4.0** — research and evaluation only, non-commercial, no
 derivatives. It is the default speculator here, so read that before you deploy
 this anywhere commercial. `SPEC_MODE=mtp` serves the MTP head inside the MIT
-target checkpoint instead and does not use it at all.
+model checkpoint instead and does not use it at all.
 
 **The benchmark prompts and the published DGX Spark figures** are quoted from
 MiaAI-Lab's repository (AGPL-3.0) and their sparkDash prompt constants (MIT),
@@ -635,8 +503,8 @@ used as data with attribution. No code from their repositories is included here.
 ## Credits
 
 - **[MiaAI-Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)**
-  for publishing their 2x DGX Spark figures and their benchmark prompts, which
-  are the entire comparison column above. Thank you for publishing both.
+  for publishing their 2× DGX Spark figures and their benchmark prompts, which
+  are the entire comparison column above.
 - **[incoai](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)** for the
   DFlash2 drafter checkpoint.
 - **[canada-quant](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)**

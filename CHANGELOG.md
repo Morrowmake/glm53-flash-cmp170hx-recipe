@@ -4,76 +4,81 @@
 
 <!-- TODO(1.3.0 release): date; pin; installed version string from a clean install of the pin. -->
 
+**Tensor-parallel only.** 1.3.0 supports one layout, tensor-parallel 4
+(`PP=1`, `TP=4`), as 1.2.0 did. Pipeline-parallel 4 is planned (below).
+
 **Engine pin moves to `ff4750db5d`** (54 commits on upstream `496c6472cb`).
 Installed version `0.29.1rc1.dev573+gff4750db5.precompiled`.
 PENDING: the pin moves again to the merged, validated commit carrying the
-second-generation decode kernels and the pipeline-parallel changes below.
+second-generation decode kernels, the determinism fixes, the KV-pool fix and
+the KV headroom changes below.
 
-**Two layouts.** `LAYOUT=tp4` (the default, tensor-parallel 4) for one or two
-interactive agents, and `LAYOUT=pp4` (pipeline-parallel 4, **experimental**)
-for many parallel agents, long prefills and more KV, and for boards with
-narrow links. `LAYOUT` wins over `PP`/`TP`. Under `pp4`, `serve.sh` sets the
-layer split, a 4,608-token KV block so the DFlash2 drafter keeps the shared KV
-layout, 2,304-token prefill chunks, and the tensor-parallel features off.
-DFlash2 is now the default speculator under pipeline-parallel as well (it was
-MTP). PENDING: pp4 validation and numbers.
-
-**3,456-token prefill chunks.** The tensor-parallel default `MAX_BATCHED` goes
-from 2048 (1,152-token chunks) to 3460 (3,456-token chunks). 2,304-token
-chunks measured +8.0% cold prefill against 1,152; 3,456 adds +2.4% to +3.6% on
-top, for about 35,600 fewer KV tokens (−3%), with decode step time unchanged.
+**3,456-token prefill chunks.** The default `MAX_BATCHED` goes from 2048
+(1,152-token chunks) to 3460 (3,456-token chunks). 2,304-token chunks measured
++8.0% cold prefill against 1,152; 3,456 adds +2.4% to +3.6% on top, for about
+35,600 fewer KV tokens (−3%), with decode step time unchanged.
 `MAX_BATCHED=2048` restores the previous chunking. **An `.env` copied from an
-earlier release pins `MAX_BATCHED=2048` and `PP`/`TP`**: delete those lines to
-get the new defaults and the layout switch.
+earlier release pins `MAX_BATCHED=2048`**: delete that line to get the new
+default.
 
 **Second-generation decode kernels** (PENDING — not in the current pin, and
-off in `serve.sh` until it is). Tensor-parallel only, each off in the engine
-and turned on by `serve.sh`, each a kill switch: `VLLM_GLM5_DECODE_IDX_GLUE`,
+off in `serve.sh` until it is). Each off in the engine and turned on by
+`serve.sh`, each a kill switch: `VLLM_GLM5_DECODE_IDX_GLUE`,
 `VLLM_GLM5_DECODE_KDA_V2`, `VLLM_GLM5_DECODE_MOE_ROUTE_V2`,
 `VLLM_GLM5_DECODE_MHC_V2`, `VLLM_GLM5_DRAFTER_ROPE_FIT`, plus thin-GEMM rows for
-24-row batches. Measured together with the peer-to-peer gate on: ms/step
-16.26 → 15.05 at one stream, 29.98 → 27.76 at four, 42.00 → 34.62 at six,
-43.92 → 41.55 at eight; cold prefill flat; KV +2,048 tokens. With the gate
+24-row batches. Measured together during development, with the peer-to-peer
+gate on: ms/step 16.26 → 15.05 at one stream, 29.98 → 27.76 at four,
+42.00 → 34.62 at six, 43.92 → 41.55 at eight; cold prefill flat. With the gate
 off, as the recipe ships: PENDING.
 
-**`.env.example`.** The three tensor-parallel-only switches
-(`VLLM_GLM5_PREFILL_OVERLAP`, `VLLM_GLM5_LOCAL_LOGITS`,
-`VLLM_GLM5_HOST_ALLREDUCE`) are left commented, so `serve.sh` sets them per
-layout; uncommenting one forces it.
+**Repeatable output for a request on its own** (PENDING the pin). Four sources
+of run-to-run variation in prefill are fixed: MoE block alignment in a fixed
+order, CUDA-graph padding rows kept out of the MoE, and the sparse-attention
+indexer's top-k made consistent on ties and emitted in a fixed order. With them
+on, the same request sent alone returns the same tokens and log-probabilities
+every time; measured during development at under 1% of step time. Flags and
+defaults: PENDING the `serve.sh` port.
+
+**KV-pool fix** (PENDING the pin). With speculative decoding, a rejected draft
+could overwrite the per-request tail of the sparse-attention key pool, leaving
+a wrong pool key in the indexer cache past 2,048 tokens of context. The tail
+ring is now sized for the draft depth, at no KV cost.
+
+**KV headroom** (PENDING the pin). Smaller indexer workspaces and a
+vocabulary-sharded drafter selector free memory for the KV pool: +39,626 tokens
+(+3.45%) measured during development, outputs bit-identical, no step-time cost.
 
 **Optional PCIe peer-to-peer.** Where the driver advertises peer access, the TP
 all-reduce can run in device memory rather than staging through the host:
 `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE`, with `VLLM_CUSTOM_ALLREDUCE_ALGO` and
-the caching-allocator choice tied to the same variable. Worth -5.8% ms/step at
-one stream and -10.8% at four, cold prefill unchanged, about 21,500 more KV
-tokens. **It ships at 0 here**, because it needs peer-to-peer enabled at the
-driver level; at 0 the recipe behaves exactly as 1.2.0 with no driver change.
-See "Optional: PCIe peer-to-peer" in the README.
+the caching-allocator choice tied to the same variable. Measured during
+development on an earlier engine: −5.8% ms/step at one stream and −10.8% at
+four, cold prefill unchanged. On this release: PENDING. **It ships at 0 here**,
+because it needs peer-to-peer enabled at the driver level; at 0 the recipe
+behaves as 1.2.0 with no driver change. See "PCIe peer-to-peer (optional)" in
+the README.
 
 **Prefill overlap beside a live CustomAllreduce.** The overlap no longer stands
 down when a CustomAllreduce is present; its split collectives ride NCCL
 (`VLLM_GLM5_PREFILL_OVERLAP_BACKEND`, code default `nccl`). That is what
 removes the prefill cost the peer-to-peer path used to carry.
 
-**Determinism instruments**, both default 0 and documented as available:
-`VLLM_GLM5_TOPK_CANONICAL` and `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN` (0/1/2).
-
 The seven launcher variables are now declared in the engine, so starting the
 server no longer prints unknown-variable warnings.
 
-Measured on `ff4750db5d` with 1,152-token chunks, peer-to-peer gate off: 17.03 ms/step at
-one stream, 32.26 at four, cold prefill 2,222 tok/s, KV pool 1,160,192 tokens
-(4.43x of 262,144), TTFT about 2.6 s at 6.2K and 9.8 s at 23.3K. With the gate
-on those become 15.88 and 28.18 ms/step (176.9 tok/s at one stream, 1.83
-accepted tokens per step), 2,260 tok/s and 1,181,696 tokens (4.51x).
-
-Long context: needle retrieval 30/30 out to 262K, a verbatim copy at 262K
-returned byte-exact, and no content crossing between concurrent requests.
+**README rewritten**: results first, what makes it fast, a step-by-step guide
+including the peer-to-peer on/off choice, and the roadmap.
 
 Measured with this release's defaults: PENDING (ms/step at 1/4/6/8 streams,
-cold prefill, TTFT, KV pool; both layouts).
+cold prefill, TTFT, KV pool; peer-to-peer off and on).
 
 Quality: PENDING (perplexity, full GSM8K, HumanEval).
+
+### Planned
+
+**Pipeline-parallel 4** (`PP=4`), for systems whose cards run on narrower PCIe
+links, and for many parallel agents and long prompts. It is in active
+development and comes in a later release with its own validation and numbers.
 
 
 ## 1.2.0 — 2026-09-22
