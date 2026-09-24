@@ -15,10 +15,18 @@
 #   MODEL           target model directory          (default ./models/GLM-5.3-Flash-W4A16-MTP)
 #   DFLASH_MODEL    drafter directory               (default ./models/GLM-5.3-Flash-DFlash2)
 #   CUDA_HOME       CUDA toolkit root               (default /usr/local/cuda-13.3)
-# Env overrides: MAX_LEN, MAX_SEQS, MAX_BATCHED, PREFILL_CAP (upstream long-prefill chunk cap,
-#   UNCONDITIONAL; default 0 = off -- LEAVE IT 0, see below), GPU_UTIL, PORT, SPEC_N,
-#   SERVED_NAME, REASONING_PARSER, TOOL_PARSER, MM_CAP, PP, TP,
-#   VLLM_PP_LAYER_PARTITION, EXTRA_ARGS.
+# Env overrides: LAYOUT (tp4|pp4), MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3460
+#   under tp4 = 3,456-token prefill chunks, 2312 under pp4), PREFILL_CAP (upstream
+#   long-prefill chunk cap, UNCONDITIONAL; default 0 = off -- LEAVE IT 0, see
+#   below), GPU_UTIL, PORT, SPEC_N, SERVED_NAME, REASONING_PARSER, TOOL_PARSER,
+#   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
+#
+# Layouts (LAYOUT wins over PP/TP when it is set):
+#   LAYOUT=tp4 (default)  tensor-parallel 4. Fastest per request: one or two
+#                         interactive agents. Assumes PCIe Gen2 x16 links.
+#   LAYOUT=pp4            pipeline-parallel 4. EXPERIMENTAL in this release:
+#                         many parallel agents, long prefills, more KV, and
+#                         boards with narrow links. DFlash2 as well.
 #
 # ===== sm_80 feature flags ==================================================
 # Eight features plus an optional PCIe peer-to-peer gate, validated
@@ -50,6 +58,9 @@
 #   VLLM_GLM5_PREFILL_OVERLAP_BACKEND=  which communicator carries the prefill
 #                                 overlap's split collectives. NOT set here: the
 #                                 code default is nccl, which measured fastest.
+#   MAX_BATCHED=2048              1,152-token prefill chunks, as 1.2.0 shipped
+#                                 (the tp4 default 3460 gives 3,456-token
+#                                 chunks).                 [prefill-chunk-3456]
 #
 # Measured together vs the pre-merge default: prefill +13.4%, TTFT@23K -14.9%,
 # ms/step c1 -1.22 (paired, drift 0.58), decode retention during someone
@@ -68,7 +79,7 @@
 set -euo pipefail
 MODE=${1:-dflash}
 case "$MODE" in
-  -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
@@ -86,20 +97,54 @@ export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 # (VMM) allocator cannot provide. Record whether the caller set it explicitly so
 # that choice can win.
 ALLOC_CONF_EXPLICIT=${PYTORCH_CUDA_ALLOC_CONF+1}
-# Layout: TENSOR-PARALLEL 4. TP=4 assumes PCIe Gen2 x16 links between the cards:
-# it moves ~9.4 MB per layer during prefill and ~100 small collectives per decode
-# step, so on stock x4 links it is bus-bound. PP is left as a knob because the
-# engine supports it, but PP=4 is UNSUPPORTED HERE -- nothing below is tuned for
-# it. Pipeline-parallel recipe for the same cards:
-#   https://github.com/JJ48/glm53-flash-170hx-serving
+# [layout] Two layouts on the same engine.
+#   tp4 (default) -- TENSOR-PARALLEL 4. Every layer is split across all four
+#     cards, so it is the fastest per request, but it assumes PCIe Gen2 x16
+#     links: it moves ~9.4 MB per layer during prefill and ~100 small
+#     collectives per decode step, so on stock x4 links it is bus-bound.
+#   pp4 -- PIPELINE-PARALLEL 4 (TP=1). Each card holds a quarter of the layers
+#     and only hands activations to the next, so it needs far less link
+#     bandwidth; suited to many parallel agents, long prefills and more KV.
+#     EXPERIMENTAL in this release.
+# LAYOUT, when set, wins over PP/TP (an older .env may still carry PP=1 TP=4).
+# Unset, PP/TP are read as before and default to 1/4.
+case "${LAYOUT:-}" in
+  '')  PP=${PP:-1}; TP=${TP:-4} ;;
+  tp4) PP=1; TP=4 ;;
+  pp4) PP=4; TP=1 ;;
+  *) echo "serve.sh: unknown LAYOUT '$LAYOUT' (expected tp4 or pp4)" >&2; exit 2 ;;
+esac
+# PP*TP must be 4
+# ---------------------------------------------------------------------------
+# TODO(1.3.0 release): LAYOUT=pp4 needs the PP4 engine changes (drafter
+# hidden-state relay across stages, drafter layer grouping on the last stage,
+# the pipeline block-table fix, decode spreading) to be in the pinned engine
+# commit, and its own validation. Until the pin moves to that commit and PP4
+# is validated, pp4 stays marked experimental here and in the README.
+# ---------------------------------------------------------------------------
+if [ "$PP" -gt 1 ]; then
+  echo "serve.sh: [layout] PP=$PP TP=$TP -- pipeline-parallel is EXPERIMENTAL in this release" >&2
+fi
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
 # MLA tensors, so it uses the non-MTP split.
-PP=${PP:-1}; TP=${TP:-4}   # PP*TP must be 4
 if [ "$PP" = "4" ]; then
   if [ "$MODE" = "mtp" ]; then DEFAULT_PART=14,12,12,7; else DEFAULT_PART=13,11,11,10; fi
   export VLLM_PP_LAYER_PARTITION="${VLLM_PP_LAYER_PARTITION:-$DEFAULT_PART}"
 elif [ -n "${VLLM_PP_LAYER_PARTITION:-}" ]; then export VLLM_PP_LAYER_PARTITION; else unset VLLM_PP_LAYER_PARTITION; fi
+# [layout] pipeline-parallel block size. With DFlash under PP each stage holds
+# the full 64-head KDA state, which sets the attention block to 4480 tokens;
+# the drafter's matching block would then not be a multiple of 64, so the
+# drafter would leave the shared KV layout and the last stage would hold
+# several times less KV. 4608 is the next multiple of 256 that keeps it in:
+# drafter block 1152, KDA state page padded 5%, valid for SPEC_N up to 8.
+BLOCK_ARGS=()
+if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then BLOCK_ARGS=(--block-size "${BLOCK_SIZE:-4608}"); fi
+# [pp-spread-decodes] PP only: cap each micro-batch at ceil(decoding / PP)
+# decode requests so every in-flight micro-batch carries decodes (without it
+# one micro-batch takes every decode and the other stages idle). Stays 0 until
+# PP4 is validated.
+if [ "$PP" -gt 1 ]; then export VLLM_PP_SPREAD_DECODES=${VLLM_PP_SPREAD_DECODES:-0}; fi
 # Replicated input-embedding table under TP (VLLM_GLM5_REPLICATED_EMBED): skips the 2 hidden-size
 # all-reduces per prefill chunk / decode step (target + MTP drafter) for +0.74 GiB per rank
 # (-6% KV tokens). Off by default -- the KV is worth more here. Sharded table under PP-only.
@@ -163,7 +208,7 @@ fi
 #                       `nvidia-smi topo -p2p r` must report OK, not GNS.
 # Measured on four cards with peer-to-peer available, alternating legs:
 #   gate 0: ms/step c1 17.03, c4 32.26, cold prefill 2222 tok/s, KV 1,160,192
-#   gate 1 with ALGO=2stage: c1 16.03, c4 29.25, prefill 2082, KV 1,181,696
+#   gate 1 with ALGO=2stage: c1 15.88, c4 28.18, prefill 2260, KV 1,181,696
 # The gate ties both decisions together, so 0 is a complete fallback rather
 # than a drop to NCCL: VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
 export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
@@ -201,6 +246,57 @@ fi
 # 1152-token prefill chunks off this path entirely.
 # Kill switch: set it to 0 and restart, no rebuild.
 export VLLM_GLM5_SHARED_EXPERT_REORDER=${VLLM_GLM5_SHARED_EXPERT_REORDER:-1}
+
+# ===========================================================================
+# TODO(1.3.0 release): [tp4-decode-v2] five decode changes, each OFF in the
+# engine code and meant to be turned on here under TP only. They are NOT in
+# the pinned engine commit yet, so they stay OFF in this draft: TP4V2_DEFAULT
+# is 0 and nothing is exported unless you set a variable yourself. At release:
+# move the pin to the merged, validated commit, set TP4V2_DEFAULT=1, fill in
+# the measured numbers below, and delete this TODO.
+#   VLLM_GLM5_DECODE_IDX_GLUE      sparse-attention indexer decode glue folded
+#                                  into fewer kernels, plus the MoE shared add
+#   VLLM_GLM5_DECODE_KDA_V2        KDA decode with its gate projections fused
+#   VLLM_GLM5_DECODE_MOE_ROUTE_V2  MoE gate GEMV + top-k + align in one kernel
+#                                  (up to 32 tokens)
+#   VLLM_GLM5_DECODE_MHC_V2        mHC decode v2 (up to 32 tokens)
+#   VLLM_GLM5_DRAFTER_ROPE_FIT     size the DFlash2 drafter's RoPE cache to the
+#                                  context instead of 1M positions: output-
+#                                  identical, more KV
+# The v2 decode kernels need VLLM_GLM5_DECODE_KERNELS=1 (set above). New
+# thin-GEMM rows for 24-row batches ride VLLM_GLM5_THIN_GEMM and need no switch.
+# Under pp4 they stay 0 unless set explicitly (validated separately).
+# Measured together, TP=4, PCIe P2P gate on, ms/step before -> after:
+#   c1 16.26 -> 15.05, c4 29.98 -> 27.76, c6 42.00 -> 34.62, c8 43.92 -> 41.55;
+#   cold prefill flat; KV +2,048 tokens (RoPE fit +12,288, kernels -10,240).
+#   With the gate at 0 (this recipe's default): PENDING.
+# Also to settle at release (PENDING the engine merge): which prefill
+# determinism settings ship, and whether the NCCL peer-to-peer level becomes
+# part of the optional PCIe P2P setup. Neither is set here.
+# ===========================================================================
+TP4V2_DEFAULT=0   # TODO(1.3.0 release): 1 once the pin carries the merged, validated commit
+for _v in VLLM_GLM5_DECODE_IDX_GLUE VLLM_GLM5_DECODE_KDA_V2 VLLM_GLM5_DECODE_MOE_ROUTE_V2 VLLM_GLM5_DECODE_MHC_V2 VLLM_GLM5_DRAFTER_ROPE_FIT; do
+  if [ -n "${!_v:-}" ]; then
+    export "$_v"                           # set by the caller: pass it through
+  elif [ "$TP" -gt 1 ] && [ "$TP4V2_DEFAULT" = "1" ]; then
+    export "$_v=1"
+  fi                                       # otherwise unset = off in the engine
+done
+
+# [prefill-chunk-3456] batched-token budget, which sets the prefill chunk.
+# The KDA state page forces chunk ends onto 1152-token blocks, and DFlash
+# reserves SPEC_N draft slots out of the budget, so the chunk is
+# floor((MAX_BATCHED - SPEC_N) / 1152) x 1152:
+#   2048 -> 1152 (1.2.0), 2312 -> 2304, 3460 -> 3456 (tp4 default here).
+# Larger chunks let each prefill-overlap half carry more tokens per pass over
+# the experts: 3,456-token chunks measured +2.4% to +3.6% cold prefill against
+# 2,304, for about 35,600 fewer KV tokens (-3%, a larger chunk raises the
+# activation peak the memory profiler reserves for). Decode ms/step unchanged.
+# Contended prefill is unaffected (FAIR_PREFILL caps it at 384 while anything
+# decodes). If SPEC_N goes above 4, raise MAX_BATCHED to 3456 + SPEC_N to
+# keep 3,456-token chunks. pp4 keeps 2312 (not measured there).
+# Kill switch: MAX_BATCHED=2048 restores 1.2.0's chunking.
+if [ "$TP" -gt 1 ]; then MAX_BATCHED_DEFAULT=3460; else MAX_BATCHED_DEFAULT=2312; fi
 # [fair-prefill] decode-aware chunking, passed as real serve args below rather
 # than through EXTRA_ARGS so EXTRA_ARGS stays free for callers.
 FAIR_ARGS=()
@@ -235,14 +331,14 @@ CMD=("$VENV/bin/vllm" serve "$MODEL"
   --tensor-parallel-size "$TP"
   --max-model-len "${MAX_LEN:-262144}"
   --max-num-seqs "${MAX_SEQS:-8}"
-  --max-num-batched-tokens "${MAX_BATCHED:-2048}"
+  --max-num-batched-tokens "${MAX_BATCHED:-$MAX_BATCHED_DEFAULT}"
   --long-prefill-token-threshold "${PREFILL_CAP:-0}"
   --gpu-memory-utilization "${GPU_UTIL:-0.95}"
   --trust-remote-code
   --reasoning-parser "${REASONING_PARSER:-glm47}"
   --enable-auto-tool-choice --tool-call-parser "${TOOL_PARSER:-glm47}"
   --port "${PORT:-8000}"
-  "${MM_ARGS[@]}" "${SPEC[@]}" "${FAIR_ARGS[@]}" ${EXTRA_ARGS:-})
+  "${MM_ARGS[@]}" "${SPEC[@]}" "${FAIR_ARGS[@]}" "${BLOCK_ARGS[@]}" ${EXTRA_ARGS:-})
 
 if [ "${DRY:-0}" = "1" ]; then
   printf '%q ' "${CMD[@]}"; printf '\n'

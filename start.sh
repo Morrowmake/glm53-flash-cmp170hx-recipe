@@ -4,7 +4,8 @@
 # ============================================================================
 #
 # We serve canada-quant/GLM-5.3-Flash-W4A16-MTP on four GPUs with a patched
-# vLLM: OpenAI API on :8000 as "glm-5.3-flash", tensor-parallel 4, DFlash2
+# vLLM: OpenAI API on :8000 as "glm-5.3-flash", tensor-parallel 4 by default
+# (LAYOUT=pp4 for pipeline-parallel 4, experimental in this release), DFlash2
 # speculation at k=3, 262,144-token context. No FP8, no KV quantisation, no
 # offload.
 #
@@ -34,6 +35,7 @@
 # assignment beats .env for every key:
 #
 #   MAX_LEN=131072 ./start.sh restart
+#   LAYOUT=pp4 ./start.sh restart
 #   VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 #   VLLM_COMMIT=<older sha> ./start.sh update      # roll back
 #
@@ -100,6 +102,8 @@ VENV="${VENV:-$SCRIPT_DIR/venv}"
 VLLM_SRC="${VLLM_SRC:-$SCRIPT_DIR/vllm-src}"
 VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm-cmp170hx.git}"
 VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
+# TODO(1.3.0 release): move the pin to the merged, validated ampere-glm53 commit
+# (also in .env.example, the README badge, Engine row and patches section).
 VLLM_COMMIT="${VLLM_COMMIT:-ff4750db5d}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
 TARGET_REPO="${TARGET_REPO:-canada-quant/GLM-5.3-Flash-W4A16-MTP}"
@@ -113,15 +117,18 @@ MAX_JOBS="${MAX_JOBS:-16}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-glm-5.3-flash}"
-PP="${PP:-1}"; TP="${TP:-4}"
+# Layout. LAYOUT=tp4 (default) or pp4 (experimental in this release); when set
+# it wins over PP/TP, because an older .env may still carry PP=1 TP=4.
+case "${LAYOUT:-}" in
+    '')  PP="${PP:-1}"; TP="${TP:-4}" ;;
+    tp4) PP=1; TP=4 ;;
+    pp4) PP=4; TP=1 ;;
+    *)   die "unknown LAYOUT '$LAYOUT' (expected tp4 or pp4)" ;;
+esac
 export PP TP
-# PP is unsupported by this recipe, but if someone sets it anyway, default to
-# the MTP head: DFlash under pipeline parallelism has not been run here.
-if [ "$PP" -gt 1 ] && [ "$TP" = "1" ]; then
-    SPEC_MODE="${SPEC_MODE:-mtp}"
-else
-    SPEC_MODE="${SPEC_MODE:-dflash}"
-fi
+if [ "$PP" -gt 1 ]; then LAYOUT_NAME="pp$PP"; else LAYOUT_NAME="tp$TP"; fi
+# DFlash2 under both layouts.
+SPEC_MODE="${SPEC_MODE:-dflash}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
@@ -209,8 +216,8 @@ preflight() {
             if [ "${narrow:-0}" -gt 0 ] && [ "$TP" -gt 1 ]; then
                 warn "  $narrow card(s) are below x16 and TP=$TP. Tensor parallelism moves ~9.4 MB per"
                 warn "  layer during prefill and ~100 small collectives per decode step, so TP will be"
-                warn "  far slower than the published numbers on narrow links. This recipe is TP-only;"
-                warn "  see \"Link width\" in the README. Continuing anyway."
+                warn "  far slower than the published numbers on narrow links. LAYOUT=pp4 needs far"
+                warn "  less link bandwidth; see \"Choosing a layout\" in the README. Continuing anyway."
             fi
         fi
     else
@@ -429,7 +436,7 @@ launch() {
         rm -f "$PIDFILE"
     fi
     mkdir -p "$LOGDIR"
-    log "launch: $SPEC_MODE, TP=${TP:-4} PP=${PP:-1}, ctx ${MAX_LEN:-262144}, :$PORT"
+    log "launch: $SPEC_MODE, $LAYOUT_NAME (TP=${TP:-4} PP=${PP:-1}), ctx ${MAX_LEN:-262144}, :$PORT"
     log "  log: $SERVE_LOG"
     setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" >>"$SERVE_LOG" 2>&1 < /dev/null &
     local pid=$!

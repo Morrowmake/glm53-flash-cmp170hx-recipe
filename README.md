@@ -5,6 +5,7 @@
   &nbsp;·&nbsp;
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
+  <!-- TODO(1.3.0 release): badge, Engine row and patches section move to the merged, validated commit -->
   <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20ff4750db5d-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
@@ -41,9 +42,12 @@ A prefix env assignment beats `.env` for every key:
 MAX_LEN=131072 ./start.sh restart
 VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 SPEC_MODE=mtp ./start.sh restart
+LAYOUT=pp4 ./start.sh restart     # pipeline-parallel, experimental in this release
 ```
 
-This recipe is tensor-parallel only — see [Link width](#link-width).
+Two layouts: **tensor-parallel** (`LAYOUT=tp4`, the default) for one or two
+interactive agents, and **pipeline-parallel** (`LAYOUT=pp4`, experimental in
+this release) for many agents at once — see [Choosing a layout](#choosing-a-layout).
 
 ---
 
@@ -162,6 +166,24 @@ Decode speculation is DFlash2 at k=3. Accept ratios run 0.91–0.98 on structure
 and code prompts and 0.58–0.63 on prose, which is why prose decodes slower
 despite being the same model on the same cards.
 
+<!-- PENDING 1.3.0: re-measure the table above on the release pin, or label it with the engine and settings it was taken on. -->
+
+### This release's defaults (tensor-parallel)
+
+This release changes the default prefill chunk to 3,456 tokens and adds a
+second generation of decode kernels. Measured on the release configuration,
+peer-to-peer gate off:
+
+| | |
+|---|---:|
+| Decode step time, 1 / 4 / 6 / 8 users | PENDING |
+| Cold prefill | PENDING |
+| TTFT, 6.2K / 23.3K-token prompt | PENDING |
+| KV pool at `--max-model-len 262144` | PENDING |
+| Perplexity, fixed 60-document set | PENDING |
+| GSM8K, full 1,319 at concurrency 8 | PENDING |
+| HumanEval, pass@1 | PENDING |
+
 ---
 
 ## What runs
@@ -173,11 +195,12 @@ despite being the same model on the same cards.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ `ff4750db5d` |
-| Layout | TP=4, PP=1. **Assumes PCIe Gen2 x16 between the cards** — see [Link width](#link-width) |
+| Layout | TP=4, PP=1 by default (`LAYOUT=tp4`, assumes PCIe Gen2 x16 between the cards); PP=4 with `LAYOUT=pp4`, experimental — see [Choosing a layout](#choosing-a-layout) |
 | Attention | Triton sparse-MLA (DSA) on sm_80, with the sm_80 indexer and kpool paths |
 | Context | 262,144 tokens |
-| KV cache | 1,160,192 tokens at `--gpu-memory-utilization 0.95`; 4.43x concurrency at full context; **not quantised** |
+| KV cache | at `--gpu-memory-utilization 0.95`: PENDING for this release's defaults (1,160,192 tokens, 4.43x at full context, on ff4750db5d with 1,152-token chunks); **not quantised** |
 | Prefix caching | on |
+| Prefill chunks | 3,456 tokens under `tp4`, 2,304 under `pp4` (`MAX_BATCHED`) |
 | Speculation | DFlash2 ([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) at k=3; `SPEC_MODE=mtp` or `none` to change |
 | Tools + reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
 | CUDA graphs | captured at the default power-of-two decode batch shapes |
@@ -185,15 +208,45 @@ despite being the same model on the same cards.
 
 ---
 
-## Link width
+## Choosing a layout
 
-This recipe assumes four cards on **PCIe Gen2 x16** links, which is what ours
-run. Tensor parallelism splits every layer across all four cards, so it leans
-on those links hard: about 9.4 MB per layer during prefill and roughly 100
-small collectives per decode step. On stock x4 links — a quarter of the
-bandwidth — TP=4 is bus-bound and will be far slower than the numbers above.
+Both layouts run the same engine, the same weights and the same DFlash2
+speculation at k=3. They split the model across the four cards differently,
+and that decides what each is good at.
 
-For x4 cards, a pipeline-parallel recipe for the same hardware lives at
+| | `LAYOUT=tp4` (default) | `LAYOUT=pp4` (experimental) |
+|---|---|---|
+| Split | every layer across all four cards | a quarter of the layers on each card |
+| Best for | one or two interactive agents: the fastest response per request | many agents in parallel, long prefills, more KV |
+| Links between cards | assumes PCIe Gen2 x16 | needs far less link bandwidth |
+| Decode, 1 user | the tables above | PENDING |
+| Decode, 8 users, aggregate | the tables above | PENDING |
+| Cold prefill | the tables above | PENDING |
+| KV pool at 262,144 context | PENDING | PENDING |
+| Status | validated | PENDING validation |
+
+**Tensor-parallel** splits every layer across all four cards, so each token
+finishes soonest, but it leans on the links hard: about 9.4 MB per layer during
+prefill and roughly 100 small collectives per decode step. On stock x4 links —
+a quarter of the bandwidth — it is bus-bound and far slower than the numbers
+above.
+
+**Pipeline-parallel** puts a quarter of the layers on each card and passes
+only activations from one card to the next, so it needs far less link
+bandwidth and leaves more memory for KV. One request moves through the stages
+in turn, so a single stream is slower; with many requests in flight every
+card stays busy. `serve.sh` sets the pipeline-specific parts for you: the
+layer split, a 4,608-token KV block (so the DFlash2 drafter shares the KV
+layout on the last stage), 2,304-token prefill chunks, and the tensor-parallel
+features off.
+
+```bash
+LAYOUT=pp4 ./start.sh restart
+```
+
+<!-- TODO(1.3.0 release): LAYOUT=pp4 needs the pipeline-parallel engine changes in the pinned commit and its own validation; fill in the pp4 column, then drop "experimental" if it passes. -->
+
+Another pipeline-parallel recipe for these cards is
 [JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
 
 ---
@@ -201,8 +254,8 @@ For x4 cards, a pipeline-parallel recipe for the same hardware lives at
 ## Optional: PCIe peer-to-peer
 
 **The recipe does not need this and does not turn it on.** With the gate at 0 —
-the default — everything runs exactly as the previous release, with no driver
-change of any kind. This section is only for people who already have
+the default — the cards talk through the host-staged all-reduce exactly as in
+the previous release, with no driver change of any kind. This section is only for people who already have
 peer-to-peer working on their cards.
 
 A stock CMP 170HX refuses GPU peer access: `nvidia-smi topo -p2p r` answers
@@ -214,6 +267,8 @@ staging through the host. Measured on four cards, alternating legs:
 |---|---:|---:|---:|---:|
 | Gate 0 — host-staged (**the default**) | 17.03 | 32.26 | 2,222 tok/s | 1,160,192 (4.43x) |
 | Gate 1 — PCIe P2P, `ALGO=2stage` | **15.88** | **28.18** | **2,260 tok/s** | **1,181,696 (4.51x)** |
+
+<!-- PENDING 1.3.0: this table is engine ff4750db5d with 1,152-token chunks; re-measure both gates on the release pin and defaults. -->
 
 About 7% off the step time at one stream and 13% at four, with roughly 21,500
 more KV tokens and cold prefill no worse. At one stream that is 176.9 tok/s, at
@@ -255,10 +310,11 @@ headlines are:
 | Key | Default | |
 |---|---|---|
 | `VLLM_COMMIT` | *(commented out)* | engine pin. Left to `start.sh`'s default so a `git pull` can move it |
-| `PP` / `TP` | `1` / `4` | layout; `PP*TP` must equal your GPU count |
+| `LAYOUT` | `tp4` | `tp4` or `pp4` (experimental); wins over `PP`/`TP` — see [Choosing a layout](#choosing-a-layout) |
+| `PP` / `TP` | `1` / `4` | raw layout, read only when `LAYOUT` is unset; `PP*TP` must equal your GPU count |
 | `MAX_LEN` | `262144` | context ceiling; lowering it raises KV concurrency |
 | `MAX_SEQS` | `8` | concurrent sequences |
-| `MAX_BATCHED` | `2048` | batched tokens per scheduler step |
+| `MAX_BATCHED` | `3460` (`tp4`) / `2312` (`pp4`) | batched tokens per scheduler step; sets the prefill chunk. `2048` restores 1.2.0's 1,152-token chunks |
 | `GPU_UTIL` | `0.95` | memory target. 0.97 was too tight here |
 | `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculator and draft depth; `mtp` or `none` |
 | `PORT` / `SERVED_MODEL_NAME` | `8000` / `glm-5.3-flash` | |
@@ -273,6 +329,14 @@ headlines are:
 −15.3% prefill and +16.5% TTFT@23K here, and as a side effect drops chunks below
 the two prefill gates, silently disabling the overlap and the prefill kernels.
 `FAIR_PREFILL` only bites while requests are actually decoding.
+
+The prefill chunk is `floor((MAX_BATCHED − SPEC_N) / 1152) × 1152`, because the
+KDA state page puts chunk ends on 1,152-token blocks and DFlash2 reserves its
+draft slots out of the budget. `3460` gives 3,456-token chunks: +2.4% to +3.6%
+cold prefill against 2,304-token chunks, for about 35,600 fewer KV tokens (−3%),
+with decode step time unchanged. If you raise `SPEC_N` above 4, raise
+`MAX_BATCHED` to `3456 + SPEC_N` to keep them. An `.env` copied from an earlier
+release pins `MAX_BATCHED=2048`; delete that line to get the new default.
 
 ### Kill switches
 
@@ -290,13 +354,16 @@ rebuild, no revert:
 | `VLLM_GLM5_THIN_GEMM` | sm_80 thin-M BF16 GEMM |
 | `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce for nodes without peer access |
 | `VLLM_GLM5_SHARED_EXPERT_REORDER` | MoE shared experts overlapped with the routed dispatch |
+| `FAIR_PREFILL` | decode-aware prefill chunking |
+
+<!-- TODO(1.3.0 release): once the pin carries them, add the five tp4 decode flags as kill switches here:
+VLLM_GLM5_DECODE_IDX_GLUE, VLLM_GLM5_DECODE_KDA_V2, VLLM_GLM5_DECODE_MOE_ROUTE_V2, VLLM_GLM5_DECODE_MHC_V2, VLLM_GLM5_DRAFTER_ROPE_FIT -->
 
 Two more are available and **off** by default — determinism instruments for
 reproducing exact outputs rather than levers on throughput:
 `VLLM_GLM5_TOPK_CANONICAL` (0/1) and `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN`
 (0/1/2). And one optional gate, also off, in
 [Optional: PCIe peer-to-peer](#optional-pcie-peer-to-peer).
-| `FAIR_PREFILL` | decode-aware prefill chunking |
 
 If output quality is ever in question, turn `VLLM_GLM5_DECODE_KERNELS` off
 first. Exactness moved slightly outside its noise floor when the seven were
@@ -418,11 +485,23 @@ them. Decode retention during someone else's prefill went from 7% to 18% of
 baseline. Unlike upstream's unconditional cap it only applies when something is
 actually decoding.
 
-**Pipeline parallelism enablement.** Deferred mHC post state is materialised at
-stage boundaries and the MTP drafter loads the target embedding under PP, so the
-engine supports a pipeline layout. This recipe does not — it is tuned for TP=4
-throughout. For a pipeline-parallel recipe on these cards, see
-[JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).
+**Pipeline parallelism.** Deferred mHC post state is materialised at stage
+boundaries and the MTP drafter loads the target embedding under PP, so the
+engine supports a pipeline layout. `LAYOUT=pp4` is offered as experimental in
+this release — see [Choosing a layout](#choosing-a-layout).
+
+**Second-generation decode kernels** (PENDING — ship with the next engine pin,
+tensor-parallel only, each off in the code and turned on by `serve.sh`). The
+sparse-attention indexer's decode glue folded into fewer kernels
+(`VLLM_GLM5_DECODE_IDX_GLUE`); KDA decode with its gate projections fused
+(`VLLM_GLM5_DECODE_KDA_V2`); the MoE gate, top-k and block alignment in one
+kernel (`VLLM_GLM5_DECODE_MOE_ROUTE_V2`); a faster mHC decode
+(`VLLM_GLM5_DECODE_MHC_V2`); thin-GEMM rows for 24-row batches; and the DFlash2
+drafter's RoPE cache sized to the context rather than a million positions
+(`VLLM_GLM5_DRAFTER_ROPE_FIT`, output-identical, +12,288 KV tokens). Measured
+together with the peer-to-peer gate on: ms/step 16.26 → 15.05 at one stream,
+29.98 → 27.76 at four, 42.00 → 34.62 at six, 43.92 → 41.55 at eight, cold
+prefill flat. With the gate off, as this recipe ships: PENDING.
 
 All the feature flags together, against the same engine with them off: prefill
 +13.4%, TTFT@23K −14.9%, ms/step at one stream −1.22, decode retention during
@@ -474,6 +553,7 @@ takes one to two hours.
 | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) | ~178 GB, 21 files | target model |
 | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2) | ~2.2 GB, 5 files | DFlash2 drafter |
 
+<!-- TODO(1.3.0 release): replace the sample below with ./start.sh smoke output from the release pin and defaults. -->
 **Smoke test output**, against a running server:
 
 ```
@@ -504,9 +584,9 @@ when peer access is unavailable and pointless when it is not. Where P2P works,
 leave it off. It is also why per-stream decode here does not scale with device
 count the way it would over a fast fabric.
 
-**The prefill chunk observer validated at 1152.** The overlap was measured and
-tuned at a 1152-token chunk; other chunk sizes work but were not characterised,
-and the prefill kernels will not engage below `VLLM_GLM5_PREFILL_MIN_TOKENS`.
+**Prefill chunk sizes.** The overlap was tuned at 1,152-token chunks and
+measured at 2,304 and 3,456; other sizes work but were not characterised, and
+the prefill kernels will not engage below `VLLM_GLM5_PREFILL_MIN_TOKENS`.
 
 **The DFlash2 checkpoint is required for the default mode.** `./serve.sh` with
 no argument wants `./models/GLM-5.3-Flash-DFlash2`. Use `./serve.sh mtp` for the
@@ -514,15 +594,17 @@ MTP head that ships inside the target checkpoint, or `./serve.sh none` for no
 speculation — both are slower.
 
 **Context and KV are a trade.** At `--max-model-len 262144` and
-`--gpu-memory-utilization 0.95` the KV pool is 1,160,192 tokens, which is 4.43x
-concurrency at full context. Raising `MAX_LEN` lowers that multiplier; with
+`--gpu-memory-utilization 0.95` the KV pool was 1,160,192 tokens with 1,152-token
+chunks, which is 4.43x concurrency at full context; 3,456-token chunks cost
+about 35,600 of those (this release's figure: PENDING). Raising `MAX_LEN` lowers that multiplier; with
 `MM_CAP=0` the memory profiler also reserves for a context-filling video, which
 costs roughly 150k KV tokens.
 
-**TP=4 only, and it assumes wide links.** Tensor parallelism moves about
-9.4 MB per layer between cards during prefill and ~100 small collectives per
-decode step, so on x4 links it is bus-bound. This recipe does not support a
-pipeline layout — see [Link width](#link-width).
+**Tensor-parallel assumes wide links; pipeline-parallel is experimental.**
+Tensor parallelism moves about 9.4 MB per layer between cards during prefill
+and ~100 small collectives per decode step, so on x4 links it is bus-bound.
+`LAYOUT=pp4` needs far less link bandwidth but is not yet validated in this
+release — see [Choosing a layout](#choosing-a-layout).
 
 ---
 
