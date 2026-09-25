@@ -26,6 +26,14 @@ path needs a Hopper GPU; the CMP 170HX is Ampere (sm_80). Our
 the Ampere kernels that make the model run at all, then spends the rest of its
 patches on making it fast and making it repeatable.
 
+> **Which setups this release is for.** Release 1.3.0 is optimised for
+> **tensor-parallel 4 on PCIe x16 links** — cards with the x16 capacitor
+> modification. That is where every number on this page was measured. On cards
+> limited to x4 links, tensor-parallel is bus-bound and much slower; a
+> **pipeline-parallel 4 layout optimised for x4 cards is in active development**
+> and will ship in a later release (see [Status and roadmap](#status-and-roadmap)).
+> `./start.sh` checks your link width and warns if a card is narrower than x16.
+
 One command sets it up and starts it:
 
 ```bash
