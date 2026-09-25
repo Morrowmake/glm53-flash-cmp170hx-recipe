@@ -15,3 +15,7 @@ logs/*
 __pycache__/
 *.pyc
 .DS_Store
+
+# Container: image build output (docker/build.sh) and compile caches
+docker/out/
+cache/

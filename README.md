@@ -7,7 +7,7 @@
   &nbsp;
   <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/0ed7d3e7f3f855646a139701598a9b40d5745688"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%200ed7d3e7f3-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.3.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.3.1-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -531,6 +531,19 @@ prefill and roughly 100 small collectives per decode step. It assumes PCIe Gen2
 x16 links; on x4 links it is bus-bound and far slower than the numbers above.
 `./start.sh` prints each card's link width in its preflight and warns if any is
 narrower than x16. For narrower links, see the [roadmap](#status-and-roadmap).
+
+### Run in a container
+
+The same engine is also packaged as a container image,
+`ghcr.io/morrowmake/vllm-cmp170hx:1.3.0-0ed7d3e7f3`: the fork at the 1.3.0 pin
+on a CUDA 13.3.1 base, no weights. You mount the two checkpoints and run it
+with Docker and the NVIDIA Container Toolkit on driver 580 or newer, with the
+same defaults as `serve.sh` and peer-to-peer off. The Dockerfile, the build
+script and the run command are in [`docker/`](docker/README.md).
+
+The native install above remains the primary path: every number on this page
+was measured on it, and it has the preflight, the smoke test and
+`./start.sh update`.
 
 ---
 

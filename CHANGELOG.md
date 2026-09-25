@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.3.1 — 2026-09-26
+
+**Documentation only. No engine change:** the pin stays at `0ed7d3e7f3`, and
+`install.sh`, `serve.sh` and every default are unchanged, so `./start.sh update`
+from 1.3.0 reinstalls nothing and the 1.3.0 results stand.
+
+**Container image.** New [`docker/`](docker/README.md) folder: the Dockerfile
+and the build script for `ghcr.io/morrowmake/vllm-cmp170hx:1.3.0-0ed7d3e7f3`
+(the fork at the 1.3.0 pin on `nvidia/cuda:13.3.1-devel-ubuntu24.04`, no
+weights), `container.env` with `serve.sh`'s defaults written out (peer-to-peer
+off), and the `docker run` command with the two checkpoints and the compile
+cache mounted. Needs the NVIDIA Container Toolkit and driver 580 or newer. The
+README links it under *Run in a container*; the native install remains the
+primary path.
+
 ## 1.3.0 — 2026-09-25
 
 **Install:** `./start.sh` (see the README). Later releases update with
