@@ -56,9 +56,8 @@ and the optional [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path.
 | KV pool at 262,144 context | 1,174,567 tokens (4.48 full-length requests) | 1,187,776 tokens (4.53) |
 
 All at 180 W per card, one server start per column. Decode tok/s is the
-per-request streaming rate on
-[MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)
-prompts (400 tokens, temperature 0, median of 5); prose is slower because the
+per-request streaming rate on three fixed prompt types — structured,
+code and prose (400 tokens, temperature 0, median of 5); prose is slower because the
 drafter's guesses are accepted less often. Cold prefill is the median over
 real-text prompts of 23.9K to 37.9K tokens.
 
@@ -100,58 +99,47 @@ release table above; each line says what it was measured against.
   from 8K to 262K tokens, a verbatim copy of a passage at 262,000 tokens
   returned byte-exact, and nothing leaked between concurrent requests.
 
-### Against 2× DGX Spark (release 1.0.0)
+### Decode and prefill in detail
 
-![GLM-5.3-Flash on 4x CMP 170HX versus 2x DGX Spark](assets/glm53-cmp170hx-vs-dgx-spark-full-2026-09-18.jpg)
-
-The graphic is from release 1.0.0 (2026-09-18). The tables below are the same
-protocol re-run on release 1.3.0 with the defaults (peer-to-peer off). Against
-1.0.0, one user now decodes at 264.6 tok/s instead of 238.7 on structured text,
-260.4 instead of 232.4 on code and 188.4 instead of 165.1 on prose, and cold
-prefill at ~128k tokens runs at 2,425 tok/s instead of 2,149.
-
-The DGX Spark figures and the benchmark prompts are
-[MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks),
-quoted from their README — thank you for publishing both.
-
-- **Theirs:** 2× DGX Spark, EXL3 quant, DFlash2 k=7, 850K–1M declared context, as published.
-- **Ours:** 4× CMP 170HX, vLLM W4A16, DFlash2 k=3, 262,144 context, release 1.3.0 defaults, temperature 0, median of 5. The requests set `enable_thinking: false` as their protocol does; on this model the reasoning is still generated and counted.
+Release 1.3.0 with the defaults (peer-to-peer off), temperature 0, median of 5.
+Against release 1.0.0, one user now decodes at 264.6 tok/s instead of 238.7 on
+structured text, 260.4 instead of 232.4 on code and 188.4 instead of 165.1 on
+prose, and cold prefill at ~128k tokens runs at 2,425 tok/s instead of 2,149.
 
 **Decode**, 400 max tokens. `Stream` is per request,
 `(completion_tokens − 1) / (end − first token)`; `Agg` is
-`sum(completion_tokens) / wall` across all streams. Our runs prepend a unique
-nonce so nothing hits the prefix cache.
+`sum(completion_tokens) / wall` across all streams. Each request carries a
+unique nonce so nothing hits the prefix cache.
 
-| Prompt type | Users | Theirs stream | Ours stream | Theirs agg | Ours agg | Theirs TTFT | Ours TTFT (cold) |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | 62.9 | **264.6** | 62.9 | **264.6** | 719 ms | 66 ms |
-|  | ×2 | 51.7 | **206.2** | 103.3 | **386.0** | 6620 ms | 113 ms |
-|  | ×4 | 37.1 | **146.7** | 146.5 | **531.3** | 6300 ms | 262 ms |
-|  | ×8 | not published | **104.5** | not published | **745.4** | not published | 343 ms |
-| Code (clamp_00…clamp_49) | ×1 | 62.9 | **260.4** | 62.9 | **260.4** | 719 ms | 168 ms |
-|  | ×2 | 51.7 | **177.4** | 103.3 | **308.5** | 6620 ms | 264 ms |
-|  | ×4 | 37.1 | **137.6** | 146.5 | **470.3** | 6300 ms | 403 ms |
-|  | ×8 | not published | **97.3** | not published | **664.5** | not published | 635 ms |
-| Prose (hash map) | ×1 | 36.1 | **188.4** | 37.1 | **188.4** | 333 ms | 69 ms |
-|  | ×2 | 25.0 | **140.0** | 51.1 | **261.7** | 365 ms | 165 ms |
-|  | ×4 | 19.4 | **104.4** | 75.3 | **384.3** | 401 ms | 265 ms |
-|  | ×8 | not published | **71.5** | not published | **519.8** | not published | 344 ms |
+| Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
+|---|---:|---:|---:|---:|
+| Structured (count 1→200) | ×1 | **264.6** | **264.6** | 66 ms |
+|  | ×2 | **206.2** | **386.0** | 113 ms |
+|  | ×4 | **146.7** | **531.3** | 262 ms |
+|  | ×8 | **104.5** | **745.4** | 343 ms |
+| Code (clamp_00…clamp_49) | ×1 | **260.4** | **260.4** | 168 ms |
+|  | ×2 | **177.4** | **308.5** | 264 ms |
+|  | ×4 | **137.6** | **470.3** | 403 ms |
+|  | ×8 | **97.3** | **664.5** | 635 ms |
+| Prose (hash map) | ×1 | **188.4** | **188.4** | 69 ms |
+|  | ×2 | **140.0** | **261.7** | 165 ms |
+|  | ×4 | **104.4** | **384.3** | 265 ms |
+|  | ×8 | **71.5** | **519.8** | 344 ms |
+
+Prose decodes slower than structured or code text because the drafter's guesses
+are accepted less often (0.58–0.60 against 0.84–0.98).
 
 **Cold prefill**, unique uncached text, `max_tokens=1`, median of 2,
 `prompt tokens / TTFT` measured client side.
 
-| Rung | Theirs prompt | Theirs TTFT | Theirs tok/s | Ours prompt | Ours TTFT | Ours tok/s |
-|---|---:|---:|---:|---:|---:|---:|
-| ~8k | 8,221 | 5.51 s | 1492.1 | 7,978 | 3.27 s | **2442.8** |
-| ~32k | 32,797 | 22.96 s | 1428.2 | 31,931 | 12.78 s | **2497.9** |
-| ~128k | 131,101 | 83.95 s | 1561.7 | 127,586 | 52.62 s | **2424.7** |
-| ~250k | 262,173 | 172.84 s | 1516.8 | 250,280 | 107.61 s | **2325.7** |
-
-Their top rung is 262,173 tokens, which does not fit under our 262,144 ceiling,
-so our top rung is ~250k. Our two intermediate rungs, which they did not
-publish: 2,502.2 tok/s at ~16k and 2,478.6 at ~64k. Prose decodes slower than
-structured or code text on the same model because the drafter's guesses are
-accepted less often (0.58–0.60 against 0.84–0.98).
+| Prompt | TTFT | tok/s |
+|---:|---:|---:|
+| 7,978 | 3.27 s | **2,442.8** |
+| 15,974 | 6.38 s | **2,502.2** |
+| 31,931 | 12.78 s | **2,497.9** |
+| 64,057 | 25.84 s | **2,478.6** |
+| 127,586 | 52.62 s | **2,424.7** |
+| 250,280 | 107.61 s | **2,325.7** |
 
 ---
 
@@ -542,15 +530,13 @@ derivatives. It is the default speculator here, so read that before you deploy
 this anywhere commercial. `SPEC_MODE=mtp` serves the MTP head inside the MIT
 model checkpoint instead and does not use it at all.
 
-**The benchmark prompts and the published DGX Spark figures** are quoted from
-MiaAI-Lab's repository (AGPL-3.0) and their sparkDash prompt constants (MIT),
-used as data with attribution. No code from their repositories is included here.
+**The benchmark prompts** come from MiaAI-Lab's repository (AGPL-3.0) and
+their sparkDash prompt constants (MIT), used as data with attribution. No code from their repositories is included here.
 
 ## Credits
 
 - **[MiaAI-Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)**
-  for publishing their 2× DGX Spark figures and their benchmark prompts, which
-  are the entire comparison column above.
+  for publishing the benchmark prompts used in the decode tables.
 - **[incoai](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)** for the
   DFlash2 drafter checkpoint.
 - **[canada-quant](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)**

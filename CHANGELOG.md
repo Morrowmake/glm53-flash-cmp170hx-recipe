@@ -33,7 +33,7 @@ Quality, peer-to-peer off: perplexity 3.2858 on the fixed 60-document set
 truncated; HumanEval pass@1 0.9573 (157/164) at 4,096 tokens per reply, scoring
 the last complete code block of the reply (the first block gives 0.8537).
 
-Against 1.0.0 on MiaAI-Lab's protocol, one user: 238.7 → 264.6 tok/s
+Against 1.0.0, one user: 238.7 → 264.6 tok/s
 structured, 232.4 → 260.4 code, 165.1 → 188.4 prose. Cold-prefill ladder from
 ~8k to ~250k tokens: 2,443 / 2,502 / 2,498 / 2,479 / 2,425 / 2,326 tok/s.
 
