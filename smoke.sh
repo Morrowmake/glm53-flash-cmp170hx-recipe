@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # One-shot sanity check against a running server.
 #
-# Waits for /health, sends one chat request and one tool-call request, prints
-# the decode rate computed from the usage block of each, and echoes the KV
-# cache line from the server log if it can find one.
+# Waits for /health, sends one chat request (reasoning_effort "low", so the
+# answer comes back promptly in .content) and one tool-call request with the
+# model's default reasoning, prints the decode rate computed from the usage
+# block of each, and echoes the KV cache line from the server log if it can
+# find one. Exits 1 if the chat request returns nothing or the tool call is not
+# parsed.
 #
 # Usage:  ./smoke.sh
 #
@@ -43,12 +46,14 @@ req_chat=$(jq -n --arg m "$MODEL_ID" '{
   messages: [{role:"user", content:"In three sentences, explain why PCIe peer-to-peer matters for tensor parallelism."}],
   max_tokens: 200,
   temperature: 0,
-  chat_template_kwargs: {enable_thinking: false}
+  reasoning_effort: "low"
 }')
 t0=$(date +%s.%N)
 resp_chat=$(curl -s "$BASE/v1/chat/completions" -H 'Content-Type: application/json' -d "$req_chat")
 t1=$(date +%s.%N)
-echo "$resp_chat" | jq -e '.choices[0].message.content' >/dev/null || { echo "$resp_chat" >&2; exit 1; }
+# Any reasoning comes back in .reasoning and the answer in .content.
+echo "$resp_chat" | jq -e '(.choices[0].message.content // "") | length > 0' >/dev/null \
+  || { echo "smoke.sh: no answer in the chat reply:" >&2; echo "$resp_chat" >&2; exit 1; }
 echo "$resp_chat" | jq -r '"    reply: " + (.choices[0].message.content | .[0:160] | gsub("\n";" ")) + " ..."'
 echo "$resp_chat" | jq -r --arg w "$(echo "$t1 - $t0" | bc)" '
   .usage as $u | "    usage: prompt=\($u.prompt_tokens) completion=\($u.completion_tokens) wall=\($w|tonumber|.*100|round/100)s  ->  \(($u.completion_tokens / ($w|tonumber) * 10 | round) / 10) tok/s"'
@@ -75,18 +80,18 @@ req_tool=$(jq -n --arg m "$MODEL_ID" '{
     }
   }],
   tool_choice: "auto",
-  max_tokens: 200,
-  temperature: 0,
-  chat_template_kwargs: {enable_thinking: false}
+  max_tokens: 400,
+  temperature: 0
 }')
 t0=$(date +%s.%N)
 resp_tool=$(curl -s "$BASE/v1/chat/completions" -H 'Content-Type: application/json' -d "$req_tool")
 t1=$(date +%s.%N)
-if [ "$(echo "$resp_tool" | jq -r '.choices[0].message.tool_calls // empty | length // 0')" -gt 0 ]; then
+if [ "$(echo "$resp_tool" | jq -r '(.choices[0].message.tool_calls // []) | length')" -gt 0 ]; then
   echo "$resp_tool" | jq -r '.choices[0].message.tool_calls[0] | "    tool_call: \(.function.name)(\(.function.arguments))"'
 else
-  echo "    NO tool_call parsed -- check --enable-auto-tool-choice / --tool-call-parser"
-  echo "$resp_tool" | jq -r '"    content: " + ((.choices[0].message.content // "") | .[0:200])'
+  echo "    NO tool_call parsed -- check --enable-auto-tool-choice / --tool-call-parser" >&2
+  echo "$resp_tool" | jq -r '"    content: " + ((.choices[0].message.content // "") | .[0:200])' >&2
+  exit 1
 fi
 echo "$resp_tool" | jq -r --arg w "$(echo "$t1 - $t0" | bc)" '
   .usage as $u | "    usage: prompt=\($u.prompt_tokens) completion=\($u.completion_tokens) wall=\($w|tonumber|.*100|round/100)s  ->  \(($u.completion_tokens / ($w|tonumber) * 10 | round) / 10) tok/s"'

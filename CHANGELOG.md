@@ -1,62 +1,96 @@
 # Changelog
 
-## 1.3.0 — PENDING (draft)
+## 1.3.0 — 2026-09-25
 
-<!-- TODO(1.3.0 release): date; pin; installed version string from a clean install of the pin. -->
+**Upgrade:** `./start.sh update`. It pulls this release, sees that the engine
+pin moved, reinstalls the engine (a few minutes; the checkpoints are kept) and
+restarts the server. Before you run it, check your `.env` for the two lines
+below.
+
+**Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
+Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the
+fork adds no C++ or CUDA source, so the install uses upstream's precompiled
+extensions for that base.
 
 **Tensor-parallel only.** 1.3.0 supports one layout, tensor-parallel 4
 (`PP=1`, `TP=4`), as 1.2.0 did. Pipeline-parallel 4 is planned (below).
 
-**Engine pin moves to `ff4750db5d`** (54 commits on upstream `496c6472cb`).
-Installed version `0.29.1rc1.dev573+gff4750db5.precompiled`.
-PENDING: the pin moves again to the merged, validated commit carrying the
-second-generation decode kernels, the determinism fixes, the KV-pool fix and
-the KV headroom changes below.
+### Measured with this release's defaults
+
+180 W per card, one server start per column.
+
+| | Peer-to-peer off (default) | Peer-to-peer on (optional) |
+|---|---:|---:|
+| ms/step at 1 / 4 / 6 / 8 streams | 15.841 / 30.092 / 38.778 / 44.705 | 15.250 / 28.015 / 35.549 / 41.921 |
+| Decode, 1 user, structured / code / prose | 264.6 / 260.4 / 188.4 tok/s | 274.8 / 273.0 / 197.9 tok/s |
+| Decode, 8 users, aggregate | 745.4 / 664.5 / 519.8 tok/s | 808.1 / 720.5 / 556.3 tok/s |
+| Cold prefill | 2,484 tok/s | 2,490 tok/s |
+| TTFT, 6,217 / 23,255 tokens | 2.50 / 8.97 s | 2.49 / 8.94 s |
+| KV pool at 262,144 | 1,174,567 tokens, 4.48x | 1,187,776 tokens, 4.53x |
+
+Quality, peer-to-peer off: perplexity 3.2858 on the fixed 60-document set
+(bit-identical with peer-to-peer on); GSM8K 0.975 on all 1,319 problems, none
+truncated; HumanEval pass@1 0.9573 (157/164) at 4,096 tokens per reply, scoring
+the last complete code block of the reply (the first block gives 0.8537).
+
+Against 1.0.0 on MiaAI-Lab's protocol, one user: 238.7 → 264.6 tok/s
+structured, 232.4 → 260.4 code, 165.1 → 188.4 prose. Cold-prefill ladder from
+~8k to ~250k tokens: 2,443 / 2,502 / 2,498 / 2,479 / 2,425 / 2,326 tok/s.
+
+### What changed
+
+**Same request, same output.** A request sent on its own now returns the same
+tokens and log-probabilities on every repeat and across restarts. Four sources
+of run-to-run variation are fixed: MoE block alignment in a fixed order,
+CUDA-graph padding rows kept out of the MoE, and the sparse-attention indexer's
+top-k made consistent on ties and returned in a fixed order. New switches, all
+on by default, each a kill switch at 0: `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN`,
+`VLLM_GLM5_MOE_MASK_PADDING`, `VLLM_GLM5_TOPK_TIEFIX`, `VLLM_GLM5_TOPK_SORTED`,
+`VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS` (8). Measured on against off: step time
+within restart noise, prefill −0.3%. `serve.sh` refuses
+`VLLM_MOE_SKIP_PADDING=0` together with `VLLM_GLM5_MOE_MASK_PADDING=1`.
+
+**Second-generation decode kernels**, on by default under TP, each a kill
+switch at 0: `VLLM_GLM5_DECODE_IDX_GLUE`, `VLLM_GLM5_DECODE_KDA_V2`,
+`VLLM_GLM5_DECODE_MOE_ROUTE_V2`, `VLLM_GLM5_DECODE_MHC_V2`,
+`VLLM_GLM5_DRAFTER_ROPE_FIT`, plus thin-GEMM rows for 24-row batches. Measured
+together with the peer-to-peer gate on: ms/step 16.26 → 15.05 at one stream,
+29.98 → 27.76 at four, 42.00 → 34.62 at six, 43.92 → 41.55 at eight; cold
+prefill flat.
+
+**KV headroom**, on by default under TP: `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=128`
+(512, upstream's value, switches it off), `VLLM_GLM5_DRAFTER_SELECTOR_SHARD=1`,
+`VLLM_GLM5_INDEXER_DECODE_ROWS=1`; the engine's own
+`VLLM_GLM5_INDEXER_GATHER_CLAMP` (on) is documented as a kill switch. Together
++39,626 KV tokens, outputs bit-identical, no step-time cost.
+
+**Accuracy.** Every custom kernel on the default path is now checked on real
+inputs against a 64-bit reference, side by side with the code it replaces. The
+mHC pre-norm projection in the prefill kernels (`VLLM_GLM5_PREFILL_KERNELS`,
+shipped since 1.0.0) lost precision in its tensor-core accumulation: its mean
+error was 22.8× upstream's and is now 0.93×, for about +0.9 ms per 3,456-token
+chunk. The new mHC decode and indexer-glue kernels had the same defect and were
+fixed before release.
+
+**KV-pool fix.** With speculative decoding, a rejected draft could overwrite
+the per-request tail of the sparse-attention key pool, leaving a wrong pool key
+in the indexer cache past 2,048 tokens of context. The tail ring is now sized
+for the draft depth, at no KV cost.
 
 **3,456-token prefill chunks.** The default `MAX_BATCHED` goes from 2048
 (1,152-token chunks) to 3460 (3,456-token chunks). 2,304-token chunks measured
 +8.0% cold prefill against 1,152; 3,456 adds +2.4% to +3.6% on top, for about
 35,600 fewer KV tokens (−3%), with decode step time unchanged.
-`MAX_BATCHED=2048` restores the previous chunking. **An `.env` copied from an
-earlier release pins `MAX_BATCHED=2048`**: delete that line to get the new
-default.
-
-**Second-generation decode kernels** (PENDING — not in the current pin, and
-off in `serve.sh` until it is). Each off in the engine and turned on by
-`serve.sh`, each a kill switch: `VLLM_GLM5_DECODE_IDX_GLUE`,
-`VLLM_GLM5_DECODE_KDA_V2`, `VLLM_GLM5_DECODE_MOE_ROUTE_V2`,
-`VLLM_GLM5_DECODE_MHC_V2`, `VLLM_GLM5_DRAFTER_ROPE_FIT`, plus thin-GEMM rows for
-24-row batches. Measured together during development, with the peer-to-peer
-gate on: ms/step 16.26 → 15.05 at one stream, 29.98 → 27.76 at four,
-42.00 → 34.62 at six, 43.92 → 41.55 at eight; cold prefill flat. With the gate
-off, as the recipe ships: PENDING.
-
-**Repeatable output for a request on its own** (PENDING the pin). Four sources
-of run-to-run variation in prefill are fixed: MoE block alignment in a fixed
-order, CUDA-graph padding rows kept out of the MoE, and the sparse-attention
-indexer's top-k made consistent on ties and emitted in a fixed order. With them
-on, the same request sent alone returns the same tokens and log-probabilities
-every time; measured during development at under 1% of step time. Flags and
-defaults: PENDING the `serve.sh` port.
-
-**KV-pool fix** (PENDING the pin). With speculative decoding, a rejected draft
-could overwrite the per-request tail of the sparse-attention key pool, leaving
-a wrong pool key in the indexer cache past 2,048 tokens of context. The tail
-ring is now sized for the draft depth, at no KV cost.
-
-**KV headroom** (PENDING the pin). Smaller indexer workspaces and a
-vocabulary-sharded drafter selector free memory for the KV pool: +39,626 tokens
-(+3.45%) measured during development, outputs bit-identical, no step-time cost.
+`MAX_BATCHED=2048` restores the previous chunking.
 
 **Optional PCIe peer-to-peer.** Where the driver advertises peer access, the TP
 all-reduce can run in device memory rather than staging through the host:
-`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE`, with `VLLM_CUSTOM_ALLREDUCE_ALGO` and
-the caching-allocator choice tied to the same variable. Measured during
-development on an earlier engine: −5.8% ms/step at one stream and −10.8% at
-four, cold prefill unchanged. On this release: PENDING. **It ships at 0 here**,
-because it needs peer-to-peer enabled at the driver level; at 0 the recipe
-behaves as 1.2.0 with no driver change. See "PCIe peer-to-peer (optional)" in
-the README.
+`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1`, with `VLLM_CUSTOM_ALLREDUCE_ALGO` and
+the caching-allocator choice tied to the same variable. On this release: step
+time −3.7% / −6.9% / −8.3% / −6.2% at 1 / 4 / 6 / 8 streams, cold prefill
+unchanged, +13,209 KV tokens. **It ships at 0**, because it needs peer-to-peer
+enabled at the driver level; at 0 the recipe needs no driver change. See
+"PCIe peer-to-peer (optional)" in the README.
 
 **Prefill overlap beside a live CustomAllreduce.** The overlap no longer stands
 down when a CustomAllreduce is present; its split collectives ride NCCL
@@ -66,19 +100,34 @@ removes the prefill cost the peer-to-peer path used to carry.
 The seven launcher variables are now declared in the engine, so starting the
 server no longer prints unknown-variable warnings.
 
-**README rewritten**: results first, what makes it fast, a step-by-step guide
-including the peer-to-peer on/off choice, and the roadmap.
+**Scripts.** `DRY=1 ./start.sh` (and `DRY=1 ./serve.sh`) now print the
+environment the server would get as well as the command. `smoke.sh` no longer
+sends `enable_thinking: false`: the chat request uses `reasoning_effort: "low"`
+and the tool call uses the model's default reasoning, and the smoke test now
+fails if no tool call is parsed.
 
-Measured with this release's defaults: PENDING (ms/step at 1/4/6/8 streams,
-cold prefill, TTFT, KV pool; peer-to-peer off and on).
+**README rewritten**: results first, what makes it fast and correct, a
+step-by-step guide including the peer-to-peer on/off choice, and the roadmap.
 
-Quality: PENDING (perplexity, full GSM8K, HumanEval).
+### `.env` defaults that changed
+
+| Key | 1.2.0 | 1.3.0 | What to do in an existing `.env` |
+|---|---|---|---|
+| `MAX_BATCHED` | `2048` (uncommented) | `3460` from `serve.sh` (commented) | **Delete the `MAX_BATCHED=2048` line**, or keep it to stay on 1,152-token chunks |
+| `VLLM_COMMIT` | `434dea1a1b` (commented) | `3bbb99a534` (commented) | Nothing if it is still commented. If you uncommented it, **delete the line** (or set `3bbb99a534`), or `update` keeps the old engine |
+| `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | not in `.env`; 0 | `0` | Nothing; set `1` only if peer-to-peer works on your cards |
+| `VLLM_CUSTOM_ALLREDUCE_ALGO` | not in `.env` | `2stage` | Nothing; read only while peer-to-peer is on |
+| the five decode, five determinism and four KV-headroom switches above | not present | on from `serve.sh` (listed commented) | Nothing; an old `.env` picks them up from `serve.sh` |
+
+Every other key keeps its 1.2.0 default. To go back to the previous engine for
+one run: `VLLM_COMMIT=434dea1a1b ./start.sh update`.
 
 ### Planned
 
-**Pipeline-parallel 4** (`PP=4`), for systems whose cards run on narrower PCIe
-links, and for many parallel agents and long prompts. It is in active
-development and comes in a later release with its own validation and numbers.
+**Pipeline-parallel 4** (`PP=4`), for systems without the x16 capacitor
+modification, whose cards run on narrower PCIe links, and for many parallel
+agents and long prompts. It is in active development and comes in a later
+release with its own validation and numbers.
 
 
 ## 1.2.0 — 2026-09-22

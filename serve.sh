@@ -8,7 +8,8 @@
 #   none           no speculative decoding.
 # A --speculative-config inside EXTRA_ARGS wins over all of the above and no
 # second one is added, so callers can pass their own JSON.
-# Set DRY=1 to print the command that would run instead of running it.
+# Set DRY=1 to print the environment and the command that would run instead
+# of running them.
 #
 # Paths (all relative to this repo unless overridden):
 #   VENV            venv from install.sh            (default ./venv)
@@ -26,8 +27,8 @@
 #   pipeline-parallel layout for narrower links is planned for a later release.
 #
 # ===== sm_80 feature flags ==================================================
-# Eight features plus an optional PCIe peer-to-peer gate, validated
-# individually and then together.
+# The performance features, the determinism fixes and the KV levers, plus an
+# optional PCIe peer-to-peer gate, validated individually and then together.
 # All are OFF by default IN THE CODE; the block below is the only thing that
 # turns them on, so each one is a one-variable kill switch -- set it to 0 in
 # the environment and restart, no rebuild and no revert:
@@ -41,12 +42,22 @@
 #   FAIR_PREFILL=0                decode-aware prefill chunking    [fair-prefill]
 #   VLLM_GLM5_HOST_ALLREDUCE=0    host-staged no-P2P all-reduce    [pcie-allreduce]
 #   VLLM_GLM5_SHARED_EXPERT_REORDER=0  MoE shared experts after routed dispatch  [shared-expert-stream]
+#   VLLM_GLM5_DECODE_IDX_GLUE=0 / VLLM_GLM5_DECODE_KDA_V2=0 /
+#   VLLM_GLM5_DECODE_MOE_ROUTE_V2=0 / VLLM_GLM5_DECODE_MHC_V2=0 /
+#   VLLM_GLM5_DRAFTER_ROPE_FIT=0  second-generation decode, TP only  [tp4-decode-v2]
+#   VLLM_GLM5_DETERMINISTIC_MOE_ALIGN=0 / VLLM_GLM5_MOE_MASK_PADDING=0 /
+#   VLLM_GLM5_TOPK_TIEFIX=0 / VLLM_GLM5_TOPK_SORTED=0 /
+#   VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS=0  repeatable output          [determinism]
+#   VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=512 / VLLM_GLM5_DRAFTER_SELECTOR_SHARD=0 /
+#   VLLM_GLM5_INDEXER_DECODE_ROWS=0 / VLLM_GLM5_INDEXER_GATHER_CLAMP=0
+#                                 KV headroom, TP only          [kv-levers]
 #   VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1  device-memory custom all-reduce over
 #                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
 #                                 needs peer-to-peer enabled at the driver level
 #                                 -- see the optional section in the README.
-#                                 Worth -5.8% ms/step at c1 and -10.8% at c4,
-#                                 cold prefill unchanged, KV +21.5k tokens.
+#                                 On this release: ms/step -3.7% at c1, -6.9%
+#                                 at c4, -8.3% at c6, -6.2% at c8, cold prefill
+#                                 unchanged, KV +13,209 tokens.
 #                                 0 keeps the host-staged path.  [pcie-p2p-gate]
 #   VLLM_CUSTOM_ALLREDUCE_ALGO=   which CustomAllreduce kernel; 2stage here
 #                                 because the built-in crossover is NVLink-tuned
@@ -76,7 +87,7 @@
 set -euo pipefail
 MODE=${1:-dflash}
 case "$MODE" in
-  -h|--help) sed -n '2,27p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
@@ -169,9 +180,12 @@ fi
 #   1                -- CustomAllreduce owns the TP all-reduce over PCIe P2P.
 #                       Only set this if peer-to-peer is actually available:
 #                       `nvidia-smi topo -p2p r` must report OK, not GNS.
-# Measured on four cards with peer-to-peer available, alternating legs:
-#   gate 0: ms/step c1 17.03, c4 32.26, cold prefill 2222 tok/s, KV 1,160,192
-#   gate 1 with ALGO=2stage: c1 15.88, c4 28.18, prefill 2260, KV 1,181,696
+# Measured on this release, four cards with peer-to-peer available, one boot
+# each, release defaults otherwise:
+#   gate 0: ms/step c1 15.841, c4 30.092, c6 38.778, c8 44.705,
+#           cold prefill 2,484 tok/s, KV 1,174,567
+#   gate 1: ms/step c1 15.250, c4 28.015, c6 35.549, c8 41.921,
+#           cold prefill 2,490 tok/s, KV 1,187,776
 # The gate ties both decisions together, so 0 is a complete fallback rather
 # than a drop to NCCL: VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
 export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
@@ -210,13 +224,8 @@ fi
 # Kill switch: set it to 0 and restart, no rebuild.
 export VLLM_GLM5_SHARED_EXPERT_REORDER=${VLLM_GLM5_SHARED_EXPERT_REORDER:-1}
 
-# ===========================================================================
-# TODO(1.3.0 release): [tp4-decode-v2] five decode changes, each OFF in the
-# engine code and meant to be turned on here under TP only. They are NOT in
-# the pinned engine commit yet, so they stay OFF in this draft: TP4V2_DEFAULT
-# is 0 and nothing is exported unless you set a variable yourself. At release:
-# move the pin to the merged, validated commit, set TP4V2_DEFAULT=1, fill in
-# the measured numbers below, and delete this TODO.
+# [tp4-decode-v2] five decode changes, each OFF in the engine code and turned
+# on here under TP only. Kill switch for any of them: set it to 0 and restart.
 #   VLLM_GLM5_DECODE_IDX_GLUE      sparse-attention indexer decode glue folded
 #                                  into fewer kernels, plus the MoE shared add
 #   VLLM_GLM5_DECODE_KDA_V2        KDA decode with its gate projections fused
@@ -228,23 +237,64 @@ export VLLM_GLM5_SHARED_EXPERT_REORDER=${VLLM_GLM5_SHARED_EXPERT_REORDER:-1}
 #                                  identical, more KV
 # The v2 decode kernels need VLLM_GLM5_DECODE_KERNELS=1 (set above). New
 # thin-GEMM rows for 24-row batches ride VLLM_GLM5_THIN_GEMM and need no switch.
-# Under PP (unsupported here) they stay unset unless set explicitly.
+# Under PP (unsupported here) they default to 0.
 # Measured together, TP=4, PCIe P2P gate on, ms/step before -> after:
 #   c1 16.26 -> 15.05, c4 29.98 -> 27.76, c6 42.00 -> 34.62, c8 43.92 -> 41.55;
 #   cold prefill flat; KV +2,048 tokens (RoPE fit +12,288, kernels -10,240).
-#   With the gate at 0 (this recipe's default): PENDING.
-# Also to settle at release (PENDING the engine merge): which prefill
-# determinism settings ship, and whether the NCCL peer-to-peer level becomes
-# part of the optional PCIe P2P setup. Neither is set here.
-# ===========================================================================
-TP4V2_DEFAULT=0   # TODO(1.3.0 release): 1 once the pin carries the merged, validated commit
+if [ "$TP" -gt 1 ]; then TP4V2_DEFAULT=1; else TP4V2_DEFAULT=0; fi
 for _v in VLLM_GLM5_DECODE_IDX_GLUE VLLM_GLM5_DECODE_KDA_V2 VLLM_GLM5_DECODE_MOE_ROUTE_V2 VLLM_GLM5_DECODE_MHC_V2 VLLM_GLM5_DRAFTER_ROPE_FIT; do
-  if [ -n "${!_v:-}" ]; then
-    export "$_v"                           # set by the caller: pass it through
-  elif [ "$TP" -gt 1 ] && [ "$TP4V2_DEFAULT" = "1" ]; then
-    export "$_v=1"
-  fi                                       # otherwise unset = off in the engine
+  export "$_v=${!_v:-$TP4V2_DEFAULT}"
 done
+echo "serve.sh: [tp4-decode-v2] IDX_GLUE=$VLLM_GLM5_DECODE_IDX_GLUE KDA_V2=$VLLM_GLM5_DECODE_KDA_V2 MOE_ROUTE_V2=$VLLM_GLM5_DECODE_MOE_ROUTE_V2 MHC_V2=$VLLM_GLM5_DECODE_MHC_V2 DRAFTER_ROPE_FIT=$VLLM_GLM5_DRAFTER_ROPE_FIT"
+
+# [determinism] a request on its own returns the same output every time: the
+# same tokens and the same log-probabilities on every repeat and across
+# restarts. Each fix is OFF in the engine code and turned on here, in every
+# layout. Kill switch for any of them: set it to 0 and restart.
+#   VLLM_GLM5_DETERMINISTIC_MOE_ALIGN  MoE block alignment by counting sort, in
+#                                      a fixed order (no atomics)
+#   VLLM_GLM5_MOE_MASK_PADDING         CUDA-graph padding rows routed to no
+#                                      expert (inside the fused router when it
+#                                      is on)
+#   VLLM_GLM5_TOPK_TIEFIX              sparse-attention indexer top-k keeps the
+#                                      lowest index among exact ties
+#   VLLM_GLM5_TOPK_SORTED              indexer top-k rows in ascending order
+#   VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS   batches of up to this many rows run the
+#                                      tie fix + sort split across more
+#                                      programs (8; 0 = one program per row)
+# Measured on vs off, four alternating boots: ms/step c1 +0.59%, c4 -1.75%,
+# c8 -3.74% (inside restart noise), prefill -0.32%.
+# Never set VLLM_MOE_SKIP_PADDING=0 while VLLM_GLM5_MOE_MASK_PADDING=1: the
+# padding mask relies on the buffer that SKIP_PADDING=1 (the engine default)
+# fills, so serve.sh refuses that combination.
+export VLLM_GLM5_DETERMINISTIC_MOE_ALIGN=${VLLM_GLM5_DETERMINISTIC_MOE_ALIGN:-1}
+export VLLM_GLM5_MOE_MASK_PADDING=${VLLM_GLM5_MOE_MASK_PADDING:-1}
+export VLLM_GLM5_TOPK_TIEFIX=${VLLM_GLM5_TOPK_TIEFIX:-1}
+export VLLM_GLM5_TOPK_SORTED=${VLLM_GLM5_TOPK_SORTED:-1}
+export VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS=${VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS:-8}
+if [ "${VLLM_MOE_SKIP_PADDING:-1}" = "0" ] && [ "$VLLM_GLM5_MOE_MASK_PADDING" = "1" ]; then
+  echo "serve.sh: VLLM_MOE_SKIP_PADDING=0 with VLLM_GLM5_MOE_MASK_PADDING=1 would mask real rows; refusing" >&2
+  exit 2
+fi
+echo "serve.sh: [determinism] MOE_ALIGN=$VLLM_GLM5_DETERMINISTIC_MOE_ALIGN MASK_PADDING=$VLLM_GLM5_MOE_MASK_PADDING TOPK_TIEFIX=$VLLM_GLM5_TOPK_TIEFIX TOPK_SORTED=$VLLM_GLM5_TOPK_SORTED SPLIT_ROWS=$VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS"
+
+# [kv-levers] return memory the engine reserves but a step cannot use to the KV
+# pool. TP only. Outputs bit-identical, no measurable step-time cost; together
+# +39,626 KV tokens.
+#   VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=128  prefill indexer logits budget; set
+#                                  512 (upstream's default) to switch it off
+#   VLLM_GLM5_DRAFTER_SELECTOR_SHARD  DFlash2 selector tables split across the
+#                                  cards (one extra all-reduce per draft step)
+#   VLLM_GLM5_INDEXER_DECODE_ROWS  indexer decode block tables sized by the
+#                                  decode rows a step can hold
+#   VLLM_GLM5_INDEXER_GATHER_CLAMP indexer gather workspace clamp; ON in the
+#                                  engine code already, 0 is its kill switch
+if [ "$TP" -gt 1 ]; then
+  export VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-128}
+  export VLLM_GLM5_DRAFTER_SELECTOR_SHARD=${VLLM_GLM5_DRAFTER_SELECTOR_SHARD:-1}
+  export VLLM_GLM5_INDEXER_DECODE_ROWS=${VLLM_GLM5_INDEXER_DECODE_ROWS:-1}
+fi
+echo "serve.sh: [kv-levers] MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-512} SELECTOR_SHARD=${VLLM_GLM5_DRAFTER_SELECTOR_SHARD:-0} DECODE_ROWS=${VLLM_GLM5_INDEXER_DECODE_ROWS:-0} GATHER_CLAMP=${VLLM_GLM5_INDEXER_GATHER_CLAMP:-1}"
 
 # [prefill-chunk-3456] batched-token budget, which sets the prefill chunk.
 # The KDA state page forces chunk ends onto 1152-token blocks, and DFlash
@@ -304,6 +354,9 @@ CMD=("$VENV/bin/vllm" serve "$MODEL"
   "${MM_ARGS[@]}" "${SPEC[@]}" "${FAIR_ARGS[@]}" ${EXTRA_ARGS:-})
 
 if [ "${DRY:-0}" = "1" ]; then
+  echo "serve.sh: DRY=1, environment the server would get:"
+  env | LC_ALL=C sort | grep -E '^(VLLM_GLM5_|VLLM_SPARSE_|VLLM_ALLOW_PCIE_|VLLM_CUSTOM_ALLREDUCE_|VLLM_PP_|VLLM_MOE_|PYTORCH_CUDA_ALLOC_CONF=|NCCL_)' | sed 's/^/  /' || true
+  echo "serve.sh: DRY=1, command:"
   printf '%q ' "${CMD[@]}"; printf '\n'
   exit 0
 fi

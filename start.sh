@@ -37,7 +37,8 @@
 #   VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 #   VLLM_COMMIT=<older sha> ./start.sh update      # roll back
 #
-# DRY=1 ./start.sh prints the launch command instead of running it.
+# DRY=1 ./start.sh prints the server environment and launch command instead
+# of launching.
 #
 # Lifecycle commands on this checkout are serialised by a flock on
 # logs/lifecycle.lock. start/restart/install/download refuse immediately when
@@ -100,9 +101,7 @@ VENV="${VENV:-$SCRIPT_DIR/venv}"
 VLLM_SRC="${VLLM_SRC:-$SCRIPT_DIR/vllm-src}"
 VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm-cmp170hx.git}"
 VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
-# TODO(1.3.0 release): move the pin to the merged, validated ampere-glm53 commit
-# (also in .env.example, the README badge, Engine row and patches section).
-VLLM_COMMIT="${VLLM_COMMIT:-ff4750db5d}"
+VLLM_COMMIT="${VLLM_COMMIT:-3bbb99a534}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
 TARGET_REPO="${TARGET_REPO:-canada-quant/GLM-5.3-Flash-W4A16-MTP}"
 DRAFTER_REPO="${DRAFTER_REPO:-incoai/GLM-5.3-Flash-DFlash2}"

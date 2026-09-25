@@ -5,8 +5,7 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <!-- TODO(1.3.0 release): badge, Engine row and the pin in "What runs" move to the merged, validated commit -->
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20PENDING-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/3bbb99a5344c3a9cc7e0a1c8ff0d602263520ef5"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%203bbb99a534-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="release" src="https://img.shields.io/badge/release-1.3.0-2ea44f?style=flat">
   &nbsp;
@@ -14,10 +13,10 @@
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards at PENDING(1.3.0 single-user decode, tok/s, structured / code / prose,
-peer-to-peer off) tok/s for one user. The weights are W4A16 and nothing else is
-cut: the KV cache is full precision, there is no FP8 anywhere, and nothing is
-offloaded to CPU or disk.**
+cards at 264.6 tok/s for one user and 745.4 tok/s across eight. The weights are
+W4A16 and nothing else is cut: the KV cache is full precision, there is no FP8
+anywhere, and nothing is offloaded to CPU or disk. A request sent on its own
+gives the same output every time.**
 
 This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
 cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
@@ -49,15 +48,31 @@ and the optional [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path.
 
 | | Peer-to-peer off (default) | Peer-to-peer on (optional) |
 |---|---:|---:|
-| Decode step, 1 / 4 / 6 / 8 users | PENDING(ms/step c1/c4/c6/c8, release pin, P2P off) | PENDING(ms/step c1/c4/c6/c8, release pin, P2P on) |
-| Decode, 1 user, structured / code / prose | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
-| Decode, 8 users, aggregate | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
-| Cold prefill | PENDING(tok/s, P2P off) | PENDING(tok/s, P2P on) |
-| Time to first token, 6.2K / 23.3K-token prompt | PENDING(TTFT, P2P off) | PENDING(TTFT, P2P on) |
-| KV pool at 262,144 context | PENDING(KV tokens and concurrency, P2P off) | PENDING(KV tokens and concurrency, P2P on) |
-| Perplexity, fixed 60-document set | PENDING(perplexity, release pin) | PENDING(perplexity, release pin, P2P on) |
-| GSM8K, all 1,319 problems | PENDING(GSM8K full, release pin) | PENDING(GSM8K full, release pin, P2P on) |
-| HumanEval, pass@1 | PENDING(HumanEval 164, release pin) | PENDING(HumanEval 164, release pin, P2P on) |
+| Decode, 1 user, structured / code / prose | **264.6 / 260.4 / 188.4 tok/s** | **274.8 / 273.0 / 197.9 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **745.4 / 664.5 / 519.8 tok/s** | **808.1 / 720.5 / 556.3 tok/s** |
+| Decode step, 1 / 4 / 6 / 8 users | 15.84 / 30.09 / 38.78 / 44.71 ms | 15.25 / 28.02 / 35.55 / 41.92 ms |
+| Cold prefill | **2,484 tok/s** | **2,490 tok/s** |
+| Time to first token, 6,217 / 23,255-token prompt | 2.50 s / 8.97 s | 2.49 s / 8.94 s |
+| KV pool at 262,144 context | 1,174,567 tokens (4.48 full-length requests) | 1,187,776 tokens (4.53) |
+
+All at 180 W per card, one server start per column. Decode tok/s is the
+per-request streaming rate on
+[MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)
+prompts (400 tokens, temperature 0, median of 5); prose is slower because the
+drafter's guesses are accepted less often. Cold prefill is the median over
+real-text prompts of 23.9K to 37.9K tokens.
+
+**Quality**, measured on the default (peer-to-peer off):
+
+| | |
+|---|---:|
+| Perplexity, fixed 60-document set | **3.2858** (bit-identical with peer-to-peer on) |
+| GSM8K, all 1,319 problems | **0.975** (none cut off at 3,072 tokens) |
+| HumanEval, all 164, pass@1 | **0.9573** (157/164) |
+
+HumanEval allows 4,096 tokens per reply and scores the last complete fenced code
+block of the reply, reasoning included; 12 replies hit the 4,096-token limit.
+Scoring the first code block instead gives 0.8537.
 
 ### Measured while building this release
 
@@ -65,8 +80,9 @@ These come from development runs on the same four cards. They are not the
 release table above; each line says what it was measured against.
 
 - **About a quarter off each decode step.** One user: 20.5 ms per decode step
-  with every optional optimisation in the fork switched off, about 15.1 ms with
-  the release candidate engine and peer-to-peer on.
+  with every optional optimisation in the fork switched off (measured on
+  release 1.0.0's engine), 15.8 ms with this release's defaults and 15.3 ms
+  with peer-to-peer on.
 - **Second-generation decode kernels**, measured together with peer-to-peer
   on: step time −7.4% at one and four users, −17.6% at six, −5.4% at eight,
   cold prefill flat.
@@ -83,24 +99,23 @@ release table above; each line says what it was measured against.
 - **Long context holds up.** On the previous engine: needle retrieval 30/30
   from 8K to 262K tokens, a verbatim copy of a passage at 262,000 tokens
   returned byte-exact, and nothing leaked between concurrent requests.
-- **Checked against fp32.** On the release candidate engine, every
-  sparse-attention, indexer and key-pool kernel matched an fp32 reference
-  exactly or to within bf16/fp8 rounding.
 
 ### Against 2× DGX Spark (release 1.0.0)
 
 ![GLM-5.3-Flash on 4x CMP 170HX versus 2x DGX Spark](assets/glm53-cmp170hx-vs-dgx-spark-full-2026-09-18.jpg)
 
-Measured 2026-09-18 on release 1.0.0 with peer-to-peer off, before most of the
-work in this release. Re-run on 1.3.0: PENDING(Spark protocol re-run on the
-release pin).
+The graphic is from release 1.0.0 (2026-09-18). The tables below are the same
+protocol re-run on release 1.3.0 with the defaults (peer-to-peer off). Against
+1.0.0, one user now decodes at 264.6 tok/s instead of 238.7 on structured text,
+260.4 instead of 232.4 on code and 188.4 instead of 165.1 on prose, and cold
+prefill at ~128k tokens runs at 2,425 tok/s instead of 2,149.
 
 The DGX Spark figures and the benchmark prompts are
 [MiaAI-Lab's](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks),
 quoted from their README — thank you for publishing both.
 
 - **Theirs:** 2× DGX Spark, EXL3 quant, DFlash2 k=7, 850K–1M declared context, as published.
-- **Ours:** 4× CMP 170HX, vLLM W4A16, DFlash2 k=3, 262,144 context, thinking off, temperature 0, median of 5.
+- **Ours:** 4× CMP 170HX, vLLM W4A16, DFlash2 k=3, 262,144 context, release 1.3.0 defaults, temperature 0, median of 5. The requests set `enable_thinking: false` as their protocol does; on this model the reasoning is still generated and counted.
 
 **Decode**, 400 max tokens. `Stream` is per request,
 `(completion_tokens − 1) / (end − first token)`; `Agg` is
@@ -109,33 +124,34 @@ nonce so nothing hits the prefix cache.
 
 | Prompt type | Users | Theirs stream | Ours stream | Theirs agg | Ours agg | Theirs TTFT | Ours TTFT (cold) |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | 62.9 | **238.7** | 62.9 | **238.7** | 719 ms | 65 ms |
-|  | ×2 | 51.7 | **185.7** | 103.3 | **348.8** | 6620 ms | 116 ms |
-|  | ×4 | 37.1 | **137.5** | 146.5 | **497.9** | 6300 ms | 255 ms |
-|  | ×8 | not published | **94.5** | not published | **669.8** | not published | 341 ms |
-| Code (clamp_00…clamp_49) | ×1 | 62.9 | **232.4** | 62.9 | **232.4** | 719 ms | 159 ms |
-|  | ×2 | 51.7 | **167.0** | 103.3 | **301.5** | 6620 ms | 249 ms |
-|  | ×4 | 37.1 | **127.3** | 146.5 | **437.7** | 6300 ms | 399 ms |
-|  | ×8 | not published | **87.4** | not published | **603.4** | not published | 624 ms |
-| Prose (hash map) | ×1 | 36.1 | **165.1** | 37.1 | **165.1** | 333 ms | 69 ms |
-|  | ×2 | 25.0 | **130.5** | 51.1 | **239.6** | 365 ms | 164 ms |
-|  | ×4 | 19.4 | **98.3** | 75.3 | **360.4** | 401 ms | 259 ms |
-|  | ×8 | not published | **65.5** | not published | **469.7** | not published | 343 ms |
+| Structured (count 1→200) | ×1 | 62.9 | **264.6** | 62.9 | **264.6** | 719 ms | 66 ms |
+|  | ×2 | 51.7 | **206.2** | 103.3 | **386.0** | 6620 ms | 113 ms |
+|  | ×4 | 37.1 | **146.7** | 146.5 | **531.3** | 6300 ms | 262 ms |
+|  | ×8 | not published | **104.5** | not published | **745.4** | not published | 343 ms |
+| Code (clamp_00…clamp_49) | ×1 | 62.9 | **260.4** | 62.9 | **260.4** | 719 ms | 168 ms |
+|  | ×2 | 51.7 | **177.4** | 103.3 | **308.5** | 6620 ms | 264 ms |
+|  | ×4 | 37.1 | **137.6** | 146.5 | **470.3** | 6300 ms | 403 ms |
+|  | ×8 | not published | **97.3** | not published | **664.5** | not published | 635 ms |
+| Prose (hash map) | ×1 | 36.1 | **188.4** | 37.1 | **188.4** | 333 ms | 69 ms |
+|  | ×2 | 25.0 | **140.0** | 51.1 | **261.7** | 365 ms | 165 ms |
+|  | ×4 | 19.4 | **104.4** | 75.3 | **384.3** | 401 ms | 265 ms |
+|  | ×8 | not published | **71.5** | not published | **519.8** | not published | 344 ms |
 
 **Cold prefill**, unique uncached text, `max_tokens=1`, median of 2,
 `prompt tokens / TTFT` measured client side.
 
 | Rung | Theirs prompt | Theirs TTFT | Theirs tok/s | Ours prompt | Ours TTFT | Ours tok/s |
 |---|---:|---:|---:|---:|---:|---:|
-| ~8k | 8,221 | 5.51 s | 1492.1 | 7,977 | 3.61 s | **2208.7** |
-| ~32k | 32,797 | 22.96 s | 1428.2 | 31,925 | 14.63 s | **2182.9** |
-| ~128k | 131,101 | 83.95 s | 1561.7 | 127,587 | 59.36 s | **2149.4** |
-| ~250k | 262,173 | 172.84 s | 1516.8 | 250,281 | 120.54 s | **2076.3** |
+| ~8k | 8,221 | 5.51 s | 1492.1 | 7,978 | 3.27 s | **2442.8** |
+| ~32k | 32,797 | 22.96 s | 1428.2 | 31,931 | 12.78 s | **2497.9** |
+| ~128k | 131,101 | 83.95 s | 1561.7 | 127,586 | 52.62 s | **2424.7** |
+| ~250k | 262,173 | 172.84 s | 1516.8 | 250,280 | 107.61 s | **2325.7** |
 
 Their top rung is 262,173 tokens, which does not fit under our 262,144 ceiling,
-so our top rung is ~250k. Prose decodes slower than structured or code text on
-the same model because the drafter's guesses are accepted less often (0.58–0.63
-against 0.91–0.98).
+so our top rung is ~250k. Our two intermediate rungs, which they did not
+publish: 2,502.2 tok/s at ~16k and 2,478.6 at ~64k. Prose decodes slower than
+structured or code text on the same model because the drafter's guesses are
+accepted less often (0.58–0.60 against 0.84–0.98).
 
 ---
 
@@ -148,10 +164,10 @@ against 0.91–0.98).
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ PENDING(release pin) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`3bbb99a534`](https://github.com/Morrowmake/vllm-cmp170hx/commit/3bbb99a5344c3a9cc7e0a1c8ff0d602263520ef5) |
 | Layout | tensor-parallel 4 (`TP=4`, `PP=1`); assumes PCIe Gen2 x16 between the cards — see [Link width](#link-width) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; PENDING(KV pool tokens at 262,144 context, release defaults) |
+| KV cache | full precision, **not quantised**; 1,174,567 tokens at 262,144 context (1,187,776 with peer-to-peer on) |
 | Prefill | 3,456-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
@@ -199,10 +215,19 @@ a single variable (see [Kill switches](#kill-switches)).
   during someone else's long prompt went from 7% to 18% of normal.
 - **Bigger prefill chunks.** 3,456-token chunks instead of 1,152: +8.0% cold
   prefill going to 2,304, and +2.4% more going to 3,456.
-- **Repeatable output for a single request.** Four sources of run-to-run
-  variation are fixed: MoE block alignment in a fixed order, CUDA-graph padding
-  rows kept out of the MoE, and the indexer's top-k made consistent on ties and
-  returned in a fixed order.
+- **Same request, same output.** A request on its own returns the same tokens
+  and the same log-probabilities every time, across restarts. Four sources of
+  run-to-run variation are fixed: MoE block alignment in a fixed order,
+  CUDA-graph padding rows kept out of the MoE, and the indexer's top-k made
+  consistent on ties and returned in a fixed order. On by default; they cost
+  less than restart-to-restart noise.
+- **Every custom kernel checked against a high-precision reference.** Each
+  kernel the fork adds on the default path is replayed on real inputs captured
+  from a running server and compared with a 64-bit reference, side by side
+  with the upstream or PyTorch code it replaces. The worst mean error in this
+  release is 1.08× that of the replaced code, and several kernels are more
+  accurate than it. Three kernels that fell short were fixed for this release,
+  including one prefill kernel shipped since 1.0.0.
 - **A real correctness fix in the key pool.** With speculative decoding, a
   rejected draft could overwrite the tail of the sparse-attention key pool,
   leaving a wrong key in the indexer cache once a conversation passed 2,048
@@ -286,7 +311,9 @@ MAX_LEN=131072 ./start.sh restart
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
 An `.env` copied from an earlier release pins `MAX_BATCHED=2048`; delete that
-line to get this release's 3,456-token chunks.
+line to get this release's 3,456-token chunks. If you uncommented `VLLM_COMMIT`
+in `.env`, delete that line too (or set it to `3bbb99a534`), or
+`./start.sh update` keeps the old engine.
 
 ### PCIe peer-to-peer (optional)
 
@@ -313,11 +340,11 @@ EPYC root ports, all pairs.
 path dead behind PLX switches on a Xeon, so a different board may simply not
 have it.
 
-**What you gain.** On this release: PENDING(P2P on vs off, ms/step c1/c4/c6/c8,
-cold prefill, KV pool, release pin) — the two columns of the
-[results table](#release-130). Measured during development on an earlier
-engine: −5.8% step time at one user and −10.8% at four, cold prefill unchanged,
-and more room for KV.
+**What you gain.** On this release, the two columns of the
+[results table](#release-130): step time −3.7% at one user, −6.9% at four,
+−8.3% at six and −6.2% at eight; single-user decode +3.9% to +5.0%; eight-user
+aggregate +7.0% to +8.4%; cold prefill unchanged (2,484 → 2,490 tok/s); and
+13,209 more KV tokens.
 
 **Turn it on.**
 
@@ -367,9 +394,18 @@ VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 | `VLLM_GLM5_HOST_ALLREDUCE` | host-staged all-reduce |
 | `VLLM_GLM5_SHARED_EXPERT_REORDER` | shared experts overlapped with the routed experts |
 | `FAIR_PREFILL` | fair prefill |
+| `VLLM_GLM5_DETERMINISTIC_MOE_ALIGN` | same output every time: MoE block alignment in a fixed order |
+| `VLLM_GLM5_MOE_MASK_PADDING` | same output every time: CUDA-graph padding rows kept out of the MoE |
+| `VLLM_GLM5_TOPK_TIEFIX`, `VLLM_GLM5_TOPK_SORTED` | same output every time: indexer top-k consistent on ties, in a fixed order |
+| `VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS` | the two above spread over more programs for batches up to `8` rows; `0` = one per row |
+| `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` | KV headroom: prefill indexer logits budget, `128` here; `512` (upstream's) switches it off |
+| `VLLM_GLM5_DRAFTER_SELECTOR_SHARD` | KV headroom: drafter selector tables split across the cards |
+| `VLLM_GLM5_INDEXER_DECODE_ROWS` | KV headroom: indexer decode tables sized by the decode rows |
+| `VLLM_GLM5_INDEXER_GATHER_CLAMP` | KV headroom: indexer gather workspace clamp (on in the engine itself) |
 
-PENDING(release pin: the determinism and KV headroom switches, with their
-names and defaults as ported into `serve.sh`).
+The second-generation decode kernels, the drafter position table and the KV
+headroom switches are tensor-parallel only. `DRY=1 ./start.sh` prints the
+environment the server would get, so you can check what is on.
 
 ### Day to day
 
@@ -420,21 +456,31 @@ x16 links; on x4 links it is bus-bound and far slower than the numbers above.
 `./start.sh` prints each card's link width in its preflight and warns if any is
 narrower than x16. For narrower links, see the [roadmap](#status-and-roadmap).
 
-<!-- TODO(1.3.0 release): replace the sample below with ./start.sh smoke output from the release pin and defaults. -->
-**Smoke test output** looks like this (sample from an earlier release):
+**Smoke test output** on this release looks like this (this sample has
+peer-to-peer on; with the default, the KV line reads 1,174,567 tokens and
+4.48x):
 
 ```
 ==> waiting for http://127.0.0.1:8000/health (up to 900s)
     healthy
     served models: glm-5.3-flash
+
 ==> chat request
-    usage: prompt=28 completion=200 wall=1.41s  ->  142.2 tok/s
+    reply: PCIe peer-to-peer (P2P) allows GPUs to transfer data directly to each other's memory over the PCIe bus without routing through host memory, avoiding costly stag ...
+    usage: prompt=28 completion=121 wall=0.87s  ->  139.8 tok/s
+
 ==> tool-call request
-    tool_call: get_weather({"city": "Reykjavik"})
-    usage: prompt=199 completion=40 wall=0.37s  ->  109 tok/s
+    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
+    usage: prompt=199 completion=66 wall=0.44s  ->  148.7 tok/s
+
 ==> KV cache
-    GPU KV cache size: 1,160,192 tokens, Maximum concurrency for 262,144 tokens per request: 4.43x
+    GPU KV cache size: 1,187,776 tokens, Maximum concurrency for 262,144 tokens per request: 4.53x
+
+smoke: ok
 ```
+
+The rates in the smoke test include the time to first token of a short
+request, so they read lower than the decode table.
 
 ---
 
