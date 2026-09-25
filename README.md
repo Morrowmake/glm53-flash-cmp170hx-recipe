@@ -63,7 +63,8 @@ and the optional [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path.
 | Time to first token, 6,217 / 23,255-token prompt | 2.50 s / 8.97 s | 2.49 s / 8.94 s |
 | KV pool at 262,144 context | 1,174,567 tokens (4.48 full-length requests) | 1,187,776 tokens (4.53) |
 
-All at 180 W per card, one server start per column. Decode tok/s is the
+All at 180 W per card (a power limit we set on our cards; the scripts never
+change power, clock or fan settings), one server start per column. Decode tok/s is the
 per-request streaming rate on three fixed prompt types — structured,
 code and prose (400 tokens, temperature 0, median of 5); prose is slower because the
 drafter's guesses are accepted less often. Cold prefill is the median over
@@ -86,10 +87,10 @@ Scoring the first code block instead gives 0.8537.
 These come from development runs on the same four cards. They are not the
 release table above; each line says what it was measured against.
 
-- **About a quarter off each decode step.** One user: 20.5 ms per decode step
-  with every optional optimisation in the fork switched off (measured on
-  release 1.0.0's engine), 15.8 ms with this release's defaults and 15.3 ms
-  with peer-to-peer on.
+- **−23% on each decode step (−25% with peer-to-peer).** One user: 20.5 ms
+  per decode step with every optional optimisation in the fork switched off
+  (measured on release 1.0.0's engine), 15.8 ms with this release's defaults
+  and 15.3 ms with peer-to-peer on.
 - **Second-generation decode kernels**, measured together with peer-to-peer
   on: step time −7.4% at one and four users, −17.6% at six, −5.4% at eight,
   cold prefill flat.
@@ -97,12 +98,12 @@ release table above; each line says what it was measured against.
   first token and the same log-probabilities on every repeat, across restarts
   (16 of 16 test prompts, 8 repeats over 2 boots). The fixes cost under 1% of
   step time.
-- **More KV for free.** +39,626 KV tokens (+3.45%) from right-sized
-  workspaces and a drafter table split across the cards, with outputs
+- **More KV for free.** +39,626 KV tokens (+3.45%, measured with
+  peer-to-peer on) from right-sized workspaces and a drafter table split across the cards, with outputs
   bit-identical and no step-time cost.
 - **Fast does not mean different.** On the previous engine, perplexity with
   every optimisation on and every optimisation off differed by less than
-  run-to-run noise.
+  run-to-run variation.
 - **Long context holds up.** On the previous engine: needle retrieval 30/30
   from 8K to 262K tokens, a verbatim copy of a passage at 262,000 tokens
   returned byte-exact, and nothing leaked between concurrent requests.
@@ -155,7 +156,7 @@ are accepted less often (0.58–0.60 against 0.84–0.98).
 
 | | |
 |---|---|
-| API | OpenAI-compatible, `http://127.0.0.1:8000/v1` |
+| API | OpenAI-compatible, `http://127.0.0.1:8000/v1`; this machine only, no API key, unless you [change that](#serving-other-machines) |
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
@@ -175,16 +176,18 @@ are accepted less often (0.58–0.60 against 0.84–0.98).
 ## What makes it fast, and correct
 
 All of this is in the fork. The Ampere backends and the correctness fixes are
-always on; every performance feature ships off in the engine code and is
-switched on by this repository's `serve.sh`, so each one can be turned off with
-a single variable (see [Kill switches](#kill-switches)).
+always on. Every performance feature can be turned off with a single variable
+(see [Kill switches](#kill-switches)): nearly all ship off in the engine code
+and are switched on by this repository's `serve.sh`; the retuned
+sparse-attention decode schedule is on in the engine itself.
 
 - **Ampere sparse attention.** GLM-5.3-Flash uses DeepSeek-style sparse
   attention, whose upstream kernels need Hopper. The fork adds an Ampere
   sparse-MLA backend, an Ampere path for the attention indexer and its FP8
   stores, and Ampere versions of the key-pool compression. Without these the
   model does not run on these cards at all.
-- **Fused decode kernels.** The mHC mixing, MoE routing and block alignment,
+- **Fused decode kernels.** The mHC mixing (the model's hyper-connection
+  residual streams), MoE routing and block alignment,
   and the linear-attention (KDA) decode each run as fused kernels built for the
   small batches decode actually sees. This release adds a second generation:
   the MoE gate, top-k and alignment in one launch, a faster mHC decode, KDA
@@ -210,13 +213,13 @@ a single variable (see [Kill switches](#kill-switches)).
   while anyone is decoding, prefill is taken in small slices. Decode speed
   during someone else's long prompt went from 7% to 18% of normal.
 - **Bigger prefill chunks.** 3,456-token chunks instead of 1,152: +8.0% cold
-  prefill going to 2,304, and +2.4% more going to 3,456.
+  prefill going to 2,304, and +2.4% more going to 3,456 (at 180 W per card).
 - **Same request, same output.** A request on its own returns the same tokens
   and the same log-probabilities every time, across restarts. Four sources of
   run-to-run variation are fixed: MoE block alignment in a fixed order,
   CUDA-graph padding rows kept out of the MoE, and the indexer's top-k made
   consistent on ties and returned in a fixed order. On by default; they cost
-  less than restart-to-restart noise.
+  less than restart-to-restart variation.
 - **Every custom kernel checked against a high-precision reference.** Each
   kernel the fork adds on the default path is replayed on real inputs captured
   from a running server and compared with a 64-bit reference, side by side
@@ -243,11 +246,11 @@ a single variable (see [Kill switches](#kill-switches)).
 
 | | |
 |---|---|
-| GPUs | 4× NVIDIA CMP 170HX, each on a PCIe Gen2 x16 link ([Link width](#link-width)); the preflight wants 60 GiB or more per card |
-| OS and driver | Linux with a working NVIDIA driver (`nvidia-smi` lists all four cards) |
+| GPUs | 4× NVIDIA CMP 170HX, **each exposing 64 GiB** (`nvidia-smi` shows 65,536 MiB) **on a PCIe Gen2 x16 link**. Stock cards expose less memory and run at x4; getting to 64 GiB and x16 is outside this repository. The preflight stops before any download if a card reports under 60 GiB, and warns below x16 ([Link width](#link-width)) |
+| OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**, which the CUDA 13 build of PyTorch needs; `nvidia-smi` must list all four cards |
 | CUDA | a 13.x toolkit at `/usr/local/cuda-13.3`, or set `CUDA_HOME` ([CUDA](#cuda)) |
-| Tools | `uv`, `git`, `curl`, Python 3.12, and `jq` for the smoke test |
-| Disk | about 185 GB for the two checkpoints |
+| Tools | `uv`, `git`, `curl`, Python 3.12, `flock` and `setsid` (util-linux, on most systems already), `jq` for the smoke test, `wget` for the CUDA commands |
+| Disk | about 180 GiB (193 GB) for the two checkpoints, plus about 20 GiB for the venv, the engine source and compile caches |
 
 ### Step by step
 
@@ -256,7 +259,7 @@ done, so running it twice is safe. The same steps one at a time:
 
 ```bash
 ./install.sh       # 1. build ./venv and the pinned vLLM fork (about six minutes)
-./download.sh      # 2. fetch the model (~178 GB) and the drafter (~2.2 GB) into ./models
+./download.sh      # 2. fetch the model (~178 GiB) and the drafter (~2.2 GiB) into ./models
 ./start.sh         # 3. launch in the background, wait for /health, print the KV pool size
 ./start.sh smoke   # 4. one chat request and one tool call against the running server
 ./start.sh stop    # stop it; weights and venv stay, so the next start is quick
@@ -264,7 +267,35 @@ done, so running it twice is safe. The same steps one at a time:
 
 Weight loading and CUDA-graph capture take a few minutes after the download.
 `./serve.sh` runs the server in the foreground instead of step 3 if you prefer;
-it reads its settings from the environment, not from `.env`.
+it reads its settings from the environment, not from `.env`. A server started
+that way is invisible to `./start.sh status`, `stop` and `restart`: stop it with
+Ctrl-C before using `./start.sh` again.
+
+**Smoke test output** on this release looks like this (this sample has
+peer-to-peer on; with the default, the KV line reads 1,174,567 tokens and
+4.48x):
+
+```
+==> waiting for http://127.0.0.1:8000/health (up to 900s)
+    healthy
+    served models: glm-5.3-flash
+
+==> chat request
+    reply: PCIe peer-to-peer (P2P) allows GPUs to transfer data directly to each other's memory over the PCIe bus without routing through host memory, avoiding costly stag ...
+    usage: prompt=28 completion=121 wall=0.87s  ->  139.8 tok/s
+
+==> tool-call request
+    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
+    usage: prompt=199 completion=66 wall=0.44s  ->  148.7 tok/s
+
+==> KV cache
+    GPU KV cache size: 1,187,776 tokens, Maximum concurrency for 262,144 tokens per request: 4.53x
+
+smoke: ok
+```
+
+The rates in the smoke test include the time to first token of a short
+request, so they read lower than the decode table.
 
 ### Talk to it
 
@@ -282,6 +313,23 @@ field of the message and the answer in `content`. `reasoning_effort` of `low`,
 `high` or `max` sets how much it thinks. Do not send `reasoning_effort: "none"`
 or `"chat_template_kwargs": {"enable_thinking": false}`: the model still thinks,
 and its reasoning then lands inside `content`.
+
+### Serving other machines
+
+By default the API listens on `127.0.0.1` only, so nothing outside this
+machine can reach it, and it has **no API key**. To serve other machines, set
+both in `.env` and restart:
+
+```bash
+HOST=0.0.0.0          # every interface; or one of this machine's addresses
+API_KEY=<a long random string>
+```
+
+With `API_KEY` set, every `/v1` request must send
+`Authorization: Bearer <key>` (OpenAI clients: pass it as the API key);
+`./start.sh smoke` and `status` send it for you. Without `API_KEY`, anyone who
+can reach the port can use the model. The key is handed to vLLM through its
+`VLLM_API_KEY` variable, so it does not appear in the process list.
 
 ### Settings
 
@@ -303,13 +351,22 @@ MAX_LEN=131072 ./start.sh restart
 | `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | fair prefill and its slice size while others decode |
 | `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it cost 15% prefill here and turns the prefill features off |
 | `MM_CAP` | `0` | `1` bounds image and video inputs, which returns roughly 150k KV tokens |
-| `PORT` / `SERVED_MODEL_NAME` | `8000` / `glm-5.3-flash` | where and under what name it serves |
+| `HOST` / `PORT` | `127.0.0.1` / `8000` | where it listens; see [Serving other machines](#serving-other-machines) |
+| `API_KEY` | unset | bearer key required on `/v1`; unset means no key |
+| `SERVED_MODEL_NAME` | `glm-5.3-flash` | the model id clients send |
+| `MODELS_DIR` | `models/` in this repo | where the checkpoints go; give an absolute path |
+| `CUDA_HOME` | `/usr/local/cuda-13.3` | CUDA toolkit root |
+| `READY_TIMEOUT` | `1800` | seconds `./start.sh` waits for `/health` |
+| `EXTRA_ARGS` | unset | appended to the `vllm serve` command line |
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
 An `.env` copied from an earlier release pins `MAX_BATCHED=2048`; delete that
 line to get this release's 3,456-token chunks. If you uncommented `VLLM_COMMIT`
 in `.env`, delete that line too (or set it to `3bbb99a534`), or
-`./start.sh update` keeps the old engine.
+`./start.sh update` keeps the old engine. If a server started by 1.2.0 or
+earlier is running, run `rm -f logs/lifecycle.lock` once before
+`./start.sh update`: those releases left the server holding the checkout's
+lock.
 
 ### PCIe peer-to-peer (optional)
 
@@ -324,11 +381,11 @@ needs no driver change of any kind and uses the host-staged path described
 above. If you do nothing, this is what you run.
 
 **Who should turn it on.** Only people who already have peer-to-peer working on
-their cards. It has to be advertised by the driver. We run a
-[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) build — that fork
-merged onto driver 610.57.04, with official cmpunlocker's `cmp-sku-mask.patch`
-added as patch 0010 — installed with `install.sh --p2p`. Read that project's own
-documentation; none of it is ours and none of it is in scope here.
+their cards. It has to be advertised by the driver. We use a build of the
+[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) project, set up
+with that project's own installer (its `install.sh --p2p`, not this
+repository's `install.sh`, which has no such option). How to install it is
+covered by that project's documentation, not here; none of it is ours.
 
 It is **topology-dependent**. We verified it on our machine: four cards on
 EPYC root ports, all pairs.
@@ -357,10 +414,11 @@ caching-allocator mode the peer-to-peer path needs.
 **Check it works.**
 
 ```bash
-grep "all-reduce backends" logs/serve.log | grep "tp:0"
+grep "all-reduce backends" logs/serve.log | grep "tp:0" | tail -1
 ```
 
-With peer-to-peer on, the list starts with `CUSTOM`: `['CUSTOM', 'PYNCCL']`.
+`logs/serve.log` keeps every start, so read the last line. With peer-to-peer
+on, the list starts with `CUSTOM`: `['CUSTOM', 'PYNCCL']`.
 With it off, or if the driver does not actually grant peer access, it reads
 `['HOSTSHM', 'PYNCCL']` — the engine falls back to the host-staged path on its
 own rather than failing. Then run `./start.sh smoke`.
@@ -371,7 +429,10 @@ and the default allocator in one step.
 
 ### Kill switches
 
-Each feature is one variable. Set it to `0` and restart; no rebuild, no revert:
+Each feature is one variable. Set it to `0` and restart; no rebuild, no
+revert. Two work differently: `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` is switched
+off with `512`, and `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` is switched *on*
+(`1`) to go back to the old schedule.
 
 ```bash
 VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
@@ -398,10 +459,15 @@ VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 | `VLLM_GLM5_DRAFTER_SELECTOR_SHARD` | KV headroom: drafter selector tables split across the cards |
 | `VLLM_GLM5_INDEXER_DECODE_ROWS` | KV headroom: indexer decode tables sized by the decode rows |
 | `VLLM_GLM5_INDEXER_GATHER_CLAMP` | KV headroom: indexer gather workspace clamp (on in the engine itself) |
+| `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` | set to `1` for the sparse-attention decode schedule from before the retune (default `0`, set in the engine) |
 
-The second-generation decode kernels, the drafter position table and the KV
+The prefill overlap, batch-sharded logits, host-staged all-reduce, the
+second-generation decode kernels, the drafter position table and the KV
 headroom switches are tensor-parallel only. `DRY=1 ./start.sh` prints the
-environment the server would get, so you can check what is on.
+environment the server would get, so you can check what is on. It runs the
+preflight and says whether a real start would install or download, but
+installs, downloads and launches nothing, so it also works before the first
+install.
 
 ### Day to day
 
@@ -414,8 +480,8 @@ environment the server would get, so you can check what is on.
 | `./start.sh smoke` | one chat request and one tool call |
 | `./start.sh stop` | stop the server this checkout started |
 | `./start.sh update` | `git pull`, reinstall if the engine pin moved, restart |
-| `VLLM_COMMIT=<older sha> ./start.sh update` | roll back to an earlier engine |
-| `DRY=1 ./start.sh` | print the launch command instead of running it |
+| `VLLM_COMMIT=<older sha> ./start.sh update` | roll back to an earlier engine, for that run only |
+| `DRY=1 ./start.sh` | print what would be installed, downloaded and launched, without doing it |
 
 `stop` only signals the process in `logs/vllm.pid`, after confirming it is the
 server this checkout launched; it never searches by process name, so another
@@ -425,16 +491,27 @@ The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 reinstalls whenever it changes: the compiled extensions must match the upstream
 commit the fork sits on. Uncomment `VLLM_COMMIT` in `.env` to freeze it.
 
+**Rolling back.** `VLLM_COMMIT=<sha> ./start.sh update` rolls the engine back
+for that run only; the next plain `./start.sh` or `restart` sees the pin and
+reinstalls this release's engine. To stay rolled back, set
+`VLLM_COMMIT=<sha>` in `.env`. That changes the engine only; to go back to an
+earlier release's scripts and defaults as well, check out its tag
+(`git checkout v1.2.0`, then `./start.sh restart`; back again with
+`git checkout main` and `./start.sh update`). Engine pins from 1.1.0 on
+(`69c33802d0`, `434dea1a1b`) can be installed; 1.0.x's pin predates a rebase
+of the fork branch and cannot.
+
 ### CUDA
 
-You need a 13.x toolkit. NVIDIA had no working `ubuntu2604` repository index
-when we built this, so we used the `ubuntu2404` one:
+You need a 13.x toolkit. These commands are for Ubuntu. NVIDIA had no working
+`ubuntu2604` repository index when we built this, so we used the `ubuntu2404`
+one:
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update
-sudo apt-get install -y cuda-toolkit-13-3 git-lfs
+sudo apt-get install -y cuda-toolkit-13-3
 ```
 
 The install uses upstream's **precompiled** CUDA extensions, which is why it
@@ -451,32 +528,6 @@ prefill and roughly 100 small collectives per decode step. It assumes PCIe Gen2
 x16 links; on x4 links it is bus-bound and far slower than the numbers above.
 `./start.sh` prints each card's link width in its preflight and warns if any is
 narrower than x16. For narrower links, see the [roadmap](#status-and-roadmap).
-
-**Smoke test output** on this release looks like this (this sample has
-peer-to-peer on; with the default, the KV line reads 1,174,567 tokens and
-4.48x):
-
-```
-==> waiting for http://127.0.0.1:8000/health (up to 900s)
-    healthy
-    served models: glm-5.3-flash
-
-==> chat request
-    reply: PCIe peer-to-peer (P2P) allows GPUs to transfer data directly to each other's memory over the PCIe bus without routing through host memory, avoiding costly stag ...
-    usage: prompt=28 completion=121 wall=0.87s  ->  139.8 tok/s
-
-==> tool-call request
-    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
-    usage: prompt=199 completion=66 wall=0.44s  ->  148.7 tok/s
-
-==> KV cache
-    GPU KV cache size: 1,187,776 tokens, Maximum concurrency for 262,144 tokens per request: 4.53x
-
-smoke: ok
-```
-
-The rates in the smoke test include the time to first token of a short
-request, so they read lower than the decode table.
 
 ---
 

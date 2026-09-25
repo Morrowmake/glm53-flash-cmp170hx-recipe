@@ -4,7 +4,8 @@
 # ============================================================================
 #
 # We serve canada-quant/GLM-5.3-Flash-W4A16-MTP on four GPUs with a patched
-# vLLM: OpenAI API on :8000 as "glm-5.3-flash", tensor-parallel 4, DFlash2
+# vLLM: OpenAI API on 127.0.0.1:8000 as "glm-5.3-flash" (local only unless you
+# set HOST; no API key unless you set API_KEY), tensor-parallel 4, DFlash2
 # speculation at k=3, 262,144-token context. No FP8, no KV quantisation, no
 # offload.
 #
@@ -12,7 +13,7 @@
 # ./start.sh twice is safe and the second run just launches.
 #
 # What we do:
-#   1. preflight — uv, git, python, 4 GPUs of >=60 GB (read only), disk, port
+#   1. preflight — uv, git, python, 4 GPUs of >=60 GiB (read only), disk, port
 #   2. install   — venv + the pinned vLLM fork, if missing or the pin moved
 #   3. download  — the two checkpoints, if missing
 #   4. launch    — detached, PID in logs/, output to logs/serve.log
@@ -35,10 +36,14 @@
 #
 #   MAX_LEN=131072 ./start.sh restart
 #   VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
-#   VLLM_COMMIT=<older sha> ./start.sh update      # roll back
+#   VLLM_COMMIT=<older sha> ./start.sh update      # roll back, this run only
 #
-# DRY=1 ./start.sh prints the server environment and launch command instead
-# of launching.
+# To stay rolled back, set VLLM_COMMIT=<sha> in .env; otherwise the next
+# plain start or restart reinstalls the pinned engine.
+#
+# DRY=1 ./start.sh runs the preflight, says whether it would install or
+# download, and prints the server environment and launch command. It installs,
+# downloads and launches nothing, and works before the first install.
 #
 # Lifecycle commands on this checkout are serialised by a flock on
 # logs/lifecycle.lock. start/restart/install/download refuse immediately when
@@ -113,7 +118,8 @@ BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-0}"
 MAX_JOBS="${MAX_JOBS:-16}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
-SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-glm-5.3-flash}"
+# SERVED_NAME is the older spelling; SERVED_MODEL_NAME wins when both are set.
+SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}"
 PP="${PP:-1}"; TP="${TP:-4}"
 export PP TP
 # PP is unsupported by this release (a pipeline-parallel layout is planned for
@@ -127,8 +133,8 @@ fi
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
-MIN_GPU_MIB="${MIN_GPU_MIB:-61440}"      # ~60 GiB
-NEED_DISK_GB="${NEED_DISK_GB:-185}"
+MIN_GPU_MIB="${MIN_GPU_MIB:-61440}"      # 60 GiB; the cards we run report 65,536 MiB
+NEED_DISK_GB="${NEED_DISK_GB:-185}"      # GiB, as df -BG counts it: checkpoints ~180 GiB
 LOCK_WAIT="${LOCK_WAIT:-30}"
 
 LOGDIR="$SCRIPT_DIR/logs"
@@ -137,6 +143,13 @@ PIDFILE="$LOGDIR/vllm.pid"
 LOCKFILE="$LOGDIR/lifecycle.lock"
 LOCKPID="$LOGDIR/lifecycle.lock.pid"
 STAMP="$VENV/.recipe-stamp"
+
+# Where our own health checks connect. A wildcard bind address is not a
+# destination, so talk to the server over loopback in that case.
+case "$HOST" in
+    0.0.0.0|::|'[::]'|'') CLIENT_HOST=127.0.0.1 ;;
+    *) CLIENT_HOST="$HOST" ;;
+esac
 
 export VENV VLLM_SRC MODEL DFLASH_MODEL CUDA_HOME HOST PORT SERVED_MODEL_NAME
 export SERVE_LOG READY_TIMEOUT
@@ -198,7 +211,7 @@ preflight() {
             small="$(printf '%s\n' "$mems" | awk -v m="$MIN_GPU_MIB" '$1+0 < m' | grep -c . || true)"
             [ "$n" -ge "$MIN_GPUS" ] || die "found $n GPU(s), need $MIN_GPUS — lower TP, or set MIN_GPUS to override this check"
             if [ "${small:-0}" -gt 0 ]; then
-                warn "$small GPU(s) report under $((MIN_GPU_MIB/1024)) GiB; the W4A16 weights need ~45 GiB per card at TP=4 plus KV"
+                die "$small GPU(s) report under $((MIN_GPU_MIB/1024)) GiB. This recipe needs about 64 GB on each card (the W4A16 weights take ~45 GiB per card at TP=4, plus the KV cache). Nothing was downloaded. Set MIN_GPU_MIB to override this check."
             fi
             log "  GPUs: $n visible, smallest $(printf '%s\n' "$mems" | sort -n | head -1) MiB"
         fi
@@ -225,9 +238,9 @@ preflight() {
     local avail_gb; avail_gb="$(df -BG --output=avail "$MODELS_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
     if [ -n "${avail_gb:-}" ] && [ "$avail_gb" -gt 0 ]; then
         if [ "$avail_gb" -lt "$NEED_DISK_GB" ] && ! models_present; then
-            die "only ${avail_gb} GB free at $MODELS_DIR, need ~${NEED_DISK_GB} GB for the checkpoints — free space or set MODELS_DIR"
+            die "only ${avail_gb} GiB free at $MODELS_DIR, need ~${NEED_DISK_GB} GiB for the checkpoints — free space or set MODELS_DIR"
         fi
-        log "  disk: ${avail_gb} GB free at $MODELS_DIR"
+        log "  disk: ${avail_gb} GiB free at $MODELS_DIR"
     fi
 
     if [ "$check_port" = 1 ]; then
@@ -247,7 +260,7 @@ port_busy() {
     if command -v ss >/dev/null 2>&1; then
         ss -ltn "sport = :$PORT" 2>/dev/null | tail -n +2 | grep -q .
     else
-        curl -fsS -m 2 "http://$HOST:$PORT/health" >/dev/null 2>&1
+        curl -fsS -m 2 "http://$CLIENT_HOST:$PORT/health" >/dev/null 2>&1
     fi
 }
 
@@ -361,7 +374,7 @@ do_download() {
     if model_present "$MODEL" && [ "${REFRESH_WEIGHTS:-0}" != "1" ]; then
         log "download: $(basename "$MODEL") already present — skipping"
     else
-        log "download: $TARGET_REPO (~178 GB, 21 files)"
+        log "download: $TARGET_REPO (~178 GiB / 191 GB, 22 files)"
         "$hf" download "$TARGET_REPO" --local-dir "$MODEL"
     fi
 
@@ -370,7 +383,7 @@ do_download() {
     elif model_present "$DFLASH_MODEL" && [ "${REFRESH_WEIGHTS:-0}" != "1" ]; then
         log "download: $(basename "$DFLASH_MODEL") already present — skipping"
     else
-        log "download: $DRAFTER_REPO (~2.2 GB, 5 files)"
+        log "download: $DRAFTER_REPO (~2.2 GiB / 2.3 GB, 5 files)"
         "$hf" download "$DRAFTER_REPO" --local-dir "$DFLASH_MODEL"
     fi
     log "download: done"
@@ -400,12 +413,15 @@ pid_is_ours() {
 
 server_is_ours() { pid_is_ours "$(read_pid)"; }
 
-health_ok() { curl -fsS -m 5 "http://$HOST:$PORT/health" >/dev/null 2>&1; }
+health_ok() { curl -fsS -m 5 "http://$CLIENT_HOST:$PORT/health" >/dev/null 2>&1; }
 
 # First "id" in /v1/models. A plain greedy sed would pick up the permission id
 # further down the same line, so match the field and take the first one.
+# /v1 needs the key when API_KEY is set; /health never does.
 served_id() {
-    curl -fsS -m 5 "http://$HOST:$PORT/v1/models" 2>/dev/null \
+    local auth=()
+    [ -n "${API_KEY:-}" ] && auth=(-H "Authorization: Bearer $API_KEY")
+    curl -fsS -m 5 ${auth[@]+"${auth[@]}"} "http://$CLIENT_HOST:$PORT/v1/models" 2>/dev/null \
         | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4
 }
 
@@ -433,7 +449,10 @@ launch() {
     mkdir -p "$LOGDIR"
     log "launch: $SPEC_MODE, TP=${TP:-4} PP=${PP:-1}, ctx ${MAX_LEN:-262144}, :$PORT"
     log "  log: $SERVE_LOG"
-    setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" >>"$SERVE_LOG" 2>&1 < /dev/null &
+    # 9>&- : the server must not inherit the lifecycle lock (fd 9). serve.sh
+    # execs vllm, so an inherited fd would hold the lock for the server's whole
+    # life and block every later stop, restart and update.
+    setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" 9>&- >>"$SERVE_LOG" 2>&1 < /dev/null &
     local pid=$!
     echo "$pid" >"$PIDFILE"
     log "  pid: $pid"
@@ -441,7 +460,7 @@ launch() {
 
 wait_ready() {
     [ -z "${DRY:-}" ] || return 0
-    local url="http://$HOST:$PORT/health" elapsed=0 pid
+    local url="http://$CLIENT_HOST:$PORT/health" elapsed=0 pid
     pid="$(read_pid)"
     log "waiting for $url (weight load and graph capture on a 320B MoE are slow; timeout ${READY_TIMEOUT}s)"
     while [ "$elapsed" -lt "$READY_TIMEOUT" ]; do
@@ -450,7 +469,7 @@ wait_ready() {
             local kv; kv="$(kv_line || true)"
             [ -n "$kv" ] && log "  $kv"
             log "  model: $(served_id)"
-            log "  API:   http://$HOST:$PORT/v1"
+            log "  API:   http://$HOST:$PORT/v1${API_KEY:+ (API key required)}"
             return 0
         fi
         if ! kill -0 "$pid" 2>/dev/null; then
@@ -510,7 +529,7 @@ do_status() {
         log "process: pid $pid is gone (stale pid file)"
     fi
     if health_ok; then
-        log "API:     healthy — http://$HOST:$PORT/v1"
+        log "API:     healthy — http://$HOST:$PORT/v1${API_KEY:+ (API key required)}"
         log "model:   $(served_id)"
     else
         log "API:     not responding on :$PORT"
@@ -565,7 +584,27 @@ do_update() {
 }
 
 # --------------------------------- start -----------------------------------
+# DRY: report what a real start would do, then print the server environment
+# and command. Nothing is installed, downloaded or launched.
+dry_start() {
+    preflight --with-port
+    if install_done; then
+        log "install: already at $VLLM_COMMIT — a real start would skip it"
+    else
+        log "install: a real start would build $VENV and the vLLM fork @ $VLLM_COMMIT"
+    fi
+    if models_present; then
+        log "download: checkpoints present — a real start would skip it"
+    else
+        local what="$TARGET_REPO"
+        [ "$SPEC_MODE" = "dflash" ] && what="$what and $DRAFTER_REPO"
+        log "download: a real start would fetch $what into $MODELS_DIR"
+    fi
+    launch
+}
+
 start_unlocked() {
+    if [ -n "${DRY:-}" ]; then dry_start; return 0; fi
     preflight --with-port
     do_install
     if models_present; then
@@ -585,15 +624,15 @@ main() {
     esac
     banner "$cmd"
     case "$cmd" in
-        start)    take_lock; start_unlocked ;;
+        start)    if [ -n "${DRY:-}" ]; then dry_start; else take_lock; start_unlocked; fi ;;
         install)  take_lock; preflight; do_install ;;
-        download) take_lock; do_download ;;
+        download) take_lock; preflight; do_download ;;
         stop)     take_lock_for_stop; do_stop ;;
-        restart)  take_lock; do_stop; start_unlocked ;;
+        restart)  if [ -n "${DRY:-}" ]; then dry_start; else take_lock; do_stop; start_unlocked; fi ;;
         update)   take_lock; do_update ;;
         status)   do_status ;;
         logs)     do_logs ;;
-        smoke)    exec "$SCRIPT_DIR/smoke.sh" ;;
+        smoke)    HOST="$CLIENT_HOST" exec "$SCRIPT_DIR/smoke.sh" ;;
         *) warn "unknown command: $cmd"; usage; exit 1 ;;
     esac
 }

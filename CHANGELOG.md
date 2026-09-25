@@ -5,7 +5,9 @@
 **Upgrade:** `./start.sh update`. It pulls this release, sees that the engine
 pin moved, reinstalls the engine (a few minutes; the checkpoints are kept) and
 restarts the server. Before you run it, check your `.env` for the two lines
-below.
+below, and if the server is running (it was started by 1.2.0 or earlier, which
+left it holding the checkout's lock), run `rm -f logs/lifecycle.lock` first,
+or `update` reports the checkout as busy.
 
 **Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
 Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the
@@ -21,7 +23,7 @@ extensions for that base.
 
 | | Peer-to-peer off (default) | Peer-to-peer on (optional) |
 |---|---:|---:|
-| ms/step at 1 / 4 / 6 / 8 streams | 15.841 / 30.092 / 38.778 / 44.705 | 15.250 / 28.015 / 35.549 / 41.921 |
+| Decode step at 1 / 4 / 6 / 8 users, ms | 15.841 / 30.092 / 38.778 / 44.705 | 15.250 / 28.015 / 35.549 / 41.921 |
 | Decode, 1 user, structured / code / prose | 264.6 / 260.4 / 188.4 tok/s | 274.8 / 273.0 / 197.9 tok/s |
 | Decode, 8 users, aggregate | 745.4 / 664.5 / 519.8 tok/s | 808.1 / 720.5 / 556.3 tok/s |
 | Cold prefill | 2,484 tok/s | 2,490 tok/s |
@@ -54,7 +56,7 @@ within restart noise, prefill −0.3%. `serve.sh` refuses
 switch at 0: `VLLM_GLM5_DECODE_IDX_GLUE`, `VLLM_GLM5_DECODE_KDA_V2`,
 `VLLM_GLM5_DECODE_MOE_ROUTE_V2`, `VLLM_GLM5_DECODE_MHC_V2`,
 `VLLM_GLM5_DRAFTER_ROPE_FIT`, plus thin-GEMM rows for 24-row batches. Measured
-together with the peer-to-peer gate on: ms/step 16.26 → 15.05 at one stream,
+together with peer-to-peer on: decode step 16.26 → 15.05 ms at one user,
 29.98 → 27.76 at four, 42.00 → 34.62 at six, 43.92 → 41.55 at eight; cold
 prefill flat.
 
@@ -62,7 +64,8 @@ prefill flat.
 (512, upstream's value, switches it off), `VLLM_GLM5_DRAFTER_SELECTOR_SHARD=1`,
 `VLLM_GLM5_INDEXER_DECODE_ROWS=1`; the engine's own
 `VLLM_GLM5_INDEXER_GATHER_CLAMP` (on) is documented as a kill switch. Together
-+39,626 KV tokens, outputs bit-identical, no step-time cost.
++39,626 KV tokens (+3.45%, measured with peer-to-peer on), outputs
+bit-identical, no step-time cost.
 
 **Accuracy.** Every custom kernel on the default path is now checked on real
 inputs against a 64-bit reference, side by side with the code it replaces. The
@@ -79,15 +82,15 @@ for the draft depth, at no KV cost.
 
 **3,456-token prefill chunks.** The default `MAX_BATCHED` goes from 2048
 (1,152-token chunks) to 3460 (3,456-token chunks). 2,304-token chunks measured
-+8.0% cold prefill against 1,152; 3,456 adds +2.4% to +3.6% on top, for about
-35,600 fewer KV tokens (−3%), with decode step time unchanged.
++8.0% cold prefill against 1,152; 3,456 adds +2.4% on top at 180 W per card,
+for about 35,600 fewer KV tokens (−3%), with decode step time unchanged.
 `MAX_BATCHED=2048` restores the previous chunking.
 
 **Optional PCIe peer-to-peer.** Where the driver advertises peer access, the TP
 all-reduce can run in device memory rather than staging through the host:
 `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1`, with `VLLM_CUSTOM_ALLREDUCE_ALGO` and
 the caching-allocator choice tied to the same variable. On this release: step
-time −3.7% / −6.9% / −8.3% / −6.2% at 1 / 4 / 6 / 8 streams, cold prefill
+time −3.7% / −6.9% / −8.3% / −6.2% at 1 / 4 / 6 / 8 users, cold prefill
 unchanged, +13,209 KV tokens. **It ships at 0**, because it needs peer-to-peer
 enabled at the driver level; at 0 the recipe needs no driver change. See
 "PCIe peer-to-peer (optional)" in the README.
@@ -97,11 +100,35 @@ down when a CustomAllreduce is present; its split collectives ride NCCL
 (`VLLM_GLM5_PREFILL_OVERLAP_BACKEND`, code default `nccl`). That is what
 removes the prefill cost the peer-to-peer path used to carry.
 
-The seven launcher variables are now declared in the engine, so starting the
-server no longer prints unknown-variable warnings.
+The variables the engine reads directly (`VLLM_GLM5_PROLOGUE_FUSE` and its
+three sub-switches, `VLLM_GLM5_AUX_HIDDEN_TENSOR`,
+`VLLM_GLM5_HOST_ALLREDUCE_BUILD_DIR` and `VLLM_CUSTOM_ALLREDUCE_ALGO`) are now
+declared, so starting the server no longer prints unknown-variable warnings.
+
+**The API listens on 127.0.0.1 by default.** `HOST` in `.env` was never
+passed to the server, which listened on every interface; `serve.sh` now passes
+`--host "${HOST:-127.0.0.1}"`. To serve other machines, set `HOST=0.0.0.0` and
+set the new `API_KEY` (every `/v1` request must then carry it as a bearer
+token; `smoke` and `status` send it). With no `API_KEY` there is no key.
+
+**`SERVED_MODEL_NAME` now works.** It was documented but `serve.sh` read
+`SERVED_NAME`, so the model always served as `glm-5.3-flash`. Both names are
+read now (`SERVED_MODEL_NAME` wins), and `smoke` uses the same name.
+
+**`stop`, `restart` and `update` no longer wait on the running server.** The
+server inherited the lock `start.sh` takes, so a later `stop` could give up
+and `restart`/`update` refused while it ran. The server no longer holds it.
+A server started by 1.2.0 or earlier still does: `rm -f logs/lifecycle.lock`
+once before the first `update`, `stop` or `restart` after upgrading.
+
+**Preflight.** It now stops, before any download, if a card reports less than
+60 GiB (`MIN_GPU_MIB` overrides), and `./start.sh download` runs it too. Disk
+figures are given in GiB.
 
 **Scripts.** `DRY=1 ./start.sh` (and `DRY=1 ./serve.sh`) now print the
-environment the server would get as well as the command. `smoke.sh` no longer
+environment the server would get as well as the command, and `DRY=1
+./start.sh` no longer installs or downloads anything first: it says what a
+real start would do. `smoke.sh` no longer needs `bc`. `smoke.sh` no longer
 sends `enable_thinking: false`: the chat request uses `reasoning_effort: "low"`
 and the tool call uses the model's default reasoning, and the smoke test now
 fails if no tool call is parsed.
@@ -119,8 +146,17 @@ step-by-step guide including the peer-to-peer on/off choice, and the roadmap.
 | `VLLM_CUSTOM_ALLREDUCE_ALGO` | not in `.env` | `2stage` | Nothing; read only while peer-to-peer is on |
 | the five decode, five determinism and four KV-headroom switches above | not present | on from `serve.sh` (listed commented) | Nothing; an old `.env` picks them up from `serve.sh` |
 
-Every other key keeps its 1.2.0 default. To go back to the previous engine for
-one run: `VLLM_COMMIT=434dea1a1b ./start.sh update`.
+New keys: `API_KEY` (unset). Every other key keeps its 1.2.0 default.
+
+**Rolling back.** To go back to the previous engine, set `VLLM_COMMIT=434dea1a1b`
+in `.env` and run `./start.sh update`. A prefix assignment
+(`VLLM_COMMIT=434dea1a1b ./start.sh update`) lasts one run: the next plain
+start or restart reinstalls `3bbb99a534`. That rolls back the engine only; for
+the 1.2.0 scripts and defaults as well, `git checkout v1.2.0` and
+`./start.sh restart` (back again: `git checkout main`, then `./start.sh update`).
+Engine pins from 1.1.0 on (`69c33802d0`, `434dea1a1b`) are on the fork branch;
+1.0.x's `cf80da1839` predates a rebase of the branch and a fresh install cannot
+fetch it.
 
 ### Planned
 
@@ -176,7 +212,7 @@ publishes.
 
 Validated on four sm_80 cards against the previous pin: ms/step at one stream
 17.11 vs 17.61, at four streams 32.04 vs 32.86, cold prefill 2,243 tok/s,
-TTFT on a 23,255-token prompt 9.77 s, GSM8K 0.980 at n=50, KV pool 1,160,192
+TTFT on a 23,255-token prompt 9.77 s, GSM8K 0.980 on a 50-problem sample, KV pool 1,160,192
 tokens at a 262,144-token context.
 
 `./start.sh install` needs no change for the new pin, but **a pin bump is not
@@ -220,7 +256,8 @@ First public cut of the recipe.
 
 **Engine.** Pinned to [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx)
 `ampere-glm53` at commit `cf80da1839`, "[GLM-5.3-Flash] Host-staged all-reduce
-for PCIe-only nodes without P2P". Seven sm_80 features, each off by default in
+for PCIe-only nodes without P2P". (That commit predates a later rebase of the
+branch and can no longer be installed; roll back no further than 1.1.0.) Seven sm_80 features, each off by default in
 the engine and turned on by `serve.sh`, each with a one-variable kill switch:
 Ampere sparse-MLA / indexer / kpool backends, TP prefill comm/compute overlap,
 host-staged all-reduce for nodes without peer access, thin-M BF16 GEMM, sm_80
@@ -242,7 +279,7 @@ every key. `install.sh`, `download.sh` and `stop.sh` are thin wrappers.
 **Results.** Decode and cold-prefill measurements taken 2026-09-18 against
 MiaAI-Lab's published 2x DGX Spark figures, using their benchmark prompts.
 
-**Known limits.** Tensor-parallel only. The seven features target TP=4 shapes
+**Known limits.** Tensor-parallel only. These features target TP=4 shapes
 and the recipe assumes PCIe Gen2 x16 links between the cards; for a
 pipeline-parallel recipe on the same hardware see
 [JJ48/glm53-flash-170hx-serving](https://github.com/JJ48/glm53-flash-170hx-serving).

@@ -13,7 +13,8 @@
 # Env overrides:
 #   HOST        default 127.0.0.1
 #   PORT        default 8000
-#   MODEL_ID    default glm-5.3-flash
+#   MODEL_ID    default $SERVED_MODEL_NAME, else glm-5.3-flash
+#   API_KEY     sent as "Authorization: Bearer <key>" when set
 #   WAIT        seconds to wait for /health (default 900 -- a cold start is
 #               model load plus CUDA graph capture, several minutes)
 #   SERVE_LOG   server log to scrape the KV line from (default ./logs/serve.log)
@@ -23,11 +24,22 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 BASE="http://$HOST:$PORT"
-MODEL_ID="${MODEL_ID:-glm-5.3-flash}"
+MODEL_ID="${MODEL_ID:-${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}}"
 WAIT="${WAIT:-900}"
 SERVE_LOG="${SERVE_LOG:-$REPO_ROOT/logs/serve.log}"
 
 command -v jq >/dev/null || { echo "smoke.sh: needs jq." >&2; exit 1; }
+
+# /v1 needs the key when the server was started with API_KEY; /health never does.
+AUTH=()
+[ -n "${API_KEY:-}" ] && AUTH=(-H "Authorization: Bearer $API_KEY")
+
+# POST a chat request. Prints the response body, then on its own last line the
+# wall time curl measured, so no clock arithmetic is needed here.
+post_chat() {
+  curl -s ${AUTH[@]+"${AUTH[@]}"} -w '\n%{time_total}' "$BASE/v1/chat/completions" \
+    -H 'Content-Type: application/json' -d "$1"
+}
 
 echo "==> waiting for $BASE/health (up to ${WAIT}s)"
 deadline=$(( $(date +%s) + WAIT ))
@@ -36,7 +48,7 @@ until [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health" || true)" = "20
   sleep 5
 done
 echo "    healthy"
-echo "    served models: $(curl -s "$BASE/v1/models" | jq -r '.data[].id' | paste -sd, -)"
+echo "    served models: $(curl -s ${AUTH[@]+"${AUTH[@]}"} "$BASE/v1/models" | jq -r '.data[].id' | paste -sd, -)"
 
 # --- 1. plain chat -----------------------------------------------------------
 echo
@@ -48,14 +60,14 @@ req_chat=$(jq -n --arg m "$MODEL_ID" '{
   temperature: 0,
   reasoning_effort: "low"
 }')
-t0=$(date +%s.%N)
-resp_chat=$(curl -s "$BASE/v1/chat/completions" -H 'Content-Type: application/json' -d "$req_chat")
-t1=$(date +%s.%N)
+out=$(post_chat "$req_chat")
+wall_chat=${out##*$'\n'}
+resp_chat=${out%$'\n'*}
 # Any reasoning comes back in .reasoning and the answer in .content.
 echo "$resp_chat" | jq -e '(.choices[0].message.content // "") | length > 0' >/dev/null \
   || { echo "smoke.sh: no answer in the chat reply:" >&2; echo "$resp_chat" >&2; exit 1; }
 echo "$resp_chat" | jq -r '"    reply: " + (.choices[0].message.content | .[0:160] | gsub("\n";" ")) + " ..."'
-echo "$resp_chat" | jq -r --arg w "$(echo "$t1 - $t0" | bc)" '
+echo "$resp_chat" | jq -r --arg w "$wall_chat" '
   .usage as $u | "    usage: prompt=\($u.prompt_tokens) completion=\($u.completion_tokens) wall=\($w|tonumber|.*100|round/100)s  ->  \(($u.completion_tokens / ($w|tonumber) * 10 | round) / 10) tok/s"'
 
 # --- 2. tool call ------------------------------------------------------------
@@ -83,9 +95,9 @@ req_tool=$(jq -n --arg m "$MODEL_ID" '{
   max_tokens: 400,
   temperature: 0
 }')
-t0=$(date +%s.%N)
-resp_tool=$(curl -s "$BASE/v1/chat/completions" -H 'Content-Type: application/json' -d "$req_tool")
-t1=$(date +%s.%N)
+out=$(post_chat "$req_tool")
+wall_tool=${out##*$'\n'}
+resp_tool=${out%$'\n'*}
 if [ "$(echo "$resp_tool" | jq -r '(.choices[0].message.tool_calls // []) | length')" -gt 0 ]; then
   echo "$resp_tool" | jq -r '.choices[0].message.tool_calls[0] | "    tool_call: \(.function.name)(\(.function.arguments))"'
 else
@@ -93,7 +105,7 @@ else
   echo "$resp_tool" | jq -r '"    content: " + ((.choices[0].message.content // "") | .[0:200])' >&2
   exit 1
 fi
-echo "$resp_tool" | jq -r --arg w "$(echo "$t1 - $t0" | bc)" '
+echo "$resp_tool" | jq -r --arg w "$wall_tool" '
   .usage as $u | "    usage: prompt=\($u.prompt_tokens) completion=\($u.completion_tokens) wall=\($w|tonumber|.*100|round/100)s  ->  \(($u.completion_tokens / ($w|tonumber) * 10 | round) / 10) tok/s"'
 
 # --- 3. KV line from the log -------------------------------------------------
