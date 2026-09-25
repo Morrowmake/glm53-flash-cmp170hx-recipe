@@ -360,10 +360,9 @@ MAX_LEN=131072 ./start.sh restart
 | `EXTRA_ARGS` | unset | appended to the `vllm serve` command line |
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
-An `.env` copied from an earlier release pins `MAX_BATCHED=2048`; delete that
-line to get this release's 3,456-token chunks. If you uncommented `VLLM_COMMIT`
-in `.env`, delete that line too (or set it to `3bbb99a534`), or
-`./start.sh update` keeps the old engine.
+`.env.example` leaves the engine pin, `MAX_BATCHED` and the switches added
+in this release commented out, so a later release's new defaults for them
+apply without editing `.env`. To move to a later release, run `./start.sh update`.
 
 ### PCIe peer-to-peer (optional)
 

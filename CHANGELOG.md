@@ -2,10 +2,11 @@
 
 ## 1.3.0 — 2026-09-25
 
-**Upgrade:** `./start.sh update`. It pulls this release, sees that the engine
-pin moved, reinstalls the engine (a few minutes; the checkpoints are kept) and
-restarts the server. Before you run it, check your `.env` for the two lines
-below.
+**Install:** `./start.sh` (see the README). Later releases update with
+`./start.sh update`: it pulls, reinstalls the engine if its pin moved and
+restarts the server. `.env.example` leaves the engine pin, `MAX_BATCHED` and
+the switches added in this release commented out, so a later release's new
+defaults for them apply without editing `.env`.
 
 **Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
 Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the
@@ -136,18 +137,6 @@ fails if no tool call is parsed.
 
 **README rewritten**: results first, what makes it fast and correct, a
 step-by-step guide including the peer-to-peer on/off choice, and the roadmap.
-
-### `.env` defaults that changed
-
-| Key | 1.2.0 | 1.3.0 | What to do in an existing `.env` |
-|---|---|---|---|
-| `MAX_BATCHED` | `2048` (uncommented) | `3460` from `serve.sh` (commented) | **Delete the `MAX_BATCHED=2048` line**, or keep it to stay on 1,152-token chunks |
-| `VLLM_COMMIT` | `434dea1a1b` (commented) | `3bbb99a534` (commented) | Nothing if it is still commented. If you uncommented it, **delete the line** (or set `3bbb99a534`), or `update` keeps the old engine |
-| `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | not in `.env`; 0 | `0` | Nothing; set `1` only if peer-to-peer works on your cards |
-| `VLLM_CUSTOM_ALLREDUCE_ALGO` | not in `.env` | `2stage` | Nothing; read only while peer-to-peer is on |
-| the five decode, five determinism and four KV-headroom switches above | not present | on from `serve.sh` (listed commented) | Nothing; an old `.env` picks them up from `serve.sh` |
-
-New keys: `API_KEY` (unset). Every other key keeps its 1.2.0 default.
 
 **Rolling back.** To go back to the previous engine, set `VLLM_COMMIT=434dea1a1b`
 in `.env` and run `./start.sh update`. A prefix assignment
