@@ -4,9 +4,9 @@
 
 **Install:** `./start.sh` (see the README). Later releases update with
 `./start.sh update`: it pulls, reinstalls the engine if its pin moved and
-restarts the server. `.env.example` leaves the engine pin, `MAX_BATCHED` and
-the switches added in this release commented out, so a later release's new
-defaults for them apply without editing `.env`.
+restarts the server. Every setting in `.env.example` is now commented out and
+shows its default; uncommenting one overrides that default, so a later
+release's new defaults apply without editing `.env`.
 
 **Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
 Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the

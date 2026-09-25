@@ -347,7 +347,7 @@ MAX_LEN=131072 ./start.sh restart
 | `GPU_UTIL` | `0.95` | share of each card's memory the engine may use |
 | `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculative drafter and draft depth; `mtp` uses the MTP head in the model checkpoint, `none` turns speculation off |
 | `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | `0` | the [peer-to-peer](#pcie-peer-to-peer-optional) switch |
-| `MAX_BATCHED` | `3460` (commented) | sets the prefill chunk: 3,456 tokens; `2048` gives 1,152 |
+| `MAX_BATCHED` | `3460` | sets the prefill chunk: 3,456 tokens; `2048` gives 1,152 |
 | `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | fair prefill and its slice size while others decode |
 | `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it cost 15% prefill here and turns the prefill features off |
 | `MM_CAP` | `0` | `1` bounds image and video inputs, which returns roughly 150k KV tokens |
@@ -360,9 +360,10 @@ MAX_LEN=131072 ./start.sh restart
 | `EXTRA_ARGS` | unset | appended to the `vllm serve` command line |
 | `HF_TOKEN` | unset | a Hugging Face token makes the download faster |
 
-`.env.example` leaves the engine pin, `MAX_BATCHED` and the switches added
-in this release commented out, so a later release's new defaults for them
-apply without editing `.env`. To move to a later release, run `./start.sh update`.
+Every setting in `.env.example` is commented out and shows its default;
+uncommenting one overrides that default. A `.env` you have not edited
+therefore picks up a later release's new defaults without changes. To move
+to a later release, run `./start.sh update`.
 
 ### PCIe peer-to-peer (optional)
 
