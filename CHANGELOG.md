@@ -13,7 +13,10 @@ weights), `container.env` with `serve.sh`'s defaults written out (peer-to-peer
 off), and the `docker run` command with the two checkpoints and the compile
 cache mounted. Needs the NVIDIA Container Toolkit and driver 580 or newer. The
 README links it under *Run in a container*; the native install remains the
-primary path.
+primary path. The image is published at
+`ghcr.io/morrowmake/vllm-cmp170hx@sha256:ee978fb3e3d11cf8577a014539a7ad4e2a8dff95163fc5d96c0a06fcf9c64640`
+and runs within 0.4 % of the native install (decode at 1 / 4 / 8 users and
+cold prefill).
 
 ## 1.3.0 — 2026-09-25
 

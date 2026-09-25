@@ -27,7 +27,16 @@ Image name (compressed size about 10.35 GB):
 ghcr.io/morrowmake/vllm-cmp170hx:1.3.0-0ed7d3e7f3
 ```
 
-Digest: PENDING (to be published)
+Digest (pull by digest to get exactly the tested image):
+
+```
+docker pull ghcr.io/morrowmake/vllm-cmp170hx@sha256:ee978fb3e3d11cf8577a014539a7ad4e2a8dff95163fc5d96c0a06fcf9c64640
+```
+
+**Measured:** on the same four cards at 180 W with peer-to-peer off, the image
+runs at the native install's speed: 15.79 / 30.16 / 44.89 ms per decode step
+at 1 / 4 / 8 users (native 15.84 / 30.09 / 44.71) and 2,488 tokens/s cold
+prefill (native 2,484), all within 0.4 %.
 
 ## Build it
 
