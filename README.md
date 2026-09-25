@@ -265,7 +265,9 @@ done, so running it twice is safe. The same steps one at a time:
 ./start.sh stop    # stop it; weights and venv stay, so the next start is quick
 ```
 
-Weight loading and CUDA-graph capture take a few minutes after the download.
+After the download, the first boot of a fresh install takes about 7–8 minutes
+to become healthy, because it also builds the kernel compile caches; later
+boots take about 3 minutes (weight loading and CUDA-graph capture).
 `./serve.sh` runs the server in the foreground instead of step 3 if you prefer;
 it reads its settings from the environment, not from `.env`. A server started
 that way is invisible to `./start.sh status`, `stop` and `restart`: stop it with
@@ -364,6 +366,10 @@ Every setting in `.env.example` is commented out and shows its default;
 uncommenting one overrides that default. A `.env` you have not edited
 therefore picks up a later release's new defaults without changes. To move
 to a later release, run `./start.sh update`.
+
+Write each setting as `KEY=value` on its own line. In an unquoted value,
+anything after a space and `#` is a note and is ignored; quote the value
+(`"..."`) to keep it exactly as written.
 
 ### PCIe peer-to-peer (optional)
 

@@ -83,8 +83,19 @@ fi
 # expansion happens inside a value. A key already present in the environment is
 # left alone even when it is explicitly empty, which is what makes
 # `KEY= ./start.sh` mean "unset this knob" rather than "use the .env value".
+#
+# Values: a value in matching quotes ("..." or '...') is taken exactly as
+# written between them; a note after the closing quote is ignored. An unquoted
+# value ends at the first whitespace-then-# (`KEY=v  # note` gives `v`), then a
+# trailing note in parentheses after two or more spaces is dropped
+# (`KEY=v   (default: x)` gives `v`), then surrounding whitespace is trimmed.
+# A # or ( with no whitespace before it (`a#b`, `f(x)`) or after a single
+# space (`a (b)`) stays in the value; quote the value to keep anything else.
 load_env_defaults() {
-    local file="$1" line key val
+    local file="$1" line key val raw
+    local re_dq='^"([^"]*)"[[:space:]]*(#.*|\(.*\))?$'
+    local re_sq="^'([^']*)'[[:space:]]*(#.*|\\(.*\\))?\$"
+    local re_paren='^(.*)[[:space:]][[:space:]]+\([^()]*\)[[:space:]]*$'
     [ -r "$file" ] || return 0
     while IFS= read -r line || [ -n "$line" ]; do
         line="${line%$'\r'}"
@@ -96,10 +107,21 @@ load_env_defaults() {
         key="${key%"${key##*[![:space:]]}"}"             # rtrim
         case "$key" in ''|*[!A-Za-z0-9_]*) continue ;; esac
         [ -n "${!key+x}" ] && continue                   # caller already set it
-        case "$val" in                                   # one layer of quotes
-            \"*\") val="${val#\"}"; val="${val%\"}" ;;
-            \'*\') val="${val#\'}"; val="${val%\'}" ;;
-        esac
+        raw="$val"
+        val="${val#"${val%%[![:space:]]*}"}"             # ltrim
+        if [[ $val =~ $re_dq || $val =~ $re_sq ]]; then  # quoted: verbatim
+            val="${BASH_REMATCH[1]}"
+        else
+            case "$val" in                               # quotes around a value
+                \"*\") val="${val#\"}"; val="${val%\"}" ;;   # that holds quotes
+                \'*\') val="${val#\'}"; val="${val%\'}" ;;
+                *)                                       # unquoted: drop notes
+                    val="${raw%%[[:space:]]#*}"          # (KEY= # x is empty)
+                    [[ $val =~ $re_paren ]] && val="${BASH_REMATCH[1]}"
+                    val="${val#"${val%%[![:space:]]*}"}"
+                    val="${val%"${val##*[![:space:]]}"}" ;;      # trim
+            esac
+        fi
         export "$key=$val"
     done <"$file"
 }
