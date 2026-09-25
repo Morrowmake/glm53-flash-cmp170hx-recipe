@@ -5,7 +5,7 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/3bbb99a5344c3a9cc7e0a1c8ff0d602263520ef5"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%203bbb99a534-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/0ed7d3e7f3f855646a139701598a9b40d5745688"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%200ed7d3e7f3-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="release" src="https://img.shields.io/badge/release-1.3.0-2ea44f?style=flat">
   &nbsp;
@@ -161,7 +161,7 @@ are accepted less often (0.58–0.60 against 0.84–0.98).
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`3bbb99a534`](https://github.com/Morrowmake/vllm-cmp170hx/commit/3bbb99a5344c3a9cc7e0a1c8ff0d602263520ef5) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`0ed7d3e7f3`](https://github.com/Morrowmake/vllm-cmp170hx/commit/0ed7d3e7f3f855646a139701598a9b40d5745688) |
 | Layout | tensor-parallel 4 (`TP=4`, `PP=1`); assumes PCIe Gen2 x16 between the cards — see [Link width](#link-width) |
 | Context | 262,144 tokens |
 | KV cache | full precision, **not quantised**; 1,174,567 tokens at 262,144 context (1,187,776 with peer-to-peer on) |

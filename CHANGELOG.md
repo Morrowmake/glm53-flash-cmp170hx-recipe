@@ -10,8 +10,8 @@ release's new defaults apply without editing `.env`. Each note in
 `.env.example` now sits on its own line, and a note left after an unquoted
 value (`KEY=value  # note`) is no longer read into the value.
 
-**Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
-Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the
+**Engine pin moves to `0ed7d3e7f3`** (98 commits on upstream `496c6472cb`).
+Installed version `0.29.1rc1.dev617+g0ed7d3e7f.precompiled`. As before, the
 fork adds no C++ or CUDA source, so the install uses upstream's precompiled
 extensions for that base.
 
@@ -81,6 +81,10 @@ the per-request tail of the sparse-attention key pool, leaving a wrong pool key
 in the indexer cache past 2,048 tokens of context. The tail ring is now sized
 for the draft depth, at no KV cost.
 
+**Startup fix.** Startup no longer hangs when the host-memory all-reduce fails
+to set up on some cards (peer-to-peer off); all cards now agree and fall back
+together.
+
 **3,456-token prefill chunks.** The default `MAX_BATCHED` goes from 2048
 (1,152-token chunks) to 3460 (3,456-token chunks). 2,304-token chunks measured
 +8.0% cold prefill against 1,152; 3,456 adds +2.4% on top at 180 W per card,
@@ -143,7 +147,7 @@ step-by-step guide including the peer-to-peer on/off choice, and the roadmap.
 **Rolling back.** To go back to the previous engine, set `VLLM_COMMIT=434dea1a1b`
 in `.env` and run `./start.sh update`. A prefix assignment
 (`VLLM_COMMIT=434dea1a1b ./start.sh update`) lasts one run: the next plain
-start or restart reinstalls `3bbb99a534`. That rolls back the engine only; for
+start or restart reinstalls `0ed7d3e7f3`. That rolls back the engine only; for
 the 1.2.0 scripts and defaults as well, `git checkout v1.2.0` and
 `./start.sh restart` (back again: `git checkout main`, then `./start.sh update`).
 Engine pins from 1.1.0 on (`69c33802d0`, `434dea1a1b`) are on the fork branch;
