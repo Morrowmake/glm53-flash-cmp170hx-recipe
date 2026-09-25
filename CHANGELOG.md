@@ -5,9 +5,7 @@
 **Upgrade:** `./start.sh update`. It pulls this release, sees that the engine
 pin moved, reinstalls the engine (a few minutes; the checkpoints are kept) and
 restarts the server. Before you run it, check your `.env` for the two lines
-below, and if the server is running (it was started by 1.2.0 or earlier, which
-left it holding the checkout's lock), run `rm -f logs/lifecycle.lock` first,
-or `update` reports the checkout as busy.
+below.
 
 **Engine pin moves to `3bbb99a534`** (97 commits on upstream `496c6472cb`).
 Installed version `0.29.1rc1.dev616+g3bbb99a53.precompiled`. As before, the
@@ -117,9 +115,10 @@ read now (`SERVED_MODEL_NAME` wins), and `smoke` uses the same name.
 
 **`stop`, `restart` and `update` no longer wait on the running server.** The
 server inherited the lock `start.sh` takes, so a later `stop` could give up
-and `restart`/`update` refused while it ran. The server no longer holds it.
-A server started by 1.2.0 or earlier still does: `rm -f logs/lifecycle.lock`
-once before the first `update`, `stop` or `restart` after upgrading.
+and `restart`/`update` refused while it ran. The server no longer holds it,
+and if a server started by an earlier release still does, `start.sh` sees that
+only that server holds it and carries on; a command that is really running
+still makes the checkout busy.
 
 **Preflight.** It now stops, before any download, if a card reports less than
 60 GiB (`MIN_GPU_MIB` overrides), and `./start.sh download` runs it too. Disk
@@ -128,7 +127,9 @@ figures are given in GiB.
 **Scripts.** `DRY=1 ./start.sh` (and `DRY=1 ./serve.sh`) now print the
 environment the server would get as well as the command, and `DRY=1
 ./start.sh` no longer installs or downloads anything first: it says what a
-real start would do. `smoke.sh` no longer needs `bc`. `smoke.sh` no longer
+real start would do. With `stop`, `restart` or `update`, `DRY=1` takes the
+checkout's lock and says what it would stop, without stopping, pulling or
+installing anything. `smoke.sh` no longer needs `bc`. `smoke.sh` no longer
 sends `enable_thinking: false`: the chat request uses `reasoning_effort: "low"`
 and the tool call uses the model's default reasoning, and the smoke test now
 fails if no tool call is parsed.

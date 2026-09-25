@@ -43,12 +43,16 @@
 #
 # DRY=1 ./start.sh runs the preflight, says whether it would install or
 # download, and prints the server environment and launch command. It installs,
-# downloads and launches nothing, and works before the first install.
+# downloads and launches nothing, and works before the first install. With
+# stop, restart or update, DRY=1 also takes the checkout's lock and says what
+# it would stop, without stopping, pulling or installing anything.
 #
 # Lifecycle commands on this checkout are serialised by a flock on
 # logs/lifecycle.lock. start/restart/install/download refuse immediately when
 # another one holds it; stop waits LOCK_WAIT seconds and then exits 1 WITHOUT
 # stopping anything. The lock is per checkout: another clone is not covered.
+# A lock left held by a server from an earlier release is recognised and
+# cleared, never by signalling anything.
 #
 # stop only ever signals the PID in logs/vllm.pid, and only after confirming
 # that process is the server this checkout launched. It never searches by
@@ -164,22 +168,111 @@ banner() {
 # ------------------------------- locking -----------------------------------
 # The flock is the authoritative owner; $LOCKPID is advisory diagnostics only
 # and is never signalled.
-take_lock() {
+#
+# A server launched by an earlier release inherited the lock's descriptor and
+# held the lock for its whole life. When the lock is busy we therefore look at
+# who holds it (read only, via /proc, our own processes only). If every holder
+# belongs to the server in $PIDFILE (that pid, or its process group/session
+# after setsid) and none is a start.sh, the lock is stale: we unlink the file
+# and lock a fresh one. The old server keeps its descriptor on the unlinked
+# file, which no longer matters. Nothing is ever signalled here; stop, restart
+# and update still stop the server through do_stop. The clearing itself is
+# serialised by a short-lived second lock, so two commands cannot both clear.
+
+# PIDs (ours to read) with an open descriptor on $LOCKFILE, one per line.
+lock_holders() {
+    local f p
+    for f in /proc/[0-9]*/fd/[0-9]*; do
+        [ "$f" -ef "$LOCKFILE" ] || continue
+        p="${f#/proc/}"
+        echo "${p%%/*}"
+    done | sort -u
+}
+
+# True when pid $1 is the server pid $2 or runs inside its group/session.
+holder_is_server() {
+    local h="$1" s="$2" st cl
+    cl="$(tr '\0' ' ' <"/proc/$h/cmdline" 2>/dev/null || true)"
+    case "$cl" in *start.sh*) return 1 ;; esac
+    [ "$h" = "$s" ] && return 0
+    read -r st 2>/dev/null <"/proc/$h/stat" || return 1
+    st="${st##*) }"                        # fields after "pid (comm) "
+    set -- $st                             # state ppid pgrp session ...
+    [ "${3:-}" = "$s" ] || [ "${4:-}" = "$s" ]
+}
+
+# True when the lock is held, and held only by this checkout's server.
+lock_held_by_server_only() {
+    local s h holders
+    s="$(read_pid)"
+    pid_is_ours "$s" || return 1
+    holders="$(lock_holders)"
+    [ -n "$holders" ] || return 1
+    for h in $holders; do
+        holder_is_server "$h" "$s" || return 1
+    done
+    return 0
+}
+
+# True when fd 9 is still the file at $LOCKFILE (not one unlinked meanwhile).
+lock_is_current() {
+    [ -e "/proc/$$/fd/9" ] || return 0
+    [ "$LOCKFILE" -ef "/proc/$$/fd/9" ]
+}
+
+# Lock $LOCKFILE on fd 9. Returns 0 when locked, 1 when a real command holds
+# it. Clears a stale lock (see above) on the way.
+acquire_lock() {
+    local tries=0
     mkdir -p "$LOGDIR"
-    exec 9>"$LOCKFILE"
-    if ! flock -n 9; then
-        local holder; holder="$(tr -d '[:space:]' <"$LOCKPID" 2>/dev/null || true)"
+    while [ "$tries" -lt 5 ]; do
+        tries=$((tries + 1))
+        exec 9>"$LOCKFILE"
+        if flock -n 9; then
+            # Make sure the path still names the file we locked; if another
+            # command replaced it meanwhile, go round again.
+            lock_is_current && return 0
+            exec 9>&-
+            continue
+        fi
+        exec 9>&-
+        exec 8>"$LOCKFILE.gate"
+        flock -w 10 8 || { exec 8>&-; return 1; }
+        exec 9>"$LOCKFILE"
+        if flock -n 9; then                  # freed or cleared meanwhile
+            exec 8>&-
+            lock_is_current && return 0
+            exec 9>&-
+            continue
+        fi
+        exec 9>&-
+        if lock_held_by_server_only; then
+            log "an earlier server was holding the lock; continuing"
+            rm -f "$LOCKFILE"
+            exec 8>&-
+            continue
+        fi
+        exec 8>&-
+        return 1
+    done
+    return 1
+}
+
+take_lock() {
+    if ! acquire_lock; then
+        local holder; holder="$(tr -d '[:space:]' 2>/dev/null <"$LOCKPID" || true)"
         die "this checkout is busy${holder:+ with pid $holder}. Wait for that command to finish, then try again."
     fi
     echo $$ >"$LOCKPID" 2>/dev/null || true
 }
 take_lock_for_stop() {
-    mkdir -p "$LOGDIR"
-    exec 9>"$LOCKFILE"
-    if ! flock -w "$LOCK_WAIT" 9; then
-        local holder; holder="$(tr -d '[:space:]' <"$LOCKPID" 2>/dev/null || true)"
-        warn "gave up waiting ${LOCK_WAIT}s for this checkout${holder:+ (pid $holder has it)}."
-        die "The server was left running. Try stop again once that command finishes."
+    if ! acquire_lock; then
+        exec 9>"$LOCKFILE"
+        if ! flock -w "$LOCK_WAIT" 9 || ! lock_is_current; then
+            local holder; holder="$(tr -d '[:space:]' 2>/dev/null <"$LOCKPID" || true)"
+            warn "gave up waiting ${LOCK_WAIT}s for this checkout${holder:+ (pid $holder has it)}."
+            die "The server was left running. Try stop again once that command finishes."
+        fi
     fi
     echo $$ >"$LOCKPID" 2>/dev/null || true
 }
@@ -603,6 +696,24 @@ dry_start() {
     launch
 }
 
+# DRY stop/update: the lock is taken for real (that is what they check), and
+# nothing is signalled, pulled or installed.
+dry_stop() {
+    local pid; pid="$(read_pid)"
+    if [ -z "$pid" ]; then
+        log "stop: DRY=1, nothing started from this checkout is running"
+    elif pid_is_ours "$pid"; then
+        log "stop: DRY=1, a real stop would send SIGINT to pid $pid (process group)"
+    else
+        log "stop: DRY=1, pid $pid is not our server; a real stop would only clear the pid file"
+    fi
+}
+dry_update() {
+    log "update: DRY=1, a real update would git pull --ff-only, reinstall if the pin moved, then restart"
+    dry_stop
+    dry_start
+}
+
 start_unlocked() {
     if [ -n "${DRY:-}" ]; then dry_start; return 0; fi
     preflight --with-port
@@ -627,9 +738,9 @@ main() {
         start)    if [ -n "${DRY:-}" ]; then dry_start; else take_lock; start_unlocked; fi ;;
         install)  take_lock; preflight; do_install ;;
         download) take_lock; preflight; do_download ;;
-        stop)     take_lock_for_stop; do_stop ;;
-        restart)  if [ -n "${DRY:-}" ]; then dry_start; else take_lock; do_stop; start_unlocked; fi ;;
-        update)   take_lock; do_update ;;
+        stop)     take_lock_for_stop; if [ -n "${DRY:-}" ]; then dry_stop; else do_stop; fi ;;
+        restart)  take_lock; if [ -n "${DRY:-}" ]; then dry_stop; else do_stop; fi; start_unlocked ;;
+        update)   take_lock; if [ -n "${DRY:-}" ]; then dry_update; else do_update; fi ;;
         status)   do_status ;;
         logs)     do_logs ;;
         smoke)    HOST="$CLIENT_HOST" exec "$SCRIPT_DIR/smoke.sh" ;;

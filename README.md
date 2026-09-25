@@ -363,10 +363,7 @@ MAX_LEN=131072 ./start.sh restart
 An `.env` copied from an earlier release pins `MAX_BATCHED=2048`; delete that
 line to get this release's 3,456-token chunks. If you uncommented `VLLM_COMMIT`
 in `.env`, delete that line too (or set it to `3bbb99a534`), or
-`./start.sh update` keeps the old engine. If a server started by 1.2.0 or
-earlier is running, run `rm -f logs/lifecycle.lock` once before
-`./start.sh update`: those releases left the server holding the checkout's
-lock.
+`./start.sh update` keeps the old engine.
 
 ### PCIe peer-to-peer (optional)
 
