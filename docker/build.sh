@@ -30,11 +30,14 @@ OUT="$HERE/out"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="ampere-glm53"
-VLLM_COMMIT="${VLLM_COMMIT:-PIN_PENDING}"
+VLLM_COMMIT="${VLLM_COMMIT:-9cdecd00a43d559154f9e6427466987f5beda3ea}"
 # Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
 # wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
 VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"
 RELEASE="1.4.0"
+# Upstream release tag the pin's base descends from (sets the version string).
+VERSION_TAG="v0.30.1rc0"
+UPSTREAM_REPO="https://github.com/vllm-project/vllm.git"
 PYTHON_VERSION="3.12"
 REG="127.0.0.1:5055"
 NAME="vllm-cmp170hx"
@@ -66,6 +69,14 @@ build_tree() {
         git -C "$STAGE/opt/vllm-src" update-ref -d "refs/remotes/origin/$CLONE_BRANCH"
         git -C "$STAGE/opt/vllm-src" remote set-branches origin "$VLLM_BRANCH"
     fi
+    # The installed version string comes from the nearest upstream release tag
+    # (setuptools-scm); make sure the clone has it even when CLONE_FROM does not.
+    if ! git -C "$STAGE/opt/vllm-src" rev-parse -q --verify "refs/tags/$VERSION_TAG" >/dev/null; then
+        git -C "$STAGE/opt/vllm-src" fetch --filter=blob:none --no-tags "$UPSTREAM_REPO" \
+            "refs/tags/$VERSION_TAG:refs/tags/$VERSION_TAG"
+    fi
+    git -C "$STAGE/opt/vllm-src" merge-base --is-ancestor "$VERSION_TAG" HEAD \
+        || { echo "$VERSION_TAG is not an ancestor of $VLLM_COMMIT" >&2; exit 1; }
     git -C "$STAGE/opt/vllm-src" submodule update --init --recursive --depth 1
 
     export VIRTUAL_ENV="$STAGE/opt/venv"

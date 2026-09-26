@@ -81,7 +81,6 @@
 #   VLLM_PP_SPREAD_DECODES=0 / VLLM_PP_PACKED_HOP=0 / VLLM_PP_HOP_NO_METADATA=0 /
 #   VLLM_PP_SPLIT_DRAFT_EVENT=0 / VLLM_GLM5_PP_FOLD_DRAFT_FC=0
 #                                 PP4 pipeline and drafter changes, PP only
-#   VLLM_PP_DRAFT_TAIL_STAGE=-1   PP4 drafter tail on stage 3 instead of 2
 #   VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1  the sparse-attention decode schedule
 #                                 from before 1.2.0 (the retuned one is on in
 #                                 the engine; not set here)
@@ -89,17 +88,17 @@
 #                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
 #                                 needs peer-to-peer enabled at the driver level
 #                                 -- see the optional section in the README.
-#                                 Measured on 1.3.0: decode step -3.7% at 1 user,
-#                                 -6.9% at 4, -8.3% at 6, -6.2% at 8, cold
-#                                 prefill unchanged, KV +13,209 tokens.
+#                                 On this release (TP4): decode step -3.7% at 1
+#                                 user, -4.3% at 4, -7.6% at 6, -9.1% at 8, cold
+#                                 prefill +14.7% (with NCCL over peer-to-peer,
+#                                 below), KV +21,011 tokens.
 #                                 0 keeps the host-staged path.
 #   VLLM_CUSTOM_ALLREDUCE_ALGO=   which CustomAllreduce kernel; 2stage here
 #                                 because the built-in crossover is NVLink-tuned
 #                                 and 1stage measured worse on Gen2 x16. Inert
 #                                 unless the switch above is 1. Unset = upstream.
-#   GLM5_NCCL_P2P_SYS=1           NCCL over peer-to-peer too (NCCL_P2P_LEVEL=SYS),
-#                                 TP4 with the switch above at 1 only.
-#                                 Default PENDING (0 for now), see below.
+#   GLM5_NCCL_P2P_SYS=0           NCCL over peer-to-peer too (NCCL_P2P_LEVEL=SYS);
+#                                 on by default with the switch above at 1 (TP4).
 #   VLLM_GLM5_PREFILL_OVERLAP_BACKEND=  which communicator carries the prefill
 #                                 overlap's split collectives. NOT set here: the
 #                                 code default is nccl, which measured fastest.
@@ -194,19 +193,6 @@ if [ "$PP" -gt 1 ]; then
   export VLLM_GLM5_PP_FOLD_DRAFT_FC=${VLLM_GLM5_PP_FOLD_DRAFT_FC:-1}
   echo "serve.sh: pipeline: SPREAD=$VLLM_PP_SPREAD_DECODES PACKED_HOP=$VLLM_PP_PACKED_HOP HOP_NO_METADATA=$VLLM_PP_HOP_NO_METADATA SPLIT_DRAFT_EVENT=$VLLM_PP_SPLIT_DRAFT_EVENT FOLD_DRAFT_FC=$VLLM_GLM5_PP_FOLD_DRAFT_FC"
 fi
-# Drafter tail on stage 2 (PP4 only): moves the drafter's vocabulary pass and
-# token selection from the last stage, which also runs the sampler, to stage 2.
-# Outputs are meant to be bit-identical either way. -1 keeps it on the last
-# stage (the engine default), 2 moves it.
-# PENDING: the default is decided by this release's validation (on if
-# bit-identical, 4-user aggregate at least +3% and 1 user not slower); until
-# then it stays -1.
-PP_DRAFT_TAIL_DEFAULT=-1
-if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then
-  export VLLM_PP_DRAFT_TAIL_STAGE=${VLLM_PP_DRAFT_TAIL_STAGE:-$PP_DRAFT_TAIL_DEFAULT}
-  echo "serve.sh: drafter tail stage: $VLLM_PP_DRAFT_TAIL_STAGE (-1 = last stage)"
-fi
-
 # --- prefill kernels, per layout ----------------------------------------------
 # Sparse-attention prefill gather, both layouts: empty top-k slots fetch
 # nothing instead of all reading the same cache row. Bitwise-identical output.
@@ -309,13 +295,12 @@ export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
 # Under PP4 there is no tensor-parallel all-reduce, so the switch does nothing
 # there; the stage-to-stage hand-off uses peer-to-peer by itself where the
 # driver offers it.
-# Measured on 1.3.0 (TP4), four cards with peer-to-peer available, one boot
-# each, release defaults otherwise:
-#   switch 0: decode step at 1 / 4 / 6 / 8 users 15.841 / 30.092 / 38.778 /
-#             44.705 ms, cold prefill 2,484 tok/s, KV 1,174,567
-#   switch 1: decode step at 1 / 4 / 6 / 8 users 15.250 / 28.015 / 35.549 /
-#             41.921 ms,
-#             cold prefill 2,490 tok/s, KV 1,187,776
+# Measured on this release (TP4), four cards with peer-to-peer available, one
+# boot each, release defaults otherwise:
+#   switch 0: decode step at 1 / 4 / 6 / 8 users 15.87 / 29.51 / 38.91 /
+#             44.45 ms, cold prefill 2,670 tok/s, KV 1,156,635
+#   switch 1: decode step at 1 / 4 / 6 / 8 users 15.29 / 28.23 / 35.94 /
+#             40.39 ms, cold prefill 3,062 tok/s, KV 1,177,646
 # The switch ties both decisions together, so 0 is a complete fallback rather
 # than a drop to NCCL: VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
 export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
@@ -342,13 +327,11 @@ fi
 # NCCL over peer-to-peer (TP4 with the switch above at 1). NCCL treats these
 # cards, each on its own root port, as not peer-capable and runs its ring
 # through host memory; NCCL_P2P_LEVEL=SYS lets it use peer-to-peer instead,
-# which carries the large prefill collectives. GLM5_NCCL_P2P_SYS=1 turns it on,
-# 0 off; an explicit NCCL_P2P_LEVEL always wins. Nothing changes with the
-# switch above at 0 (the default) or under PP4.
-# PENDING: whether it is on by default when peer-to-peer is on is decided by
-# this release's validation (on if quality is unchanged and prefill gains);
-# until then the default is 0.
-NCCL_P2P_SYS_DEFAULT=0
+# which carries the large prefill collectives: +13.7% cold prefill with
+# identical outputs. On by default whenever the switch above is 1;
+# GLM5_NCCL_P2P_SYS=0 turns it off, and an explicit NCCL_P2P_LEVEL always wins.
+# Nothing changes with the switch above at 0 (the default) or under PP4.
+NCCL_P2P_SYS_DEFAULT=1
 if [ "$TP" -gt 1 ] && [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ] \
    && [ "${GLM5_NCCL_P2P_SYS:-$NCCL_P2P_SYS_DEFAULT}" = "1" ]; then
   export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-SYS}

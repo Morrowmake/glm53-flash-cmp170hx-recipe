@@ -147,9 +147,9 @@ VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
 # compiled extensions match that commit's upstream base (e55d076f89 has no
 # wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
 # it), and the container image built from them, pinned by digest.
-RELEASE_VLLM_COMMIT=PIN_PENDING
+RELEASE_VLLM_COMMIT=9cdecd00a4
 RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
@@ -893,8 +893,16 @@ wait_ready() {
 }
 
 # --------------------------------- stop ------------------------------------
+# Stops whatever this checkout started, native or container, whatever RUNTIME
+# is set to now, so switching RUNTIME and restarting stops the old server.
 do_stop() {
-    if [ "$RUNTIME" = container ]; then container_stop; return; fi
+    local did=0
+    if [ -f "$CIDFILE" ]; then container_stop; did=1; fi
+    if [ -f "$PIDFILE" ]; then native_stop; did=1; fi
+    [ "$did" = 1 ] || log "stop: nothing started from this checkout is running"
+}
+
+native_stop() {
     local pid; pid="$(read_pid)"
     if [ -z "$pid" ]; then
         log "stop: nothing started from this checkout is running"
@@ -1041,13 +1049,10 @@ dry_start() {
 # DRY stop/update: the lock is taken for real (that is what they check), and
 # nothing is signalled, pulled or installed.
 dry_stop() {
-    if [ "$RUNTIME" = container ]; then
-        local id; id="$(read_cid)"
-        if [ -z "$id" ]; then log "stop: DRY=1, no container started from this checkout"
-        else log "stop: DRY=1, a real stop would docker stop ${id:0:12} if it is ours"; fi
-        return 0
-    fi
+    local id; id="$(read_cid)"
+    [ -z "$id" ] || log "stop: DRY=1, a real stop would docker stop container ${id:0:12} if it is ours"
     local pid; pid="$(read_pid)"
+    [ -n "$pid" ] || [ -z "$id" ] || return 0
     if [ -z "$pid" ]; then
         log "stop: DRY=1, nothing started from this checkout is running"
     elif pid_is_ours "$pid"; then

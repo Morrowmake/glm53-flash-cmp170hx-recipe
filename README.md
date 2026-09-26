@@ -5,7 +5,7 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/PIN_PENDING"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20PIN_PENDING-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/9cdecd00a43d559154f9e6427466987f5beda3ea"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%209cdecd00a4-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="release" src="https://img.shields.io/badge/release-1.4.0-2ea44f?style=flat">
   &nbsp;
@@ -13,9 +13,9 @@
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts: tensor-parallel at {{TP4_OFF_1U_STRUCT}} tok/s for one
-user and {{TP4_OFF_8U_STRUCT}} tok/s across eight, or pipeline-parallel with
-{{PP4_PREFILL}} tok/s cold prefill and a {{PP4_KV}}-token KV pool. The weights
+cards in two layouts: tensor-parallel at 264.4 tok/s for one
+user and 763.1 tok/s across eight, or pipeline-parallel with
+6,264 tok/s cold prefill and a 2,320,328-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. A request sent on its
 own gives the same output every time, on every install.**
@@ -72,16 +72,19 @@ which is what this layout is for).
 
 | | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
 |---|---:|---:|---:|
-| Decode, 1 user, structured / code / prose | **{{TP4_OFF_1U}} tok/s** | **{{TP4_ON_1U}} tok/s** | **{{PP4_1U}} tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **{{TP4_OFF_8U}} tok/s** | **{{TP4_ON_8U}} tok/s** | **{{PP4_8U}} tok/s** |
-| Decode step, 1 / 4 / 6 / 8 users | {{TP4_OFF_STEPS}} ms | {{TP4_ON_STEPS}} ms | {{PP4_STEPS}} ms |
-| Cold prefill | **{{TP4_OFF_PREFILL}} tok/s** | **{{TP4_ON_PREFILL}} tok/s** | **{{PP4_PREFILL}} tok/s** |
-| Time to first token, 6,217 / 23,255-token prompt | {{TP4_OFF_TTFT}} s | {{TP4_ON_TTFT}} s | {{PP4_TTFT}} s |
-| KV pool at 262,144 context | {{TP4_OFF_KV}} tokens ({{TP4_OFF_KV_X}} full-length requests) | {{TP4_ON_KV}} tokens ({{TP4_ON_KV_X}}) | {{PP4_KV}} tokens ({{PP4_KV_X}}) |
+| Decode, 1 user, structured / code / prose | **264.4 / 258.5 / 189.9 tok/s** | **275.8 / 274.0 / 204.2 tok/s** | **142.2 / 138.6 / 100.7 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **763.1 / 684.7 / 512.0 tok/s** | **848.3 / 726.9 / 570.0 tok/s** | **556.3 / 503.5 / 376.8 tok/s** |
+| Decode step, 1 / 4 / 6 / 8 users | 15.87 / 29.51 / 38.91 / 44.45 ms | 15.29 / 28.23 / 35.94 / 40.39 ms | 29.35 ms at 1 user |
+| Cold prefill | **2,670 tok/s** | **3,062 tok/s** | **6,264 tok/s** |
+| Time to first token, 6,217 / 23,255-token prompt | 2.37 / 8.67 s | 2.05 / 7.49 s | 1.49 / 3.79 s |
+| KV pool at 262,144 context | 1,156,635 tokens (4.41 full-length requests) | 1,177,646 tokens (4.49) | 2,320,328 tokens (8.85) |
 
 All at 180 W per card (a power limit we set on our cards; the scripts never
-change power, clock or fan settings), PCIe x16 links, {{RELEASE_BOOTS}}. PP4
-with peer-to-peer on: {{PP4_P2P_ON_LINE}}. Decode
+change power, clock or fan settings), PCIe x16 links, one server start per
+column. PP4 with peer-to-peer on: 141.0 / 139.4 / 105.1 tok/s for one user,
+532.7 / 493.9 / 377.8 across eight, 6,606 tok/s cold prefill, the same KV pool.
+Under PP4 several micro-batches are in flight at once, so its step time is only
+comparable at one user. Decode
 tok/s is the per-request streaming rate on three fixed prompt types —
 structured, code and prose (400 tokens, temperature 0, median of 5); prose is
 slower because the drafter's guesses are accepted less often. Cold prefill is
@@ -93,12 +96,15 @@ size the server can actually fill with prefill chunks in flight (see
 
 | | TP4 (peer-to-peer off) | PP4 |
 |---|---:|---:|
-| Perplexity, fixed 60-document set | **{{TP4_PPL}}** | **{{PP4_PPL}}** |
-| GSM8K, all 1,319 problems | **{{TP4_GSM8K}}** | **{{PP4_GSM8K}}** |
-| HumanEval, all 164, pass@1 | **{{TP4_HUMANEVAL}}** | **{{PP4_HUMANEVAL}}** |
+| Perplexity, fixed 60-document set | **3.2781** | **3.2735** |
+| GSM8K, all 1,319 problems | **0.972** | **0.970** |
+| HumanEval, all 164, pass@1 | **0.9634** | **0.9878** |
 
 HumanEval allows 4,096 tokens per reply and scores the last complete fenced code
-block of the reply, reasoning included. {{HUMANEVAL_NOTES}}
+block of the reply, reasoning included: 158/164 under TP4 (8 replies hit the
+limit) and 162/164 under PP4 (16 hit it). Scoring the first code block instead
+gives 0.8110 and 0.8476. GSM8K cut 2 of 1,319 answers off at 3,072 tokens in
+each layout.
 
 ### Choosing a layout
 
@@ -106,8 +112,8 @@ block of the reply, reasoning included. {{HUMANEVAL_NOTES}}
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | {{TP4_OFF_PREFILL}} tok/s | {{PP4_PREFILL}} tok/s ({{PP4_PREFILL_RATIO}}×) |
-| KV pool | {{TP4_OFF_KV}} tokens | {{PP4_KV}} tokens ({{PP4_KV_RATIO}}×) |
+| Prefill | 2,670 tok/s | 6,264 tok/s (2.35×) |
+| KV pool | 1,156,635 tokens | 2,320,328 tokens (2.01×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
 
@@ -131,7 +137,13 @@ release table above; each line says what it was measured against.
   folded input projection, which is checked against a 64-bit reference.
 - **Tensor-parallel prefill kernels.** The linear-attention prefill runs 1.42×
   faster per prompt per card and the MoE prefill 1.24×, as accurate as before
-  against a 64-bit reference. {{TP4_PREFILL_GAIN_LINE}}
+  against a 64-bit reference.
+- **Against release 1.3.0**, tensor-parallel 4: cold prefill 2,484 → 2,670
+  tok/s (+7.5%) with peer-to-peer off and 2,490 → 3,062 (+23%) with it on,
+  where NCCL now also runs card to card (worth +13.7% on its own, outputs
+  identical).
+  Eight-user aggregate 745.4 → 763.1 tok/s structured (+2.4%) off and
+  808.1 → 848.3 (+5.0%) on; one user unchanged (264.6 → 264.4 structured).
 - **Honest KV figures.** With prefill chunks in flight, a request can hold more
   linear-attention state than the engine used to reserve for it, so the KV pool
   it reported was larger than the server could actually fill: under TP4,
@@ -155,10 +167,9 @@ release table above; each line says what it was measured against.
 
 Release 1.4.0, tensor-parallel 4 with the defaults (peer-to-peer off),
 temperature 0, median of 5. Against release 1.0.0, one user now decodes at
-{{TP4_OFF_1U_STRUCT}} tok/s instead of 238.7 on structured text,
-{{TP4_OFF_1U_CODE}} instead of 232.4 on code and {{TP4_OFF_1U_PROSE}} instead
-of 165.1 on prose, and cold prefill at ~128k tokens runs at
-{{TP4_OFF_PREFILL_128K}} tok/s instead of 2,149.
+264.4 tok/s instead of 238.7 on structured text,
+258.5 instead of 232.4 on code and 189.9 instead
+of 165.1 on prose.
 
 **Decode**, 400 max tokens. `Stream` is per request,
 `(completion_tokens − 1) / (end − first token)`; `Agg` is
@@ -167,33 +178,35 @@ unique nonce so nothing hits the prefix cache.
 
 | Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
 |---|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | **{{D_S1_STREAM}}** | **{{D_S1_AGG}}** | {{D_S1_TTFT}} ms |
-|  | ×2 | **{{D_S2_STREAM}}** | **{{D_S2_AGG}}** | {{D_S2_TTFT}} ms |
-|  | ×4 | **{{D_S4_STREAM}}** | **{{D_S4_AGG}}** | {{D_S4_TTFT}} ms |
-|  | ×8 | **{{D_S8_STREAM}}** | **{{D_S8_AGG}}** | {{D_S8_TTFT}} ms |
-| Code (clamp_00…clamp_49) | ×1 | **{{D_C1_STREAM}}** | **{{D_C1_AGG}}** | {{D_C1_TTFT}} ms |
-|  | ×2 | **{{D_C2_STREAM}}** | **{{D_C2_AGG}}** | {{D_C2_TTFT}} ms |
-|  | ×4 | **{{D_C4_STREAM}}** | **{{D_C4_AGG}}** | {{D_C4_TTFT}} ms |
-|  | ×8 | **{{D_C8_STREAM}}** | **{{D_C8_AGG}}** | {{D_C8_TTFT}} ms |
-| Prose (hash map) | ×1 | **{{D_P1_STREAM}}** | **{{D_P1_AGG}}** | {{D_P1_TTFT}} ms |
-|  | ×2 | **{{D_P2_STREAM}}** | **{{D_P2_AGG}}** | {{D_P2_TTFT}} ms |
-|  | ×4 | **{{D_P4_STREAM}}** | **{{D_P4_AGG}}** | {{D_P4_TTFT}} ms |
-|  | ×8 | **{{D_P8_STREAM}}** | **{{D_P8_AGG}}** | {{D_P8_TTFT}} ms |
+| Structured (count 1→200) | ×1 | **264.4** | **264.4** | 63 ms |
+|  | ×2 | **200.5** | **372.7** | 110 ms |
+|  | ×4 | **151.9** | **553.2** | 247 ms |
+|  | ×8 | **106.1** | **763.1** | 305 ms |
+| Code (clamp_00…clamp_49) | ×1 | **258.5** | **258.5** | 156 ms |
+|  | ×2 | **182.7** | **325.7** | 246 ms |
+|  | ×4 | **140.7** | **487.7** | 390 ms |
+|  | ×8 | **99.2** | **684.7** | 620 ms |
+| Prose (hash map) | ×1 | **189.9** | **189.9** | 68 ms |
+|  | ×2 | **141.1** | **264.1** | 161 ms |
+|  | ×4 | **108.5** | **390.4** | 250 ms |
+|  | ×8 | **70.7** | **512.0** | 312 ms |
 
 Prose decodes slower than structured or code text because the drafter's guesses
 are accepted less often.
 
-**Cold prefill**, unique uncached text, `max_tokens=1`, median of 2,
-`prompt tokens / TTFT` measured client side, both layouts.
+**Cold prefill by prompt length**, pipeline-parallel 4 (peer-to-peer off),
+unique uncached text, `max_tokens=1`, median of 2, `prompt tokens / TTFT`
+measured client side. (Tensor-parallel 4 runs at 2,670 tok/s on the 24K–38K
+prompts of the results table.)
 
-| Prompt | TP4 TTFT | TP4 tok/s | PP4 TTFT | PP4 tok/s |
-|---:|---:|---:|---:|---:|
-| ~8k | {{PF_T_8K_TTFT}} s | **{{PF_T_8K}}** | {{PF_P_8K_TTFT}} s | **{{PF_P_8K}}** |
-| ~16k | {{PF_T_16K_TTFT}} s | **{{PF_T_16K}}** | {{PF_P_16K_TTFT}} s | **{{PF_P_16K}}** |
-| ~32k | {{PF_T_32K_TTFT}} s | **{{PF_T_32K}}** | {{PF_P_32K_TTFT}} s | **{{PF_P_32K}}** |
-| ~64k | {{PF_T_64K_TTFT}} s | **{{PF_T_64K}}** | {{PF_P_64K_TTFT}} s | **{{PF_P_64K}}** |
-| ~128k | {{PF_T_128K_TTFT}} s | **{{PF_T_128K}}** | {{PF_P_128K_TTFT}} s | **{{PF_P_128K}}** |
-| ~250k | {{PF_T_250K_TTFT}} s | **{{PF_T_250K}}** | {{PF_P_250K_TTFT}} s | **{{PF_P_250K}}** |
+| Prompt | TTFT | tok/s |
+|---:|---:|---:|
+| ~8k | 1.97 s | **4,048** |
+| ~16k | 2.93 s | **5,459** |
+| ~32k | 5.13 s | **6,223** |
+| ~64k | 9.62 s | **6,663** |
+| ~128k | 18.91 s | **6,747** |
+| ~250k | 37.48 s | **6,678** |
 
 ---
 
@@ -206,11 +219,11 @@ are accepted less often.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`PIN_PENDING`](https://github.com/Morrowmake/vllm-cmp170hx/commit/PIN_PENDING), on upstream vLLM `e55d076f89` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING` — the engine at that pin, no weights ([docker/](docker/README.md)) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`9cdecd00a4`](https://github.com/Morrowmake/vllm-cmp170hx/commit/9cdecd00a43d559154f9e6427466987f5beda3ea), on upstream vLLM `e55d076f89` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f` — the engine at that pin, no weights ([docker/](docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; TP4 {{TP4_OFF_KV}} tokens at 262,144 context ({{TP4_ON_KV}} with peer-to-peer on), PP4 {{PP4_KV}} |
+| KV cache | full precision, **not quantised**; TP4 1,156,635 tokens at 262,144 context (1,177,646 with peer-to-peer on), PP4 2,320,328 |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
@@ -303,7 +316,7 @@ sparse-attention decode schedule is on in the engine itself.
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. Not needed for the [native install](#native-install-for-developers) |
 | Tools | `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), `jq` for the smoke test |
-| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image ({{IMAGE_SIZE}} compressed) and the kernel compile caches |
+| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image (about 10.6 GB compressed) and the kernel compile caches |
 
 ### Step by step
 
@@ -311,7 +324,7 @@ sparse-attention decode schedule is on in the engine itself.
 done, so running it twice is safe. The same steps one at a time:
 
 ```bash
-./install.sh       # 1. pull the engine image, pinned by digest ({{IMAGE_SIZE}} compressed)
+./install.sh       # 1. pull the engine image, pinned by digest (about 10.6 GB compressed)
 ./download.sh      # 2. fetch the model (~178 GiB) and the drafter (~2.2 GiB) into ./models
 ./start.sh         # 3. start the container, wait for /health, print the KV pool size
 ./start.sh smoke   # 4. one chat request and one tool call against the running server
@@ -324,8 +337,8 @@ read-only and the kernel compile caches in `./cache` (owned by you). It
 publishes the API on `127.0.0.1:8000` only. Its output goes to
 `logs/serve.log`, as a native start's does, and `./start.sh stop` stops only the
 container this checkout started. The first boot builds the compile caches and
-takes {{FIRST_BOOT_MIN}} minutes to become healthy; later boots take about
-{{LATER_BOOT_MIN}} minutes (weight loading and CUDA-graph capture).
+takes about 4–5 minutes longer than later ones (below); later boots take about
+3 minutes under TP4 and 2 under PP4 (weight loading and CUDA-graph capture).
 
 **The first boot after an install or an update is slower.** FlashInfer 0.7.0
 compiles two of its kernel modules (top-k, about 160 s, and sampling, about
@@ -334,10 +347,26 @@ them. While that build runs, the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 
-**Smoke test output** on this release looks like this ({{SMOKE_SAMPLE_NOTE}}):
+**Smoke test output** on this release looks like this (tensor-parallel 4,
+peer-to-peer off):
 
 ```
-{{SMOKE_SAMPLE}}
+==> waiting for http://127.0.0.1:8000/health (up to 900s)
+    healthy
+    served models: glm-5.3-flash
+
+==> chat request
+    reply: The user is asking about PCIe peer-to-peer (P2P) and its relevance to tensor parallelism. Let me think about what I know here.  **Tensor parallelism basics:** T ...
+    usage: prompt=28 completion=200 wall=1.27s  ->  156.9 tok/s
+
+==> tool-call request
+    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
+    usage: prompt=199 completion=66 wall=0.45s  ->  147.8 tok/s
+
+==> KV cache
+    GPU KV cache size: 1,156,635 tokens, Maximum concurrency for 262,144 tokens per request: 4.41x
+
+smoke: ok
 ```
 
 The rates in the smoke test include the time to first token of a short
@@ -456,7 +485,10 @@ path dead behind PLX switches on a Xeon, so a different board may simply not
 have it.
 
 **What you gain.** On this release, the first two columns of the
-[results table](#release-140): {{P2P_GAIN_LINE}}
+[results table](#release-140): step time −3.7% at one user, −4.3% at four,
+−7.6% at six and −9.1% at eight; single-user decode +4.3% to +7.5%; eight-user
+aggregate +6.2% to +11.3%; cold prefill +14.7% (2,670 → 3,062 tok/s); and
+21,011 more KV tokens.
 
 **Turn it on.**
 
@@ -468,7 +500,10 @@ VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 ./start.sh restart
 
 `serve.sh` ties the rest to that one variable: it selects the `2stage`
 all-reduce kernel (upstream's default crossover is tuned for NVLink), the
-caching-allocator mode the peer-to-peer path needs{{NCCL_SYS_README}}.
+caching-allocator mode the peer-to-peer path needs, and NCCL's peer-to-peer
+level (`NCCL_P2P_LEVEL=SYS`), so the large prefill collectives also go card to
+card: +13.7% cold prefill with identical outputs. `GLM5_NCCL_P2P_SYS=0` turns
+that part off.
 
 **Check it works.**
 
@@ -489,10 +524,9 @@ and the default allocator in one step.
 ### Kill switches
 
 Each feature is one variable. Set it to `0` and restart; no rebuild, no
-revert. A few work differently: `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` is switched
-off with `512`, `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` is switched *on* (`1`) to
-go back to the old schedule, and `VLLM_PP_DRAFT_TAIL_STAGE` takes a stage
-number ({{DRAFT_TAIL_README}}).
+revert. Two work differently: `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` is switched
+off with `512`, and `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` is switched *on* (`1`)
+to go back to the old schedule.
 
 ```bash
 VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
@@ -528,7 +562,6 @@ VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 | `VLLM_GLM5_INDEXER_DECODE_ROWS` | KV headroom: indexer decode tables sized by the decode rows | both |
 | `VLLM_GLM5_INDEXER_GATHER_CLAMP` | KV headroom: indexer gather workspace clamp (on in the engine itself) | both |
 | `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` | set to `1` for the sparse-attention decode schedule from before the retune (default `0`, set in the engine) | both |
-| `VLLM_PP_DRAFT_TAIL_STAGE` | {{DRAFT_TAIL_ROW}} | PP4 |
 
 `DRY=1 ./start.sh` prints the container command and the environment the server
 would get, so you can check what is on. It runs the preflight and says whether
@@ -556,6 +589,29 @@ so another container or vLLM on the same machine is never touched.
 The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 pulls the matching image whenever it changes. Uncomment `IMAGE` in `.env` to
 freeze it.
+
+**Updating from 1.3.x.** Run `./start.sh update`, nothing else. What happens:
+
+1. It pulls this release and restarts into its `start.sh`.
+2. Your checkout already has a native install, so it **stays native** (the
+   container is the default only for fresh checkouts).
+3. The engine pin moved to a new upstream base, so `start.sh` **rebuilds the
+   venv** from scratch for the new engine and its own dependency pins (a few
+   minutes; the checkpoints are not touched).
+4. It boots the server. **The first boot is about 4–5 minutes slower** than
+   later ones while FlashInfer compiles two kernel modules; the log may show
+   `No available shared memory broadcast block found in 60 seconds` lines
+   meanwhile, which are harmless.
+5. The layout stays tensor-parallel 4 and peer-to-peer stays as you had it.
+   The KV line now reads 1,156,635 tokens with peer-to-peer off (1.3.x printed
+   1,174,567): the corrected figure described above.
+
+**Moving a native install to the container.** Install Docker and the NVIDIA
+Container Toolkit ([What you need](#what-you-need)), then set
+`RUNTIME=container` in `.env` and run `./start.sh restart`: it stops the native
+server, pulls the image and starts the container on the same checkpoints.
+`RUNTIME=native` and another restart go back. The venv stays on disk until you
+delete `venv/` and `vllm-src/` yourself.
 
 **Rolling back.** `IMAGE=<image> ./start.sh update` rolls the engine back for
 that run only; the next plain `./start.sh` or `restart` goes back to this

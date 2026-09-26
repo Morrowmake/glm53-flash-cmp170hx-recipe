@@ -3,14 +3,22 @@
 ## 1.4.0 — {{RELEASE_DATE}}
 
 **Install:** `./start.sh` (see the README). This release runs the engine in a
-container by default; existing native installs keep running natively.
-`./start.sh update` from 1.3.x pulls, installs the new engine and restarts;
-nothing needs to be done by hand.
+container by default.
+
+**Updating from 1.3.x:** `./start.sh update`, nothing else. The checkout stays
+native (it already has a native install); the venv is rebuilt from scratch for
+the new engine, because the pin moved to a new upstream base; the first boot
+is about 4–5 minutes slower while FlashInfer compiles two kernel modules
+(below); the layout stays tensor-parallel 4. The KV line then reads 1,156,635
+tokens with peer-to-peer off instead of 1,174,567 (the corrected figure,
+below). To move to the container afterwards: install Docker and the NVIDIA
+Container Toolkit, set `RUNTIME=container` in `.env` and `./start.sh restart`
+(it stops the native server first).
 
 **Two layouts.** New setting `LAYOUT`: `tp4` (tensor-parallel 4, the default,
 as before) or `pp4` (pipeline-parallel 4). Pipeline-parallel 4 gives each card a
 quarter of the layers and passes only activations between them: it prefills
-{{PP4_PREFILL_RATIO}}× faster than TP4, holds {{PP4_KV_RATIO}}× the KV, suits
+2.35× faster than TP4, holds 2.01× the KV, suits
 many parallel users and long prompts, and needs far less link bandwidth, which
 makes it the layout for cards limited to x4 links. Its numbers were measured on
 our x16 cards; x4 links are not measured yet. It runs with the DFlash2 drafter
@@ -18,7 +26,7 @@ like TP4 (`SPEC_MODE` now defaults to `dflash` in both layouts). `PP` and `TP`
 still override the layout.
 
 **Container first.** `./start.sh` now runs the engine image
-`ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING` (the fork at the new
+`ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f` (the fork at the new
 pin on `nvidia/cuda:13.3.1-devel-ubuntu24.04`, no weights) with this
 repository's `serve.sh` as its entry point, as the invoking user rather than
 root, with the checkpoints mounted read-only and the compile caches in
@@ -30,8 +38,8 @@ with the checkout). The native install stays available with `RUNTIME=native`,
 and a checkout that already has one keeps using it unless `RUNTIME` says
 otherwise. {{CONTAINER_PARITY_LINE}}
 
-**Engine pin moves to `PIN_PENDING`**, on upstream `e55d076f89` (vLLM 0.30.1
-development line). Installed version `{{VLLM_VERSION}}`. The engine now pins
+**Engine pin moves to `9cdecd00a4`**, on upstream `e55d076f89` (vLLM 0.30.1
+development line). Installed version `0.30.1rc1.dev282+g9cdecd00a.precompiled`. The engine now pins
 FlashInfer 0.7.0 and humming-kernels 0.1.16. The fork still adds no C++ or CUDA
 source; the base has no nightly wheel of its own, so the compiled extensions
 come from the wheel of upstream `b6761e8ded`, whose C++, CUDA and Rust sources
@@ -48,22 +56,23 @@ harmless.
 
 ### Measured with this release's defaults
 
-180 W per card, PCIe x16 links, {{RELEASE_BOOTS}}.
+180 W per card, PCIe x16 links, one server start per column.
 
 | | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off |
 |---|---:|---:|---:|
-| Decode step at 1 / 4 / 6 / 8 users, ms | {{TP4_OFF_STEPS}} | {{TP4_ON_STEPS}} | {{PP4_STEPS}} |
-| Decode, 1 user, structured / code / prose | {{TP4_OFF_1U}} tok/s | {{TP4_ON_1U}} tok/s | {{PP4_1U}} tok/s |
-| Decode, 8 users, aggregate | {{TP4_OFF_8U}} tok/s | {{TP4_ON_8U}} tok/s | {{PP4_8U}} tok/s |
-| Cold prefill | {{TP4_OFF_PREFILL}} tok/s | {{TP4_ON_PREFILL}} tok/s | {{PP4_PREFILL}} tok/s |
-| TTFT, 6,217 / 23,255 tokens | {{TP4_OFF_TTFT}} s | {{TP4_ON_TTFT}} s | {{PP4_TTFT}} s |
-| KV pool at 262,144 | {{TP4_OFF_KV}} tokens, {{TP4_OFF_KV_X}}x | {{TP4_ON_KV}} tokens, {{TP4_ON_KV_X}}x | {{PP4_KV}} tokens, {{PP4_KV_X}}x |
+| Decode step at 1 / 4 / 6 / 8 users, ms | 15.87 / 29.51 / 38.91 / 44.45 | 15.29 / 28.23 / 35.94 / 40.39 | 29.35 at 1 user |
+| Decode, 1 user, structured / code / prose | 264.4 / 258.5 / 189.9 tok/s | 275.8 / 274.0 / 204.2 tok/s | 142.2 / 138.6 / 100.7 tok/s |
+| Decode, 8 users, aggregate | 763.1 / 684.7 / 512.0 tok/s | 848.3 / 726.9 / 570.0 tok/s | 556.3 / 503.5 / 376.8 tok/s |
+| Cold prefill | 2,670 tok/s | 3,062 tok/s | 6,264 tok/s |
+| TTFT, 6,217 / 23,255 tokens | 2.37 / 8.67 s | 2.05 / 7.49 s | 1.49 / 3.79 s |
+| KV pool at 262,144 | 1,156,635 tokens, 4.41x | 1,177,646 tokens, 4.49x | 2,320,328 tokens, 8.85x |
 
-PP4 with peer-to-peer on: {{PP4_P2P_ON_LINE}}.
+PP4 with peer-to-peer on: 141.0 / 139.4 / 105.1 tok/s for one user, 532.7 /
+493.9 / 377.8 across eight, cold prefill 6,606 tok/s, the same KV pool.
 
-Quality: TP4 perplexity {{TP4_PPL}}, GSM8K {{TP4_GSM8K}}, HumanEval
-{{TP4_HUMANEVAL}}; PP4 perplexity {{PP4_PPL}}, GSM8K {{PP4_GSM8K}}, HumanEval
-{{PP4_HUMANEVAL}}.
+Quality: TP4 perplexity 3.2781, GSM8K 0.972, HumanEval
+0.9634; PP4 perplexity 3.2735, GSM8K 0.970, HumanEval
+0.9878.
 
 ### What changed
 
@@ -79,7 +88,9 @@ for every empty top-k slot, with bitwise-identical output
 (`VLLM_GLM5_SMLA_PREFILL_PRED_LOAD`). Each kernel is at least as accurate as the
 code it replaces against a 64-bit reference on real inputs. Measured in
 development: PP4 cold prefill +19.5% (5,520 → 6,586–6,613 tok/s), TTFT on a
-23,255-token prompt 4.27 → 3.64 s, decode unchanged; {{TP4_PREFILL_GAIN_LINE}}
+23,255-token prompt 4.27 → 3.64 s, decode unchanged. Under TP4, against 1.3.0:
+cold prefill 2,484 → 2,670 tok/s (+7.5%) with peer-to-peer off and
+2,490 → 3,062 (+23%) with it on (below).
 All on by default, each a kill switch at 0.
 
 **Pipeline.** Under PP4, decoding requests are spread over every in-flight
@@ -91,7 +102,6 @@ transfer without a metadata exchange (`VLLM_PP_PACKED_HOP`,
 +2.0% cold prefill; outputs identical apart from the fold, which is checked
 against a 64-bit reference. KV block size 4,608 under PP4 with
 DFlash2 (`BLOCK_SIZE`), so the drafter shares the KV layout.
-{{DRAFT_TAIL_CHANGELOG}}
 
 **Honest KV figures.** With prefill chunks in flight, a request can hold more
 linear-attention state and drafter window blocks than the engine reserved for
@@ -117,7 +127,12 @@ their speed on one card.
 `VLLM_GLM5_INDEXER_DECODE_ROWS` are now set under PP4 too; the drafter
 selector shard stays TP only.
 
-{{NCCL_SYS_CHANGELOG}}
+**NCCL over peer-to-peer.** With peer-to-peer on under TP4
+(`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1`), `serve.sh` now also sets
+`NCCL_P2P_LEVEL=SYS`, so NCCL carries the large prefill collectives card to
+card instead of through host memory: +13.7% cold prefill with identical
+outputs. `GLM5_NCCL_P2P_SYS=0` turns it off; an explicit `NCCL_P2P_LEVEL` wins.
+Nothing changes with peer-to-peer off (the default) or under PP4.
 
 **Release tags on the fork.** Every commit a release has pinned is kept under
 a `glm53-recipe-<version>` tag on the fork, so older releases, and

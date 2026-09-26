@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/PIN_PENDING)
-  pinned at `PIN_PENDING` (the 1.4.0 pin, on upstream `e55d076f89`), installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/9cdecd00a43d559154f9e6427466987f5beda3ea)
+  pinned at `9cdecd00a4` (the 1.4.0 pin, on upstream `e55d076f89`), installed
   the way the native install does it: Python 3.12, torch 2.13.0 (CUDA 13.0
   build), the fork installed editable in `/opt/venv` with upstream's
   precompiled extensions, then the runtime extras the engine pins (FlashInfer
@@ -25,14 +25,14 @@ image, how to build it, and how to run it by hand without `./start.sh`.
   settings are baked in.
 - **No weights.** The two checkpoints are mounted from the host.
 
-Image (compressed size {{IMAGE_SIZE}}), pulled by digest to get exactly the
+Image (compressed size about 10.6 GB), pulled by digest to get exactly the
 tested image:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING
+ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f
 ```
 
-Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.0-PIN_PENDING`.
+Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.0-9cdecd00a4`.
 
 **Measured:** {{CONTAINER_PARITY_LINE}} (Release 1.3.x's image ran within
 0.4 % of the native install on decode at 1 / 4 / 8 users and on cold prefill.)
@@ -40,7 +40,7 @@ Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.0-PIN_PENDING`.
 ## Build it
 
 ```bash
-docker build -t vllm-cmp170hx:1.4.0-PIN_PENDING docker/
+docker build -t vllm-cmp170hx:1.4.0-9cdecd00a4 docker/
 ```
 
 The build needs no GPU. It clones the fork at the pinned commit and downloads
@@ -70,7 +70,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"

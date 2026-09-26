@@ -22,14 +22,14 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   docker build -t vllm-cmp170hx:1.4.0-PIN_PENDING docker/
+#   docker build -t vllm-cmp170hx:1.4.0-9cdecd00a4 docker/
 
 ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
 
 FROM ${BASE} AS build
 ARG VLLM_REPO=https://github.com/Morrowmake/vllm-cmp170hx.git
 ARG VLLM_BRANCH=ampere-glm53
-ARG VLLM_COMMIT=PIN_PENDING
+ARG VLLM_COMMIT=9cdecd00a43d559154f9e6427466987f5beda3ea
 ARG VLLM_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.12.11
@@ -50,6 +50,9 @@ RUN uv python install "${PYTHON_VERSION}" \
 # Blobless, not shallow: the precompiled-wheel lookup needs the history.
 RUN git clone --filter=blob:none --branch "${VLLM_BRANCH}" "${VLLM_REPO}" /opt/vllm-src \
  && git -C /opt/vllm-src checkout -B "${VLLM_BRANCH}" "${VLLM_COMMIT}" \
+ && (git -C /opt/vllm-src rev-parse -q --verify refs/tags/v0.30.1rc0 >/dev/null \
+     || git -C /opt/vllm-src fetch --filter=blob:none --no-tags https://github.com/vllm-project/vllm.git \
+            refs/tags/v0.30.1rc0:refs/tags/v0.30.1rc0) \
  && git -C /opt/vllm-src submodule update --init --recursive --depth 1
 ENV VIRTUAL_ENV=/opt/venv
 RUN uv pip install --extra-index-url https://flashinfer.ai/whl/ \
@@ -78,9 +81,9 @@ ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin
 LABEL org.opencontainers.image.title="vllm-cmp170hx" \
       org.opencontainers.image.description="vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) as pinned by glm53-flash-cmp170hx-recipe 1.4.0; weights not included" \
       org.opencontainers.image.source="https://github.com/Morrowmake/vllm-cmp170hx" \
-      org.opencontainers.image.revision="PIN_PENDING" \
+      org.opencontainers.image.revision="9cdecd00a43d559154f9e6427466987f5beda3ea" \
       org.opencontainers.image.url="https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/tree/v1.4.0" \
-      org.opencontainers.image.version="1.4.0-PIN_PENDING" \
+      org.opencontainers.image.version="1.4.0-9cdecd00a4" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
