@@ -4,7 +4,8 @@
 #   canada-quant/GLM-5.3-Flash-W4A16-MTP    ~178 GiB (191 GB), 22 files   (target)
 #   incoai/GLM-5.3-Flash-DFlash2            ~2.2 GiB (2.3 GB),   5 files   (drafter)
 #
-# Budget ~185 GiB of free disk. Needs the venv, so run ./install.sh first.
+# Budget ~185 GiB of free disk. Uses the hf client from the engine image (or
+# the venv, RUNTIME=native), so run ./install.sh first.
 # Runs the preflight first, so it stops before downloading if a card reports
 # under 60 GiB or the disk is too small.
 #

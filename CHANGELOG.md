@@ -1,5 +1,136 @@
 # Changelog
 
+## 1.4.0 — {{RELEASE_DATE}}
+
+**Install:** `./start.sh` (see the README). This release runs the engine in a
+container by default; existing native installs keep running natively.
+`./start.sh update` from 1.3.x pulls, installs the new engine and restarts;
+nothing needs to be done by hand.
+
+**Two layouts.** New setting `LAYOUT`: `tp4` (tensor-parallel 4, the default,
+as before) or `pp4` (pipeline-parallel 4). Pipeline-parallel 4 gives each card a
+quarter of the layers and passes only activations between them: it prefills
+{{PP4_PREFILL_RATIO}}× faster than TP4, holds {{PP4_KV_RATIO}}× the KV, suits
+many parallel users and long prompts, and needs far less link bandwidth, which
+makes it the layout for cards limited to x4 links. Its numbers were measured on
+our x16 cards; x4 links are not measured yet. It runs with the DFlash2 drafter
+like TP4 (`SPEC_MODE` now defaults to `dflash` in both layouts). `PP` and `TP`
+still override the layout.
+
+**Container first.** `./start.sh` now runs the engine image
+`ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING` (the fork at the new
+pin on `nvidia/cuda:13.3.1-devel-ubuntu24.04`, no weights) with this
+repository's `serve.sh` as its entry point, the checkpoints mounted read-only
+and the compile caches in `./cache`. It needs Docker with the NVIDIA Container
+Toolkit and driver 580 or newer. `install`, `download`, `stop`, `status`,
+`logs`, `smoke`, `update` and `DRY=1` all work as before; `stop` only stops the
+container this checkout started (recorded in `logs/container.id` and labelled
+with the checkout). The native install stays available with `RUNTIME=native`,
+and a checkout that already has one keeps using it unless `RUNTIME` says
+otherwise. {{CONTAINER_PARITY_LINE}}
+
+**Engine pin moves to `PIN_PENDING`**, on upstream `e55d076f89` (vLLM 0.30.1
+development line). Installed version `{{VLLM_VERSION}}`. The engine now pins
+FlashInfer 0.7.0 and humming-kernels 0.1.16. The fork still adds no C++ or CUDA
+source; the base has no nightly wheel of its own, so the compiled extensions
+come from the wheel of upstream `b6761e8ded`, whose C++, CUDA and Rust sources
+are identical. A native install takes the runtime extras from the engine's own
+`requirements/cuda.txt`, and rebuilds the venv when those requirements change
+with the pin.
+
+### Measured with this release's defaults
+
+180 W per card, PCIe x16 links, {{RELEASE_BOOTS}}.
+
+| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4 |
+|---|---:|---:|---:|
+| Decode step at 1 / 4 / 6 / 8 users, ms | {{TP4_OFF_STEPS}} | {{TP4_ON_STEPS}} | {{PP4_STEPS}} |
+| Decode, 1 user, structured / code / prose | {{TP4_OFF_1U}} tok/s | {{TP4_ON_1U}} tok/s | {{PP4_1U}} tok/s |
+| Decode, 8 users, aggregate | {{TP4_OFF_8U}} tok/s | {{TP4_ON_8U}} tok/s | {{PP4_8U}} tok/s |
+| Cold prefill | {{TP4_OFF_PREFILL}} tok/s | {{TP4_ON_PREFILL}} tok/s | {{PP4_PREFILL}} tok/s |
+| TTFT, 6,217 / 23,255 tokens | {{TP4_OFF_TTFT}} s | {{TP4_ON_TTFT}} s | {{PP4_TTFT}} s |
+| KV pool at 262,144 | {{TP4_OFF_KV}} tokens, {{TP4_OFF_KV_X}}x | {{TP4_ON_KV}} tokens, {{TP4_ON_KV_X}}x | {{PP4_KV}} tokens, {{PP4_KV_X}}x |
+
+Quality: TP4 perplexity {{TP4_PPL}}, GSM8K {{TP4_GSM8K}}, HumanEval
+{{TP4_HUMANEVAL}}; PP4 perplexity {{PP4_PPL}}, GSM8K {{PP4_GSM8K}}, HumanEval
+{{PP4_HUMANEVAL}}.
+
+### What changed
+
+**Prefill kernels.** Under PP4, new Ampere kernels for the shapes that layout
+runs (64 heads, whole experts): linear-attention (KDA) chunked prefill,
+sparse-attention prefill and a split-block Marlin MoE prefill
+(`VLLM_GLM5_PP_KDA_PREFILL`, `VLLM_GLM5_PP_SPARSE_MLA_PREFILL`,
+`VLLM_GLM5_PP_MARLIN_PREFILL`). Under TP4, the linear-attention prefill at 16
+heads (1.42× per prompt per card) and the split-block MoE prefill at TP4 shards
+(1.24×) (`VLLM_GLM5_TP4_KDA_PREFILL`, `VLLM_GLM5_TP4_MARLIN_PREFILL`). In both
+layouts, the sparse-attention prefill gather no longer reads the same cache row
+for every empty top-k slot, with bitwise-identical output
+(`VLLM_GLM5_SMLA_PREFILL_PRED_LOAD`). Each kernel is at least as accurate as the
+code it replaces against a 64-bit reference on real inputs. Measured in
+development: PP4 cold prefill +19.5% (5,520 → 6,586–6,613 tok/s), TTFT on a
+23,255-token prompt 4.27 → 3.64 s, decode unchanged; {{TP4_PREFILL_GAIN_LINE}}
+All on by default, each a kill switch at 0.
+
+**Pipeline.** Under PP4, decoding requests are spread over every in-flight
+micro-batch (`VLLM_PP_SPREAD_DECODES`), the stage hand-off is packed into one
+transfer without a metadata exchange (`VLLM_PP_PACKED_HOP`,
+`VLLM_PP_HOP_NO_METADATA`), the drafter's inputs are synchronised more finely
+(`VLLM_PP_SPLIT_DRAFT_EVENT`) and its input projection is folded
+(`VLLM_GLM5_PP_FOLD_DRAFT_FC`). Together: +7.3% aggregate decode at four users,
++2.0% cold prefill; outputs identical apart from the fold, which is checked
+against a 64-bit reference. KV block size 4,608 under PP4 with
+DFlash2 (`BLOCK_SIZE`), so the drafter shares the KV layout.
+{{DRAFT_TAIL_CHANGELOG}}
+
+**Honest KV figures.** With prefill chunks in flight, a request can hold more
+linear-attention state and drafter window blocks than the engine reserved for
+it, so the KV pool it reported was larger than the server could fill: under
+TP4, 1.3.x's published figure was 17,932 tokens (1.5%) too high. Near a full
+pool that could only lead to a request being paused and resumed, never to
+wrong output. The reserve now matches (`VLLM_KV_MAMBA_INFLIGHT_STATES`,
+`VLLM_KV_SWA_INFLIGHT_SCRATCH`, both on, in both layouts; 0 reports the old
+figure), and every KV figure in the README is the corrected one. Outputs
+cannot change.
+
+**The same output on every install.** The linear-attention prefill kernels
+picked their tile configuration by timing the options in each new process, so
+a fresh install or a cleared compile cache could compute in a different order.
+They now use pinned configurations (`VLLM_GLM5_FLA_PIN_AUTOTUNE`, on), exactly
+as accurate as the tuned ones against a 64-bit reference and within 0.03% of
+their speed on one card.
+
+**Second-generation decode kernels and KV headroom in both layouts.**
+`VLLM_GLM5_DECODE_IDX_GLUE`, `VLLM_GLM5_DECODE_KDA_V2`,
+`VLLM_GLM5_DECODE_MOE_ROUTE_V2`, `VLLM_GLM5_DECODE_MHC_V2`,
+`VLLM_GLM5_DRAFTER_ROPE_FIT`, `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` and
+`VLLM_GLM5_INDEXER_DECODE_ROWS` are now set under PP4 too; the drafter
+selector shard stays TP only.
+
+{{NCCL_SYS_CHANGELOG}}
+
+**Release tags on the fork.** Every commit a release has pinned is kept under
+a `glm53-recipe-<version>` tag on the fork, so older releases, and
+`VLLM_COMMIT=<older pin>` rollbacks, keep installing after the fork's branch
+moves to a new upstream base. A native install fetches those tags when a pin
+is no longer on the branch.
+
+**Settings.** New: `LAYOUT`, `RUNTIME`, `IMAGE`, `CONTAINER_NAME`, `SHM_SIZE`,
+`CACHE_DIR`, `BLOCK_SIZE` (PP4), `VLLM_PRECOMPILED_WHEEL_COMMIT` (native),
+`GLM5_NCCL_P2P_SYS`, and the kill switches above. Changed defaults:
+`VLLM_COMMIT` (the new pin), `SPEC_MODE` under `PP=4` (`mtp` → `dflash`), and
+the flags now set in both layouts. A `VLLM_COMMIT` or `IMAGE` you have
+uncommented in `.env` still wins, as it always has (that is how the engine is
+frozen), and so does a `PP`/`TP` pair over `LAYOUT`.
+
+**Rolling back.** Container: `IMAGE=<image> ./start.sh update` for one run, or
+`IMAGE=` in `.env`; 1.3.x's image is
+`ghcr.io/morrowmake/vllm-cmp170hx@sha256:ee978fb3e3d11cf8577a014539a7ad4e2a8dff95163fc5d96c0a06fcf9c64640`.
+Native: `VLLM_COMMIT=0ed7d3e7f3` the same way (the venv is rebuilt for the
+older engine's requirements). For 1.3.1's scripts and defaults as well,
+`git checkout v1.3.1` and `./start.sh restart` (1.3.x installs natively); back
+again with `git checkout main` and `./start.sh update`.
+
 ## 1.3.1 — 2026-09-26
 
 **Documentation only. No engine change:** the pin stays at `0ed7d3e7f3`, and

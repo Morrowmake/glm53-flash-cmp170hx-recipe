@@ -26,15 +26,20 @@
 #                   HOST:PORT can use the model.
 #   SERVED_MODEL_NAME  model id clients send (default glm-5.3-flash; the older
 #                   name SERVED_NAME is still read if this one is unset)
-# Env overrides: MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3460 = 3,456-token
-#   prefill chunks), PREFILL_CAP (upstream long-prefill chunk cap, UNCONDITIONAL;
-#   default 0 = off -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N,
-#   REASONING_PARSER, TOOL_PARSER, MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION,
-#   EXTRA_ARGS.
+# Env overrides: LAYOUT, MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3460 =
+#   3,456-token prefill chunks under TP4, 2312 = 2,304-token chunks under PP4),
+#   PREFILL_CAP (upstream long-prefill chunk cap, UNCONDITIONAL; default 0 = off
+#   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
+#   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
 #
-# Layout: tensor-parallel 4 (PP=1, TP=4), the one layout this release
-#   supports. It assumes PCIe Gen2 x16 links between the cards. A
-#   pipeline-parallel layout for narrower links is planned for a later release.
+# Layout (LAYOUT):
+#   tp4 (default)  tensor-parallel 4 (PP=1, TP=4). Fastest per request; one or
+#                  two interactive users. Assumes PCIe Gen2 x16 links.
+#   pp4            pipeline-parallel 4 (PP=4, TP=1). Each card holds a quarter
+#                  of the layers and passes activations on: much faster
+#                  prefill, about twice the KV, many parallel users, and far
+#                  less traffic between the cards. Measured on x16 links.
+#   An explicit PP/TP still wins over LAYOUT.
 #
 # ===== sm_80 feature flags ==================================================
 # The performance features, the repeatable-output fixes and the KV headroom
@@ -56,13 +61,27 @@
 #   VLLM_GLM5_SHARED_EXPERT_REORDER=0  MoE shared experts after routed dispatch
 #   VLLM_GLM5_DECODE_IDX_GLUE=0 / VLLM_GLM5_DECODE_KDA_V2=0 /
 #   VLLM_GLM5_DECODE_MOE_ROUTE_V2=0 / VLLM_GLM5_DECODE_MHC_V2=0 /
-#   VLLM_GLM5_DRAFTER_ROPE_FIT=0  second-generation decode, TP only
+#   VLLM_GLM5_DRAFTER_ROPE_FIT=0  second-generation decode, both layouts
 #   VLLM_GLM5_DETERMINISTIC_MOE_ALIGN=0 / VLLM_GLM5_MOE_MASK_PADDING=0 /
 #   VLLM_GLM5_TOPK_TIEFIX=0 / VLLM_GLM5_TOPK_SORTED=0 /
-#   VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS=0  repeatable output
+#   VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS=0 / VLLM_GLM5_FLA_PIN_AUTOTUNE=0
+#                                 repeatable output
 #   VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=512 / VLLM_GLM5_DRAFTER_SELECTOR_SHARD=0 /
 #   VLLM_GLM5_INDEXER_DECODE_ROWS=0 / VLLM_GLM5_INDEXER_GATHER_CLAMP=0
-#                                 KV headroom, TP only
+#                                 KV headroom (the selector shard is TP only)
+#   VLLM_KV_MAMBA_INFLIGHT_STATES=0 / VLLM_KV_SWA_INFLIGHT_SCRATCH=0
+#                                 KV accounting for prefill chunks in flight,
+#                                 both layouts (0 reports the old, larger pool)
+#   VLLM_GLM5_SMLA_PREFILL_PRED_LOAD=0  sparse-attention prefill gather that
+#                                 skips empty slots, both layouts
+#   VLLM_GLM5_TP4_KDA_PREFILL=0 / VLLM_GLM5_TP4_MARLIN_PREFILL=0
+#                                 TP4 prefill kernels, LAYOUT=tp4 only
+#   VLLM_GLM5_PP_KDA_PREFILL=0 / VLLM_GLM5_PP_SPARSE_MLA_PREFILL=0 /
+#   VLLM_GLM5_PP_MARLIN_PREFILL=0 PP4 prefill kernels, LAYOUT=pp4 only
+#   VLLM_PP_SPREAD_DECODES=0 / VLLM_PP_PACKED_HOP=0 / VLLM_PP_HOP_NO_METADATA=0 /
+#   VLLM_PP_SPLIT_DRAFT_EVENT=0 / VLLM_GLM5_PP_FOLD_DRAFT_FC=0
+#                                 PP4 pipeline and drafter changes, PP only
+#   VLLM_PP_DRAFT_TAIL_STAGE=-1   PP4 drafter tail on stage 3 instead of 2
 #   VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1  the sparse-attention decode schedule
 #                                 from before 1.2.0 (the retuned one is on in
 #                                 the engine; not set here)
@@ -70,7 +89,7 @@
 #                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
 #                                 needs peer-to-peer enabled at the driver level
 #                                 -- see the optional section in the README.
-#                                 On this release: decode step -3.7% at 1 user,
+#                                 Measured on 1.3.0: decode step -3.7% at 1 user,
 #                                 -6.9% at 4, -8.3% at 6, -6.2% at 8, cold
 #                                 prefill unchanged, KV +13,209 tokens.
 #                                 0 keeps the host-staged path.
@@ -78,6 +97,9 @@
 #                                 because the built-in crossover is NVLink-tuned
 #                                 and 1stage measured worse on Gen2 x16. Inert
 #                                 unless the switch above is 1. Unset = upstream.
+#   GLM5_NCCL_P2P_SYS=1           NCCL over peer-to-peer too (NCCL_P2P_LEVEL=SYS),
+#                                 TP4 with the switch above at 1 only.
+#                                 Default PENDING (0 for now), see below.
 #   VLLM_GLM5_PREFILL_OVERLAP_BACKEND=  which communicator carries the prefill
 #                                 overlap's split collectives. NOT set here: the
 #                                 code default is nccl, which measured fastest.
@@ -96,7 +118,7 @@
 set -euo pipefail
 MODE=${1:-dflash}
 case "$MODE" in
-  -h|--help) sed -n '2,38p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
@@ -114,12 +136,22 @@ export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 # (VMM) allocator cannot provide. Record whether the caller set it explicitly so
 # that choice can win.
 ALLOC_CONF_EXPLICIT=${PYTORCH_CUDA_ALLOC_CONF+1}
-# Layout: TENSOR-PARALLEL 4. Every layer is split across all four cards, so it
-# is the fastest per request, but it assumes PCIe Gen2 x16 links: it moves
-# ~9.4 MB per layer during prefill and ~100 small collectives per decode step,
-# so on stock x4 links it is bus-bound. PP is left as a knob because the engine
-# supports it, but PP=4 is UNSUPPORTED IN THIS RELEASE -- nothing below is
-# tuned for it. A pipeline-parallel layout is planned for a later release.
+# Layout. LAYOUT=tp4 (default): TENSOR-PARALLEL 4. Every layer is split across
+# all four cards, so it is the fastest per request, but it assumes PCIe Gen2 x16
+# links: it moves ~9.4 MB per layer during prefill and ~100 small collectives
+# per decode step, so on stock x4 links it is bus-bound.
+# LAYOUT=pp4: PIPELINE-PARALLEL 4 (PP=4, TP=1). Each card holds a quarter of the
+# layers and hands only activations to the next one, so it needs far less link
+# bandwidth; it prefills much faster and holds about twice the KV, and it suits
+# many parallel users rather than one fast one. It runs with the DFlash2
+# drafter like TP4. Its numbers were measured on x16 links.
+# An explicit PP/TP in the environment still wins over LAYOUT.
+LAYOUT=${LAYOUT:-tp4}
+case "$LAYOUT" in
+  tp4) ;;
+  pp4) PP=${PP:-4}; TP=${TP:-1} ;;
+  *) echo "serve.sh: unknown LAYOUT '$LAYOUT' (expected tp4 or pp4)" >&2; exit 2 ;;
+esac
 PP=${PP:-1}; TP=${TP:-4}   # PP*TP must be 4
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
@@ -128,10 +160,98 @@ if [ "$PP" = "4" ]; then
   if [ "$MODE" = "mtp" ]; then DEFAULT_PART=14,12,12,7; else DEFAULT_PART=13,11,11,10; fi
   export VLLM_PP_LAYER_PARTITION="${VLLM_PP_LAYER_PARTITION:-$DEFAULT_PART}"
 elif [ -n "${VLLM_PP_LAYER_PARTITION:-}" ]; then export VLLM_PP_LAYER_PARTITION; else unset VLLM_PP_LAYER_PARTITION; fi
+# KV block size under PP with DFlash2. Each stage holds the full 64-head
+# linear-attention (KDA) state, which sets the attention block to 4,480 tokens;
+# the drafter's matching block would then be 1,120 tokens, not a multiple of 64,
+# which pushes the drafter out of the shared KV layout and makes the last stage
+# pay about 6x per block. 4608 is the next multiple of 256: drafter block 1,152,
+# state page padded 5%, valid for SPEC_N up to 8.
+BLOCK_ARGS=()
+if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then BLOCK_ARGS=(--block-size "${BLOCK_SIZE:-4608}"); fi
 # Replicated input-embedding table under TP (VLLM_GLM5_REPLICATED_EMBED): skips the 2 hidden-size
 # all-reduces per prefill chunk / decode step (target + MTP drafter) for +0.74 GiB per rank
 # (-6% KV tokens). Off by default -- the KV is worth more here. Sharded table under PP-only.
 if [ "$TP" -gt 1 ]; then export VLLM_GLM5_REPLICATED_EMBED=${VLLM_GLM5_REPLICATED_EMBED:-0}; fi
+
+# --- pipeline-parallel (PP4) --------------------------------------------------
+# Pipeline and drafter changes, PP only, each a kill switch at 0:
+#   VLLM_PP_SPREAD_DECODES     spread decoding requests over all in-flight
+#                              micro-batches, so no stage idles while one
+#                              micro-batch carries every decode
+#   VLLM_PP_PACKED_HOP         stage-to-stage hand-off packed into one transfer
+#   VLLM_PP_HOP_NO_METADATA    hand-off without the per-step metadata exchange
+#   VLLM_PP_SPLIT_DRAFT_EVENT  finer synchronisation of the drafter's inputs
+#   VLLM_GLM5_PP_FOLD_DRAFT_FC drafter input projection folded
+# Outputs identical with and without the first four; the fold is checked
+# against a 64-bit reference. Measured together against PP4 without them:
+# 4-user aggregate +7.3%, cold prefill +2.0%, 1-user step -0.8%, 8,366 fewer KV
+# tokens.
+if [ "$PP" -gt 1 ]; then
+  export VLLM_PP_SPREAD_DECODES=${VLLM_PP_SPREAD_DECODES:-1}
+  export VLLM_PP_PACKED_HOP=${VLLM_PP_PACKED_HOP:-1}
+  export VLLM_PP_HOP_NO_METADATA=${VLLM_PP_HOP_NO_METADATA:-1}
+  export VLLM_PP_SPLIT_DRAFT_EVENT=${VLLM_PP_SPLIT_DRAFT_EVENT:-1}
+  export VLLM_GLM5_PP_FOLD_DRAFT_FC=${VLLM_GLM5_PP_FOLD_DRAFT_FC:-1}
+  echo "serve.sh: pipeline: SPREAD=$VLLM_PP_SPREAD_DECODES PACKED_HOP=$VLLM_PP_PACKED_HOP HOP_NO_METADATA=$VLLM_PP_HOP_NO_METADATA SPLIT_DRAFT_EVENT=$VLLM_PP_SPLIT_DRAFT_EVENT FOLD_DRAFT_FC=$VLLM_GLM5_PP_FOLD_DRAFT_FC"
+fi
+# Drafter tail on stage 2 (PP4 only): moves the drafter's vocabulary pass and
+# token selection from the last stage, which also runs the sampler, to stage 2.
+# Outputs are meant to be bit-identical either way. -1 keeps it on the last
+# stage (the engine default), 2 moves it.
+# PENDING: the default is decided by this release's validation (on if
+# bit-identical, 4-user aggregate at least +3% and 1 user not slower); until
+# then it stays -1.
+PP_DRAFT_TAIL_DEFAULT=-1
+if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then
+  export VLLM_PP_DRAFT_TAIL_STAGE=${VLLM_PP_DRAFT_TAIL_STAGE:-$PP_DRAFT_TAIL_DEFAULT}
+  echo "serve.sh: drafter tail stage: $VLLM_PP_DRAFT_TAIL_STAGE (-1 = last stage)"
+fi
+
+# --- prefill kernels, per layout ----------------------------------------------
+# Sparse-attention prefill gather, both layouts: empty top-k slots fetch
+# nothing instead of all reading the same cache row. Bitwise-identical output.
+# PP4 (64 heads): 450 -> 356 ms over the sparse-attention layers of an
+# 8.2K-token prompt; TP4 (16 heads): the first chunk's kernel 1.58x faster.
+# Kill switch: 0.
+export VLLM_GLM5_SMLA_PREFILL_PRED_LOAD=${VLLM_GLM5_SMLA_PREFILL_PRED_LOAD:-1}
+# PP4 prefill kernels (LAYOUT=pp4 only; each gated in the engine to 64 heads /
+# whole experts on sm_80): linear-attention (KDA) chunked prefill, a new
+# sparse-attention prefill kernel and a split-block Marlin MoE prefill. Each is
+# at least as accurate as the code it replaces against a 64-bit reference on
+# real inputs. With the gather above: cold prefill +19.5%. Kill switches: 0.
+if [ "$LAYOUT" = pp4 ]; then
+  export VLLM_GLM5_PP_KDA_PREFILL=${VLLM_GLM5_PP_KDA_PREFILL:-1}
+  export VLLM_GLM5_PP_SPARSE_MLA_PREFILL=${VLLM_GLM5_PP_SPARSE_MLA_PREFILL:-1}
+  export VLLM_GLM5_PP_MARLIN_PREFILL=${VLLM_GLM5_PP_MARLIN_PREFILL:-1}
+  echo "serve.sh: PP4 prefill kernels: KDA=$VLLM_GLM5_PP_KDA_PREFILL SPARSE_MLA=$VLLM_GLM5_PP_SPARSE_MLA_PREFILL MARLIN=$VLLM_GLM5_PP_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
+fi
+# TP4 prefill kernels (LAYOUT=tp4 only; gated in the engine to sm_80): the
+# KDA chunked prefill at 16 heads (1.42x per prompt per card) and the
+# split-block Marlin MoE prefill at TP4 shards (1.24x; from 384 tokens,
+# VLLM_GLM5_TP4_MARLIN_PREFILL_MIN_TOKENS). Accuracy against a 64-bit reference
+# at least equal to the code they replace. Kill switches: 0.
+if [ "$LAYOUT" = tp4 ]; then
+  export VLLM_GLM5_TP4_KDA_PREFILL=${VLLM_GLM5_TP4_KDA_PREFILL:-1}
+  export VLLM_GLM5_TP4_MARLIN_PREFILL=${VLLM_GLM5_TP4_MARLIN_PREFILL:-1}
+  echo "serve.sh: TP4 prefill kernels: KDA=$VLLM_GLM5_TP4_KDA_PREFILL MARLIN=$VLLM_GLM5_TP4_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
+fi
+
+# --- KV accounting --------------------------------------------------------------
+# With prefill chunks in flight, a request can hold more linear-attention state
+# blocks and drafter window blocks than the engine used to reserve for it, so
+# the KV pool it reported was larger than it can actually hold. These two
+# settings make the reserve match, in both layouts. They change the reported
+# pool and the start-up fit check only; outputs cannot change.
+#   VLLM_KV_MAMBA_INFLIGHT_STATES  linear-attention states held by chunks in
+#                                  flight (TP4: 17,932 fewer tokens reported,
+#                                  -1.5%)
+#   VLLM_KV_SWA_INFLIGHT_SCRATCH   drafter window blocks charged once per
+#                                  running request (PP4: +2.15% over the first
+#                                  one alone; TP4 unchanged)
+# 0 brings back the old, larger figure. Kill switches: 0.
+export VLLM_KV_MAMBA_INFLIGHT_STATES=${VLLM_KV_MAMBA_INFLIGHT_STATES:-1}
+export VLLM_KV_SWA_INFLIGHT_SCRATCH=${VLLM_KV_SWA_INFLIGHT_SCRATCH:-1}
+echo "serve.sh: KV accounting: MAMBA_INFLIGHT_STATES=$VLLM_KV_MAMBA_INFLIGHT_STATES SWA_INFLIGHT_SCRATCH=$VLLM_KV_SWA_INFLIGHT_SCRATCH"
 
 # --- sm_80 feature flags (see the header for the kill switches) -------------
 # Prefill overlap: split each mHC layer's post-attention part into S token
@@ -175,12 +295,9 @@ export VLLM_GLM5_THIN_GEMM=${VLLM_GLM5_THIN_GEMM:-1}
 # Messages above 512 KiB stay on NCCL (VLLM_GLM5_HOST_ALLREDUCE_MAX_SIZE) --
 # prefill already runs near PCIe wire speed on the ring. Also gains 4,033 KV
 # tokens. Kill switch: set it to 0 and restart.
-# There are no TP all-reduces to replace under PP-only, so it defaults off there.
-if [ "$TP" -gt 1 ]; then
-  export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
-else
-  export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-0}
-fi
+# Set in both layouts, as validated: under PP4 there is no tensor-parallel
+# all-reduce for it to replace, so it has nothing to do there.
+export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
 # PCIe peer-to-peer switch: device-memory CustomAllreduce over PCIe peer-to-peer, instead
 # of staging every collective through the host.
 #   0 (default here) -- host-staged path serves. This is what the recipe ships,
@@ -189,7 +306,10 @@ fi
 #   1                -- CustomAllreduce owns the TP all-reduce over PCIe P2P.
 #                       Only set this if peer-to-peer is actually available:
 #                       `nvidia-smi topo -p2p r` must report OK, not GNS.
-# Measured on this release, four cards with peer-to-peer available, one boot
+# Under PP4 there is no tensor-parallel all-reduce, so the switch does nothing
+# there; the stage-to-stage hand-off uses peer-to-peer by itself where the
+# driver offers it.
+# Measured on 1.3.0 (TP4), four cards with peer-to-peer available, one boot
 # each, release defaults otherwise:
 #   switch 0: decode step at 1 / 4 / 6 / 8 users 15.841 / 30.092 / 38.778 /
 #             44.705 ms, cold prefill 2,484 tok/s, KV 1,174,567
@@ -213,11 +333,25 @@ export VLLM_CUSTOM_ALLREDUCE_ALGO=${VLLM_CUSTOM_ALLREDUCE_ALGO:-2stage}
 # An explicit PYTORCH_CUDA_ALLOC_CONF in the environment wins.
 if [ -n "${ALLOC_CONF_EXPLICIT:-}" ]; then
   export PYTORCH_CUDA_ALLOC_CONF
-elif [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ]; then
+elif [ "$TP" -gt 1 ] && [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ]; then
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
 else
   # Avoids caching-allocator fragmentation during MoE weight loading.
   export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+fi
+# NCCL over peer-to-peer (TP4 with the switch above at 1). NCCL treats these
+# cards, each on its own root port, as not peer-capable and runs its ring
+# through host memory; NCCL_P2P_LEVEL=SYS lets it use peer-to-peer instead,
+# which carries the large prefill collectives. GLM5_NCCL_P2P_SYS=1 turns it on,
+# 0 off; an explicit NCCL_P2P_LEVEL always wins. Nothing changes with the
+# switch above at 0 (the default) or under PP4.
+# PENDING: whether it is on by default when peer-to-peer is on is decided by
+# this release's validation (on if quality is unchanged and prefill gains);
+# until then the default is 0.
+NCCL_P2P_SYS_DEFAULT=0
+if [ "$TP" -gt 1 ] && [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ] \
+   && [ "${GLM5_NCCL_P2P_SYS:-$NCCL_P2P_SYS_DEFAULT}" = "1" ]; then
+  export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-SYS}
 fi
 
 # Shared-expert overlap: enqueue the routed experts first, then submit the MoE
@@ -248,12 +382,13 @@ export VLLM_GLM5_SHARED_EXPERT_REORDER=${VLLM_GLM5_SHARED_EXPERT_REORDER:-1}
 #                                  identical, more KV
 # The v2 decode kernels need VLLM_GLM5_DECODE_KERNELS=1 (set above). New
 # thin-GEMM rows for 24-row batches ride VLLM_GLM5_THIN_GEMM and need no switch.
-# Under PP (unsupported here) they default to 0.
+# On in both layouts: under PP4 the shapes are the same replicated ones, and
+# the KDA v2 decode is gated to one sequence at 64 heads.
 # Measured together, TP=4, PCIe peer-to-peer on, decode step before -> after:
 #   1 user 16.26 -> 15.05 ms, 4 users 29.98 -> 27.76, 6 users 42.00 -> 34.62,
 #   8 users 43.92 -> 41.55;
 #   cold prefill flat; KV +2,048 tokens (RoPE fit +12,288, kernels -10,240).
-if [ "$TP" -gt 1 ]; then TP4V2_DEFAULT=1; else TP4V2_DEFAULT=0; fi
+TP4V2_DEFAULT=1
 for _v in VLLM_GLM5_DECODE_IDX_GLUE VLLM_GLM5_DECODE_KDA_V2 VLLM_GLM5_DECODE_MOE_ROUTE_V2 VLLM_GLM5_DECODE_MHC_V2 VLLM_GLM5_DRAFTER_ROPE_FIT; do
   export "$_v=${!_v:-$TP4V2_DEFAULT}"
 done
@@ -274,6 +409,15 @@ echo "serve.sh: second-generation decode: IDX_GLUE=$VLLM_GLM5_DECODE_IDX_GLUE KD
 #   VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS   batches of up to this many rows run the
 #                                      tie fix + sort split across more
 #                                      programs (8; 0 = one program per row)
+#   VLLM_GLM5_FLA_PIN_AUTOTUNE         the linear-attention (KDA) prefill
+#                                      kernels use one pinned configuration
+#                                      per shape instead of tuning themselves
+#                                      in each new process, so a fresh install
+#                                      and a cleared cache give the same
+#                                      output as every other start. The pinned
+#                                      configurations are exactly as accurate
+#                                      as the tuned ones against a 64-bit
+#                                      reference, at no measurable cost.
 # Measured on vs off, four alternating restarts: decode step +0.59% at 1 user,
 # -1.75% at 4, -3.74% at 8 (within restart-to-restart variation), prefill
 # -0.32%.
@@ -285,15 +429,18 @@ export VLLM_GLM5_MOE_MASK_PADDING=${VLLM_GLM5_MOE_MASK_PADDING:-1}
 export VLLM_GLM5_TOPK_TIEFIX=${VLLM_GLM5_TOPK_TIEFIX:-1}
 export VLLM_GLM5_TOPK_SORTED=${VLLM_GLM5_TOPK_SORTED:-1}
 export VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS=${VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS:-8}
+export VLLM_GLM5_FLA_PIN_AUTOTUNE=${VLLM_GLM5_FLA_PIN_AUTOTUNE:-1}
 if [ "${VLLM_MOE_SKIP_PADDING:-1}" = "0" ] && [ "$VLLM_GLM5_MOE_MASK_PADDING" = "1" ]; then
   echo "serve.sh: VLLM_MOE_SKIP_PADDING=0 with VLLM_GLM5_MOE_MASK_PADDING=1 would mask real rows; refusing" >&2
   exit 2
 fi
-echo "serve.sh: repeatable output: MOE_ALIGN=$VLLM_GLM5_DETERMINISTIC_MOE_ALIGN MASK_PADDING=$VLLM_GLM5_MOE_MASK_PADDING TOPK_TIEFIX=$VLLM_GLM5_TOPK_TIEFIX TOPK_SORTED=$VLLM_GLM5_TOPK_SORTED SPLIT_ROWS=$VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS"
+echo "serve.sh: repeatable output: MOE_ALIGN=$VLLM_GLM5_DETERMINISTIC_MOE_ALIGN MASK_PADDING=$VLLM_GLM5_MOE_MASK_PADDING TOPK_TIEFIX=$VLLM_GLM5_TOPK_TIEFIX TOPK_SORTED=$VLLM_GLM5_TOPK_SORTED SPLIT_ROWS=$VLLM_GLM5_TOPK_TIEFIX_SPLIT_ROWS FLA_PIN=$VLLM_GLM5_FLA_PIN_AUTOTUNE"
 
 # KV headroom: return memory the engine reserves but a step cannot use to the
-# KV pool. TP only. Outputs bit-identical, no measurable step-time cost;
-# together +39,626 KV tokens (+3.45%, measured with peer-to-peer on).
+# KV pool. Outputs bit-identical, no measurable step-time cost; under TP4
+# together +39,626 KV tokens (+3.45%, measured with peer-to-peer on). The logits
+# budget and the decode rows apply in both layouts; the selector shard splits
+# across tensor-parallel cards, so it is TP only.
 #   VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=128  prefill indexer logits budget; set
 #                                  512 (upstream's default) to switch it off
 #   VLLM_GLM5_DRAFTER_SELECTOR_SHARD  DFlash2 selector tables split across the
@@ -302,10 +449,10 @@ echo "serve.sh: repeatable output: MOE_ALIGN=$VLLM_GLM5_DETERMINISTIC_MOE_ALIGN 
 #                                  decode rows a step can hold
 #   VLLM_GLM5_INDEXER_GATHER_CLAMP indexer gather workspace clamp; ON in the
 #                                  engine code already, 0 is its kill switch
+export VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-128}
+export VLLM_GLM5_INDEXER_DECODE_ROWS=${VLLM_GLM5_INDEXER_DECODE_ROWS:-1}
 if [ "$TP" -gt 1 ]; then
-  export VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-128}
   export VLLM_GLM5_DRAFTER_SELECTOR_SHARD=${VLLM_GLM5_DRAFTER_SELECTOR_SHARD:-1}
-  export VLLM_GLM5_INDEXER_DECODE_ROWS=${VLLM_GLM5_INDEXER_DECODE_ROWS:-1}
 fi
 echo "serve.sh: KV headroom: MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-512} SELECTOR_SHARD=${VLLM_GLM5_DRAFTER_SELECTOR_SHARD:-0} DECODE_ROWS=${VLLM_GLM5_INDEXER_DECODE_ROWS:-0} GATHER_CLAMP=${VLLM_GLM5_INDEXER_GATHER_CLAMP:-1}"
 
@@ -320,7 +467,8 @@ echo "serve.sh: KV headroom: MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-
 # activation peak the memory profiler reserves for). Decode step unchanged.
 # Contended prefill is unaffected (FAIR_PREFILL caps it at 384 while anything
 # decodes). If SPEC_N goes above 4, raise MAX_BATCHED to 3456 + SPEC_N to
-# keep 3,456-token chunks. Under PP (unsupported here) the default stays 2312.
+# keep 3,456-token chunks. Under PP4 the default is 2312 (2,304-token chunks),
+# the chunk it was validated with.
 # Kill switch: MAX_BATCHED=2048 restores 1.2.0's chunking.
 if [ "$TP" -gt 1 ]; then MAX_BATCHED_DEFAULT=3460; else MAX_BATCHED_DEFAULT=2312; fi
 # Fair prefill: decode-aware chunking, passed as real serve args below rather
@@ -369,11 +517,12 @@ CMD=("$VENV/bin/vllm" serve "$MODEL"
   --reasoning-parser "${REASONING_PARSER:-glm47}"
   --enable-auto-tool-choice --tool-call-parser "${TOOL_PARSER:-glm47}"
   --port "${PORT:-8000}"
-  ${MM_ARGS[@]+"${MM_ARGS[@]}"} ${SPEC[@]+"${SPEC[@]}"} ${FAIR_ARGS[@]+"${FAIR_ARGS[@]}"} ${EXTRA_ARGS:-})
+  ${MM_ARGS[@]+"${MM_ARGS[@]}"} ${SPEC[@]+"${SPEC[@]}"} ${FAIR_ARGS[@]+"${FAIR_ARGS[@]}"}
+  ${BLOCK_ARGS[@]+"${BLOCK_ARGS[@]}"} ${EXTRA_ARGS:-})
 
 if [ "${DRY:-0}" = "1" ]; then
-  echo "serve.sh: DRY=1, environment the server would get:"
-  env | LC_ALL=C sort | grep -E '^(VLLM_GLM5_|VLLM_SPARSE_|VLLM_ALLOW_PCIE_|VLLM_CUSTOM_ALLREDUCE_|VLLM_PP_|VLLM_MOE_|PYTORCH_CUDA_ALLOC_CONF=|NCCL_)' | sed 's/^/  /' || true
+  echo "serve.sh: DRY=1, layout $LAYOUT (PP=$PP TP=$TP), environment the server would get:"
+  env | LC_ALL=C sort | grep -E '^(VLLM_GLM5_|VLLM_SPARSE_|VLLM_ALLOW_PCIE_|VLLM_CUSTOM_ALLREDUCE_|VLLM_PP_|VLLM_KV_|VLLM_MOE_|PYTORCH_CUDA_ALLOC_CONF=|NCCL_)' | sed 's/^/  /' || true
   if [ -n "${VLLM_API_KEY:-}" ]; then echo "  VLLM_API_KEY=(set, not shown)"; else echo "  (no API key: /v1 is open to anyone who can reach ${HOST:-127.0.0.1}:${PORT:-8000})"; fi
   echo "serve.sh: DRY=1, command:"
   printf '%q ' "${CMD[@]}"; printf '\n'

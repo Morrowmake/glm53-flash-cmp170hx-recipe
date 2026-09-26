@@ -15,6 +15,11 @@
 #
 #   ./build.sh                  full build
 #   STEP=assemble ./build.sh    re-run only the layer + image assembly
+#
+# VLLM_COMMIT (full 40-character hash) overrides the pin. CLONE_FROM and
+# CLONE_BRANCH take the engine source from another clone of the fork (for
+# example before the release commit is pushed); only that branch's history is
+# copied, and the image's origin still names the public fork.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRANE="${CRANE:-crane}"
@@ -25,11 +30,15 @@ OUT="$HERE/out"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="ampere-glm53"
-VLLM_COMMIT="0ed7d3e7f3f855646a139701598a9b40d5745688"
+VLLM_COMMIT="${VLLM_COMMIT:-PIN_PENDING}"
+# Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
+# wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
+VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"
+RELEASE="1.4.0"
 PYTHON_VERSION="3.12"
 REG="127.0.0.1:5055"
 NAME="vllm-cmp170hx"
-TAG="1.3.0-0ed7d3e7f3"
+TAG="$RELEASE-${VLLM_COMMIT:0:10}"
 PIP=(--extra-index-url https://flashinfer.ai/whl/)
 export UV_LINK_MODE=copy PYTHONDONTWRITEBYTECODE=1 UV_NO_CONFIG=1
 # git records an identity in reflogs; keep the image free of the builder's
@@ -48,18 +57,28 @@ build_tree() {
     "$UV" venv --relocatable --python "$STAGE/opt/python/bin/python$PYTHON_VERSION" "$STAGE/opt/venv"
 
     log "engine source @ $VLLM_COMMIT"
-    git clone --filter=blob:none --branch "$VLLM_BRANCH" "$VLLM_REPO" "$STAGE/opt/vllm-src"
+    git clone --filter=blob:none --single-branch --branch "${CLONE_BRANCH:-$VLLM_BRANCH}" \
+        "${CLONE_FROM:-$VLLM_REPO}" "$STAGE/opt/vllm-src"
+    git -C "$STAGE/opt/vllm-src" remote set-url origin "$VLLM_REPO"
     git -C "$STAGE/opt/vllm-src" checkout -B "$VLLM_BRANCH" "$VLLM_COMMIT"
+    if [ "${CLONE_BRANCH:-$VLLM_BRANCH}" != "$VLLM_BRANCH" ]; then
+        git -C "$STAGE/opt/vllm-src" branch -D "$CLONE_BRANCH"
+        git -C "$STAGE/opt/vllm-src" update-ref -d "refs/remotes/origin/$CLONE_BRANCH"
+        git -C "$STAGE/opt/vllm-src" remote set-branches origin "$VLLM_BRANCH"
+    fi
     git -C "$STAGE/opt/vllm-src" submodule update --init --recursive --depth 1
 
     export VIRTUAL_ENV="$STAGE/opt/venv"
     log "torch"
     "$UV" pip install "${PIP[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
     log "vllm (upstream precompiled extensions)"
-    VLLM_USE_PRECOMPILED=1 CUDA_HOME="$BUILD_CUDA_HOME" "$UV" pip install "${PIP[@]}" -e "$STAGE/opt/vllm-src"
-    log "runtime extras"
-    "$UV" pip install "${PIP[@]}" \
-        "flashinfer-python==0.6.18.post1" "flashinfer-cubin==0.6.18.post1" \
+    VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="$VLLM_WHEEL_COMMIT" \
+        VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 CUDA_HOME="$BUILD_CUDA_HOME" \
+        "$UV" pip install "${PIP[@]}" -e "$STAGE/opt/vllm-src"
+    log "runtime extras (requirements/cuda.txt: flashinfer 0.7.0, humming-kernels 0.1.16, ...)"
+    "$UV" pip install "${PIP[@]}" -r "$STAGE/opt/vllm-src/requirements/cuda.txt" \
+        "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0" \
+        "flashinfer-python==0.7.0" "flashinfer-cubin==0.7.0" \
         "tilelang==0.1.12" "apache-tvm-ffi==0.1.11" "ninja" "huggingface_hub[hf_xet]>=1.0"
     "$UV" pip freeze > "$STAGE/opt/venv/requirements.lock.txt"
 
@@ -71,7 +90,7 @@ print(f"torch       {torch.__version__} (cuda {torch.version.cuda})")
 import vllm
 print(f"vllm        {vllm.__version__}")
 import vllm._C_stable_libtorch, vllm._moe_C_stable_libtorch, vllm._custom_ops  # noqa: F401
-for mod in ("triton", "tilelang", "flashinfer"):
+for mod in ("triton", "tilelang", "flashinfer", "humming"):
     m = importlib.import_module(mod)
     print(f"{mod:<11} {getattr(m, '__version__', 'ok')}")
 from vllm.v1.attention.backends.mla import triton_mla_sparse            # noqa: F401
@@ -111,7 +130,7 @@ relocate() {
 layer() {
     log "layer"
     tar --sort=name --owner=0 --group=0 --numeric-owner \
-        --mtime='2026-09-25 00:00:00Z' --format=posix \
+        --mtime='2026-09-26 00:00:00Z' --format=posix \
         --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
         -C "$STAGE" -cf "$OUT/layer.tar" opt
     ls -l "$OUT/layer.tar"
@@ -134,10 +153,10 @@ assemble() {
         -e CUDA_HOME=/usr/local/cuda \
         -e 'NVIDIA_REQUIRE_CUDA=cuda>=13.0' \
         -l org.opencontainers.image.title=vllm-cmp170hx \
-        -l "org.opencontainers.image.description=vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) as pinned by glm53-flash-cmp170hx-recipe 1.3.0; weights not included" \
+        -l "org.opencontainers.image.description=vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) as pinned by glm53-flash-cmp170hx-recipe $RELEASE; weights not included" \
         -l org.opencontainers.image.source=https://github.com/Morrowmake/vllm-cmp170hx \
         -l org.opencontainers.image.revision=$VLLM_COMMIT \
-        -l org.opencontainers.image.url=https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/tree/v1.3.0 \
+        -l org.opencontainers.image.url=https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/tree/v$RELEASE \
         -l org.opencontainers.image.version=$TAG \
         -l org.opencontainers.image.licenses=Apache-2.0 \
         -l org.opencontainers.image.base.name=docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04 \

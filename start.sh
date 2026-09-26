@@ -5,27 +5,35 @@
 #
 # We serve canada-quant/GLM-5.3-Flash-W4A16-MTP on four GPUs with a patched
 # vLLM: OpenAI API on 127.0.0.1:8000 as "glm-5.3-flash" (local only unless you
-# set HOST; no API key unless you set API_KEY), tensor-parallel 4, DFlash2
-# speculation at k=3, 262,144-token context. No FP8, no KV quantisation, no
-# offload.
+# set HOST; no API key unless you set API_KEY), DFlash2 speculation at k=3,
+# 262,144-token context, in one of two layouts: tensor-parallel 4 (LAYOUT=tp4,
+# the default) or pipeline-parallel 4 (LAYOUT=pp4). No FP8, no KV
+# quantisation, no offload.
+#
+# The engine runs in a container by default (RUNTIME=container: Docker with the
+# NVIDIA Container Toolkit, image pinned by digest), or from a venv built on
+# this machine (RUNTIME=native). A checkout that already has a native install
+# from an earlier release keeps using it unless RUNTIME says otherwise.
 #
 # Every step is idempotent and skipped when it is already done, so running
 # ./start.sh twice is safe and the second run just launches.
 #
 # What we do:
-#   1. preflight — uv, git, python, 4 GPUs of >=60 GiB (read only), disk, port
-#   2. install   — venv + the pinned vLLM fork, if missing or the pin moved
+#   1. preflight — docker (or uv, python), git, 4 GPUs of >=60 GiB (read only),
+#                  link width, disk, port
+#   2. install   — the pinned engine image (or venv + vLLM fork), if missing or
+#                  the pin moved
 #   3. download  — the two checkpoints, if missing
-#   4. launch    — detached, PID in logs/, output to logs/serve.log
+#   4. launch    — detached, output to logs/serve.log
 #   5. wait      — poll /health up to READY_TIMEOUT, then print KV + model id
 #
 # Usage:
 #   ./start.sh                 preflight, install, download, launch — default
-#   ./start.sh install         build the venv and the fork only
+#   ./start.sh install         get the engine only (image, or venv and fork)
 #   ./start.sh download        fetch the two checkpoints only
 #   ./start.sh stop            stop the server this checkout started
 #   ./start.sh restart         stop + start
-#   ./start.sh status          process + /health + KV cache line
+#   ./start.sh status          server + /health + KV cache line
 #   ./start.sh logs            follow logs/serve.log
 #   ./start.sh update          git pull, reinstall if the pin moved, restart
 #   ./start.sh smoke           one chat request and one tool call
@@ -34,12 +42,14 @@
 # Config lives in .env, copied from .env.example on first run. A prefix env
 # assignment beats .env for every key:
 #
+#   LAYOUT=pp4 ./start.sh restart
 #   MAX_LEN=131072 ./start.sh restart
 #   VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
-#   VLLM_COMMIT=<older sha> ./start.sh update      # roll back, this run only
+#   IMAGE=<older image> ./start.sh update          # roll back (container), this run only
+#   VLLM_COMMIT=<older sha> ./start.sh update      # roll back (native), this run only
 #
-# To stay rolled back, set VLLM_COMMIT=<sha> in .env; otherwise the next
-# plain start or restart reinstalls the pinned engine.
+# To stay rolled back, set IMAGE (or VLLM_COMMIT) in .env; otherwise the next
+# plain start or restart goes back to this release's engine.
 #
 # DRY=1 ./start.sh runs the preflight, says whether it would install or
 # download, and prints the server environment and launch command. It installs,
@@ -54,9 +64,10 @@
 # A lock left held by a server from an earlier release is recognised and
 # cleared, never by signalling anything.
 #
-# stop only ever signals the PID in logs/vllm.pid, and only after confirming
-# that process is the server this checkout launched. It never searches by
-# process name, so it cannot touch an unrelated vLLM on the same machine.
+# stop only ever signals the PID in logs/vllm.pid (native) or stops the
+# container in logs/container.id (container), and only after confirming it is
+# the server this checkout launched. It never searches by process or container
+# name, so it cannot touch an unrelated vLLM on the same machine.
 # ============================================================================
 set -euo pipefail
 
@@ -132,7 +143,15 @@ VENV="${VENV:-$SCRIPT_DIR/venv}"
 VLLM_SRC="${VLLM_SRC:-$SCRIPT_DIR/vllm-src}"
 VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm-cmp170hx.git}"
 VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
-VLLM_COMMIT="${VLLM_COMMIT:-0ed7d3e7f3}"
+# This release's engine: the fork commit, the upstream nightly wheel whose
+# compiled extensions match that commit's upstream base (e55d076f89 has no
+# wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
+# it), and the container image built from them, pinned by digest.
+RELEASE_VLLM_COMMIT=PIN_PENDING
+RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING
+VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
+IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
 TARGET_REPO="${TARGET_REPO:-canada-quant/GLM-5.3-Flash-W4A16-MTP}"
 DRAFTER_REPO="${DRAFTER_REPO:-incoai/GLM-5.3-Flash-DFlash2}"
@@ -146,16 +165,30 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 # SERVED_NAME is the older spelling; SERVED_MODEL_NAME wins when both are set.
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}"
-PP="${PP:-1}"; TP="${TP:-4}"
-export PP TP
-# PP is unsupported by this release (a pipeline-parallel layout is planned for
-# a later one), but if someone sets it anyway, default to the MTP head: DFlash
-# under pipeline parallelism needs engine changes this pin does not carry.
-if [ "$PP" -gt 1 ] && [ "$TP" = "1" ]; then
-    SPEC_MODE="${SPEC_MODE:-mtp}"
-else
-    SPEC_MODE="${SPEC_MODE:-dflash}"
+# Layout: tp4 (tensor-parallel 4, the default) or pp4 (pipeline-parallel 4).
+# serve.sh reads LAYOUT too; an explicit PP/TP still wins over it.
+LAYOUT="${LAYOUT:-tp4}"
+case "$LAYOUT" in
+    tp4) PP="${PP:-1}"; TP="${TP:-4}" ;;
+    pp4) PP="${PP:-4}"; TP="${TP:-1}" ;;
+    *) die "LAYOUT must be tp4 or pp4, not '$LAYOUT'" ;;
+esac
+export LAYOUT PP TP
+# DFlash2 in both layouts.
+SPEC_MODE="${SPEC_MODE:-dflash}"
+# Where the engine runs. An existing native install (from an earlier release)
+# keeps running natively unless RUNTIME is set; a fresh checkout uses the
+# container.
+if [ -z "${RUNTIME:-}" ]; then
+    if [ -f "${VENV}/.recipe-stamp" ]; then RUNTIME=native; else RUNTIME=container; fi
 fi
+case "$RUNTIME" in
+    container|native) ;;
+    *) die "RUNTIME must be container or native, not '$RUNTIME'" ;;
+esac
+CONTAINER_NAME="${CONTAINER_NAME:-glm53-flash}"
+SHM_SIZE="${SHM_SIZE:-16g}"
+CACHE_DIR="${CACHE_DIR:-$SCRIPT_DIR/cache}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
 STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
@@ -169,6 +202,8 @@ PIDFILE="$LOGDIR/vllm.pid"
 LOCKFILE="$LOGDIR/lifecycle.lock"
 LOCKPID="$LOGDIR/lifecycle.lock.pid"
 STAMP="$VENV/.recipe-stamp"
+CIDFILE="$LOGDIR/container.id"
+LABEL="glm53-recipe.checkout"
 
 # Where our own health checks connect. A wildcard bind address is not a
 # destination, so talk to the server over loopback in that case.
@@ -309,11 +344,15 @@ need_cmd() {
 preflight() {
     local check_port=0
     [ "${1:-}" = "--with-port" ] && check_port=1
-    log "preflight"
-    need_cmd uv   "install it: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    log "preflight (runtime: $RUNTIME, layout: $LAYOUT)"
     need_cmd git  "install it: apt-get install -y git"
     need_cmd curl "install it: apt-get install -y curl"
-    command -v python3 >/dev/null 2>&1 || die "python3 not found — install Python ${PYTHON_VERSION}"
+    if [ "$RUNTIME" = container ]; then
+        preflight_docker
+    else
+        need_cmd uv   "install it: curl -LsSf https://astral.sh/uv/install.sh | sh"
+        command -v python3 >/dev/null 2>&1 || die "python3 not found — install Python ${PYTHON_VERSION}"
+    fi
 
     if command -v nvidia-smi >/dev/null 2>&1; then
         # Read only. We never set power, persistence, clocks or fan state.
@@ -339,15 +378,18 @@ preflight() {
             if [ "${narrow:-0}" -gt 0 ] && [ "$TP" -gt 1 ]; then
                 warn "  $narrow card(s) are below x16 and TP=$TP. Tensor parallelism moves ~9.4 MB per"
                 warn "  layer during prefill and ~100 small collectives per decode step, so TP will be"
-                warn "  far slower than the published numbers on narrow links. This release is TP-only;"
-                warn "  see \"Link width\" in the README. Continuing anyway."
+                warn "  far slower than the published numbers on narrow links. The pipeline-parallel"
+                warn "  layout (LAYOUT=pp4) needs far less link bandwidth; see \"Link width\" in the"
+                warn "  README. Continuing anyway."
             fi
         fi
     else
         warn "nvidia-smi not found — skipping the GPU check"
     fi
 
-    [ -d "$CUDA_HOME" ] || warn "no CUDA toolkit at $CUDA_HOME — Triton and TileLang want one at runtime (set CUDA_HOME)"
+    if [ "$RUNTIME" = native ]; then
+        [ -d "$CUDA_HOME" ] || warn "no CUDA toolkit at $CUDA_HOME — Triton and TileLang want one at runtime (set CUDA_HOME)"
+    fi
 
     mkdir -p "$MODELS_DIR"
     local avail_gb; avail_gb="$(df -BG --output=avail "$MODELS_DIR" 2>/dev/null | tail -1 | tr -dc '0-9' || true)"
@@ -371,6 +413,25 @@ preflight() {
     fi
 }
 
+# Docker must be installed and usable by this user, with the NVIDIA Container
+# Toolkit for --gpus. Under DRY a missing or unusable docker is only a warning.
+preflight_docker() {
+    local how="install Docker Engine and the NVIDIA Container Toolkit (see \"What you need\" in the README), or set RUNTIME=native"
+    if ! command -v docker >/dev/null 2>&1; then
+        [ -n "${DRY:-}" ] && { warn "docker not found — $how"; return 0; }
+        die "docker not found — $how"
+    fi
+    if ! docker info >/dev/null 2>&1; then
+        [ -n "${DRY:-}" ] && { warn "docker is installed but this user cannot reach the Docker daemon"; return 0; }
+        die "docker is installed but this user cannot reach the Docker daemon (permission denied, or the daemon is not running). Fix that, or set RUNTIME=native."
+    fi
+    if docker info --format '{{range $k, $v := .Runtimes}}{{$k}} {{end}}' 2>/dev/null | grep -qw nvidia; then
+        log "  docker: ok, NVIDIA runtime present"
+    else
+        warn "  docker: no 'nvidia' runtime registered — without the NVIDIA Container Toolkit, --gpus fails"
+    fi
+}
+
 port_busy() {
     if command -v ss >/dev/null 2>&1; then
         ss -ltn "sport = :$PORT" 2>/dev/null | tail -n +2 | grep -q .
@@ -380,21 +441,38 @@ port_busy() {
 }
 
 # ------------------------------- install -----------------------------------
+# Container: the image is the whole engine, so "installed" means the image
+# named by IMAGE (a digest) is present locally. A release that moves the pin
+# names a new image, which is pulled on the next start or update.
+container_image_present() { docker image inspect "$IMAGE" >/dev/null 2>&1; }
+
+# Native: $STAMP holds the fork commit the venv was built at (first line) and a
+# hash of the engine's requirements files (second line, "reqs <hash>").
 install_done() {
+    if [ "$RUNTIME" = container ]; then container_image_present; return; fi
     [ -x "$VENV/bin/vllm" ] || return 1
     [ -f "$STAMP" ] || return 1
     [ -d "$VLLM_SRC/.git" ] || return 1
     local want have
     want="$(git -C "$VLLM_SRC" rev-parse "$VLLM_COMMIT" 2>/dev/null || echo "?")"
-    have="$(cat "$STAMP" 2>/dev/null || echo "??")"
+    have="$(head -n1 "$STAMP" 2>/dev/null || echo "??")"
     [ "$want" = "$have" ] || return 1
     [ "$(git -C "$VLLM_SRC" rev-parse HEAD 2>/dev/null || echo '???')" = "$want" ] || return 1
     return 0
 }
 
+# The engine's own dependency pins (FlashInfer, TileLang, the quantisation
+# kernels, ...) live in its requirements files, so a pin that moves to a new
+# upstream base can change them. Their hash decides whether the venv is reused.
+reqs_hash() {
+    cat "$VLLM_SRC/requirements/common.txt" "$VLLM_SRC/requirements/cuda.txt" 2>/dev/null \
+        | sha256sum | cut -c1-16
+}
+
 do_install() {
+    if [ "$RUNTIME" = container ]; then container_install; return; fi
     if install_done && [ "${FORCE_INSTALL:-0}" != "1" ]; then
-        log "install: already at $(cut -c1-10 <"$STAMP") — skipping (FORCE_INSTALL=1 to redo)"
+        log "install: already at $(head -n1 "$STAMP" | cut -c1-10) — skipping (FORCE_INSTALL=1 to redo)"
         return 0
     fi
     log "install: venv + vLLM fork @ $VLLM_COMMIT"
@@ -407,15 +485,30 @@ do_install() {
     else
         git -C "$VLLM_SRC" fetch origin "$VLLM_BRANCH"
     fi
+    # When the fork's branch moves to a new upstream base, older pins are no
+    # longer on it; every pin a release has used is kept reachable by a
+    # glm53-recipe-<version> tag on the fork.
+    if ! git -C "$VLLM_SRC" rev-parse --verify -q "$VLLM_COMMIT^{commit}" >/dev/null; then
+        log "  $VLLM_COMMIT is not on $VLLM_BRANCH — fetching the release tags"
+        git -C "$VLLM_SRC" fetch origin 'refs/tags/glm53-recipe-*:refs/tags/glm53-recipe-*' || true
+        git -C "$VLLM_SRC" rev-parse --verify -q "$VLLM_COMMIT^{commit}" >/dev/null \
+            || die "commit $VLLM_COMMIT is neither on $VLLM_BRANCH nor under a glm53-recipe-* tag of $VLLM_REPO"
+    fi
     # Stay on a named branch rather than a detached HEAD, for the same reason
     # (`git branch --show-current` has to return something).
     git -C "$VLLM_SRC" checkout -B "$VLLM_BRANCH" "$VLLM_COMMIT"
     git -C "$VLLM_SRC" submodule update --init --recursive --depth 1
     log "  HEAD: $(git -C "$VLLM_SRC" log --oneline -1)"
 
-    if [ -x "$VENV/bin/python" ] && [ "${VENV_CLEAR:-0}" != "1" ]; then
+    local reqs old_reqs
+    reqs="$(reqs_hash)"
+    old_reqs="$(sed -n 's/^reqs //p' "$STAMP" 2>/dev/null || true)"
+    if [ -x "$VENV/bin/python" ] && [ "${VENV_CLEAR:-0}" != "1" ] && [ "$reqs" = "$old_reqs" ]; then
         log "  reusing venv at $VENV (VENV_CLEAR=1 to rebuild)"
     else
+        if [ -x "$VENV/bin/python" ] && [ "${VENV_CLEAR:-0}" != "1" ]; then
+            log "  the engine's requirements differ from the venv's — rebuilding the venv"
+        fi
         uv venv --clear --python "$PYTHON_VERSION" "$VENV"
     fi
     export VIRTUAL_ENV="$VENV"
@@ -440,15 +533,27 @@ do_install() {
             VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
             uv pip install "${pip_args[@]}" --no-build-isolation -e "$VLLM_SRC"
     else
-        log "  vLLM (upstream precompiled extensions)"
-        VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
+        # The extensions come from upstream's nightly wheel for the fork's
+        # upstream base, found through `git merge-base`. When the base has no
+        # wheel of its own, the release names the wheel to use instead
+        # (RELEASE_WHEEL_COMMIT, above); VLLM_PRECOMPILED_WHEEL_COMMIT
+        # overrides it for any pin.
+        local wheel_commit="${VLLM_PRECOMPILED_WHEEL_COMMIT:-}"
+        if [ -z "$wheel_commit" ] && [ "$(git -C "$VLLM_SRC" rev-parse HEAD)" = \
+             "$(git -C "$VLLM_SRC" rev-parse --verify -q "$RELEASE_VLLM_COMMIT^{commit}" || true)" ]; then
+            wheel_commit="$RELEASE_WHEEL_COMMIT"
+        fi
+        log "  vLLM (upstream precompiled extensions${wheel_commit:+ from wheel ${wheel_commit:0:10}})"
+        env ${wheel_commit:+VLLM_PRECOMPILED_WHEEL_COMMIT="$wheel_commit"} \
+            VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
             uv pip install "${pip_args[@]}" -e "$VLLM_SRC"
     fi
 
-    log "  runtime extras"
-    uv pip install "${pip_args[@]}" \
-        "flashinfer-python==0.6.18.post1" "flashinfer-cubin==0.6.18.post1" \
-        "tilelang==0.1.12" "apache-tvm-ffi==0.1.11" "ninja" "huggingface_hub[hf_xet]>=1.0"
+    # The runtime extras at the versions the engine pins: FlashInfer and its
+    # cubins, TileLang and the rest of requirements/cuda.txt.
+    log "  runtime extras (the engine's requirements/cuda.txt)"
+    uv pip install "${pip_args[@]}" -r "$VLLM_SRC/requirements/cuda.txt" \
+        "ninja" "huggingface_hub[hf_xet]>=1.0"
 
     log "  verifying"
     "$VENV/bin/python" - <<'PY'
@@ -468,7 +573,19 @@ from vllm.v1.worker.gpu import prologue_fuse                            # noqa: 
 from vllm.distributed.device_communicators import host_shm_all_reduce   # noqa: F401
 print("    sm_80 patch modules ok")
 PY
-    git -C "$VLLM_SRC" rev-parse HEAD >"$STAMP"
+    { git -C "$VLLM_SRC" rev-parse HEAD; echo "reqs $reqs"; } >"$STAMP"
+    log "install: done"
+}
+
+container_install() {
+    if container_image_present && [ "${FORCE_INSTALL:-0}" != "1" ]; then
+        log "install: image present — skipping (FORCE_INSTALL=1 to pull again)"
+        log "  $IMAGE"
+        return 0
+    fi
+    log "install: docker pull (the engine image, several GB)"
+    log "  $IMAGE"
+    docker pull "$IMAGE"
     log "install: done"
 }
 
@@ -480,17 +597,32 @@ models_present() {
     model_present "$DFLASH_MODEL"
 }
 
+# hf_download <repo> <local dir>: with the venv's hf CLI (native) or the one
+# in the engine image (container, run as this user so the files are yours).
+hf_download() {
+    local repo="$1" dir="$2"
+    mkdir -p "$dir"
+    if [ "$RUNTIME" = container ]; then
+        container_image_present || die "the engine image is not here yet — run ./start.sh install first"
+        docker run --rm --user "$(id -u):$(id -g)" -e HF_HOME=/tmp/hf \
+            ${HF_TOKEN:+-e HF_TOKEN} -v "$dir:/download" \
+            --entrypoint /opt/venv/bin/hf "$IMAGE" download "$repo" --local-dir /download
+    else
+        local hf="$VENV/bin/hf"
+        [ -x "$hf" ] || hf="$(command -v hf || true)"
+        [ -n "$hf" ] || die "no 'hf' CLI — run ./start.sh install first"
+        "$hf" download "$repo" --local-dir "$dir"
+    fi
+}
+
 do_download() {
-    local hf="$VENV/bin/hf"
-    [ -x "$hf" ] || hf="$(command -v hf || true)"
-    [ -n "$hf" ] || die "no 'hf' CLI — run ./start.sh install first"
     mkdir -p "$MODELS_DIR"
 
     if model_present "$MODEL" && [ "${REFRESH_WEIGHTS:-0}" != "1" ]; then
         log "download: $(basename "$MODEL") already present — skipping"
     else
         log "download: $TARGET_REPO (~178 GiB / 191 GB, 22 files)"
-        "$hf" download "$TARGET_REPO" --local-dir "$MODEL"
+        hf_download "$TARGET_REPO" "$MODEL"
     fi
 
     if [ "$SPEC_MODE" != "dflash" ]; then
@@ -499,7 +631,7 @@ do_download() {
         log "download: $(basename "$DFLASH_MODEL") already present — skipping"
     else
         log "download: $DRAFTER_REPO (~2.2 GiB / 2.3 GB, 5 files)"
-        "$hf" download "$DRAFTER_REPO" --local-dir "$DFLASH_MODEL"
+        hf_download "$DRAFTER_REPO" "$DFLASH_MODEL"
     fi
     log "download: done"
 }
@@ -526,7 +658,148 @@ pid_is_ours() {
     esac
 }
 
-server_is_ours() { pid_is_ours "$(read_pid)"; }
+server_is_ours() {
+    if [ "$RUNTIME" = container ]; then container_is_ours; else pid_is_ours "$(read_pid)"; fi
+}
+
+# ------------------------------ container ----------------------------------
+# The container this checkout started is recorded by id in $CIDFILE and carries
+# the label $LABEL=<this checkout>. Only a container with both is ever stopped
+# or removed; nothing is matched by name alone.
+read_cid() { [ -f "$CIDFILE" ] && tr -dc '0-9a-f' <"$CIDFILE" || true; }
+
+# container_state <id>: "<running> <label>" (true/false), or nothing.
+container_state() {
+    docker container inspect -f "{{.State.Running}} {{index .Config.Labels \"$LABEL\"}}" "$1" 2>/dev/null || true
+}
+container_is_ours() {
+    local id; id="$(read_cid)"
+    [ -n "$id" ] || return 1
+    [ "$(container_state "$id")" = "true $SCRIPT_DIR" ]
+}
+
+# Address:port on the host the API is published on (IPv6 in brackets).
+publish_addr() {
+    case "$HOST" in
+        \[*) printf '%s:%s' "$HOST" "$PORT" ;;
+        *:*) printf '[%s]:%s' "$HOST" "$PORT" ;;
+        *) printf '%s:%s' "$HOST" "$PORT" ;;
+    esac
+}
+
+# The environment the container's serve.sh gets: the in-container paths, then
+# every setting of yours that serve.sh reads. serve.sh (mounted from this
+# checkout) turns them into the same flags as a native start.
+CONTAINER_KEYS="LAYOUT PP TP MAX_LEN MAX_SEQS MAX_BATCHED PREFILL_CAP GPU_UTIL SPEC_N
+REASONING_PARSER TOOL_PARSER MM_CAP MM_IMAGES MM_FRAMES MM_MAX_PIXELS FAIR_PREFILL
+FAIR_CHUNK FAIR_PARTIAL BLOCK_SIZE EXTRA_ARGS SERVED_MODEL_NAME API_KEY"
+container_env() {
+    local k
+    echo "VENV=/opt/venv"
+    echo "MODEL=/models/$(basename "$MODEL")"
+    echo "DFLASH_MODEL=/models/$(basename "$DFLASH_MODEL")"
+    echo "CUDA_HOME=/usr/local/cuda"
+    echo "HOST=0.0.0.0"
+    echo "PORT=8000"
+    for k in $CONTAINER_KEYS; do
+        [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
+    done
+    env | LC_ALL=C sort | grep -E '^(VLLM_|GLM5_|NCCL_|PYTORCH_CUDA_ALLOC_CONF=)' \
+        | grep -vE '^VLLM_(COMMIT|REPO|BRANCH|SRC|USE_PRECOMPILED|PRECOMPILED_[A-Z_]*|API_KEY)=' || true
+}
+
+# The docker run arguments, into the array CRUN.
+container_args() {
+    local envfile="$1"
+    CRUN=(docker run -d --name "$CONTAINER_NAME" --label "$LABEL=$SCRIPT_DIR"
+        --gpus all --shm-size "$SHM_SIZE"
+        -p "$(publish_addr):8000"
+        --env-file "$envfile"
+        -v "$SCRIPT_DIR/serve.sh:/recipe/serve.sh:ro"
+        -v "$MODEL:/models/$(basename "$MODEL"):ro")
+    if [ "$SPEC_MODE" = dflash ]; then
+        CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")
+    fi
+    CRUN+=(-v "$CACHE_DIR:/root/.cache"
+        --entrypoint /bin/bash "$IMAGE" /recipe/serve.sh "$SPEC_MODE")
+}
+
+container_launch() {
+    if [ -n "${DRY:-}" ]; then
+        container_args "<env file>"
+        log "launch: DRY=1, a real start would run:"
+        printf '  '; printf '%q ' "${CRUN[@]}"; printf '\n'
+        log "  with this environment in the container:"
+        container_env | sed -e 's/^\(API_KEY\)=.*/\1=(set, not shown)/' -e 's/^/    /'
+        log "  and serve.sh inside it would set:"
+        env $(container_env | grep -E '^(VENV|MODEL|DFLASH_MODEL|CUDA_HOME|HOST|PORT)=') \
+            DRY=1 "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" | sed 's/^/    /'
+        return 0
+    fi
+    if container_is_ours; then
+        log "launch: already running (container $(read_cid | cut -c1-12)) — skipping"
+        return 0
+    fi
+    # A stopped container of ours is removed; any other container with the
+    # same name is left alone and we stop.
+    local id st
+    id="$(read_cid)"
+    if [ -n "$id" ]; then
+        st="$(container_state "$id")"
+        [ "${st#* }" = "$SCRIPT_DIR" ] && docker rm -f "$id" >/dev/null 2>&1 || true
+        rm -f "$CIDFILE"
+    fi
+    st="$(container_state "$CONTAINER_NAME")"
+    if [ -n "$st" ]; then
+        if [ "$st" = "false $SCRIPT_DIR" ]; then
+            docker rm "$CONTAINER_NAME" >/dev/null
+        elif [ "$st" = "true $SCRIPT_DIR" ]; then
+            docker container inspect -f '{{.Id}}' "$CONTAINER_NAME" >"$CIDFILE"
+            log "launch: already running (container $CONTAINER_NAME) — skipping"
+            return 0
+        else
+            die "a container named $CONTAINER_NAME exists and was not started from this checkout. Set CONTAINER_NAME to another name."
+        fi
+    fi
+    mkdir -p "$LOGDIR" "$CACHE_DIR"
+    log "launch: container, $SPEC_MODE, layout $LAYOUT (TP=$TP PP=$PP), ctx ${MAX_LEN:-262144}, $(publish_addr)"
+    log "  image: $IMAGE"
+    log "  log: $SERVE_LOG"
+    local envfile="$LOGDIR/container.env.run"
+    ( umask 077; container_env >"$envfile" )
+    container_args "$envfile"
+    id="$("${CRUN[@]}")" || { rm -f "$envfile"; die "docker run failed"; }
+    rm -f "$envfile"
+    echo "$id" >"$CIDFILE"
+    log "  container: ${id:0:12} ($CONTAINER_NAME)"
+    # Copy the container's output into $SERVE_LOG, as a native start writes it.
+    # The follower ends when the container does. 9>&-: see launch().
+    setsid nohup docker logs -f "$id" 9>&- >>"$SERVE_LOG" 2>&1 </dev/null &
+}
+
+container_stop() {
+    local id st; id="$(read_cid)"
+    if [ -z "$id" ]; then
+        log "stop: no container started from this checkout"
+        return 0
+    fi
+    st="$(container_state "$id")"
+    if [ -z "$st" ]; then
+        log "stop: container ${id:0:12} is gone — clearing the id file"
+        rm -f "$CIDFILE"; return 0
+    fi
+    if [ "${st#* }" != "$SCRIPT_DIR" ]; then
+        warn "stop: container ${id:0:12} was not started from this checkout — leaving it alone and clearing the id file"
+        rm -f "$CIDFILE"; return 0
+    fi
+    if [ "${st%% *}" = true ]; then
+        log "stop: docker stop ${id:0:12} (up to ${STOP_TIMEOUT}s)"
+        docker stop -t "$STOP_TIMEOUT" "$id" >/dev/null || true
+    fi
+    docker rm "$id" >/dev/null 2>&1 || true
+    rm -f "$CIDFILE"
+    log "stop: done"
+}
 
 health_ok() { curl -fsS -m 5 "http://$CLIENT_HOST:$PORT/health" >/dev/null 2>&1; }
 
@@ -549,6 +822,7 @@ kv_line() {
 
 # -------------------------------- launch -----------------------------------
 launch() {
+    if [ "$RUNTIME" = container ]; then container_launch; return; fi
     if [ -n "${DRY:-}" ]; then
         DRY=1 "$SCRIPT_DIR/serve.sh" "$SPEC_MODE"
         return 0
@@ -562,7 +836,7 @@ launch() {
         rm -f "$PIDFILE"
     fi
     mkdir -p "$LOGDIR"
-    log "launch: $SPEC_MODE, TP=${TP:-4} PP=${PP:-1}, ctx ${MAX_LEN:-262144}, :$PORT"
+    log "launch: native, $SPEC_MODE, layout $LAYOUT (TP=$TP PP=$PP), ctx ${MAX_LEN:-262144}, :$PORT"
     log "  log: $SERVE_LOG"
     # 9>&- : the server must not inherit the lifecycle lock (fd 9). serve.sh
     # execs vllm, so an inherited fd would hold the lock for the server's whole
@@ -571,6 +845,11 @@ launch() {
     local pid=$!
     echo "$pid" >"$PIDFILE"
     log "  pid: $pid"
+}
+
+# server_alive <pid>: the native process, or this checkout's container, is up.
+server_alive() {
+    if [ "$RUNTIME" = container ]; then container_is_ours; else kill -0 "$1" 2>/dev/null; fi
 }
 
 wait_ready() {
@@ -587,10 +866,11 @@ wait_ready() {
             log "  API:   http://$HOST:$PORT/v1${API_KEY:+ (API key required)}"
             return 0
         fi
-        if ! kill -0 "$pid" 2>/dev/null; then
+        if ! server_alive "$pid"; then
             warn "the server exited after ${elapsed}s — last 40 lines:"
+            sleep 1
             tail -40 "$SERVE_LOG" >&2 || true
-            rm -f "$PIDFILE"
+            [ "$RUNTIME" = container ] || rm -f "$PIDFILE"
             return 1
         fi
         sleep 5; elapsed=$((elapsed + 5))
@@ -601,6 +881,7 @@ wait_ready() {
 
 # --------------------------------- stop ------------------------------------
 do_stop() {
+    if [ "$RUNTIME" = container ]; then container_stop; return; fi
     local pid; pid="$(read_pid)"
     if [ -z "$pid" ]; then
         log "stop: nothing started from this checkout is running"
@@ -634,7 +915,21 @@ do_stop() {
 # -------------------------------- status -----------------------------------
 do_status() {
     local pid; pid="$(read_pid)"
-    if [ -z "$pid" ]; then
+    log "runtime: $RUNTIME, layout $LAYOUT (TP=$TP PP=$PP)"
+    if [ "$RUNTIME" = container ]; then
+        local id st; id="$(read_cid)"
+        if [ -z "$id" ]; then
+            log "process: no container started from this checkout"
+        else
+            st="$(container_state "$id")"
+            case "$st" in
+                "true $SCRIPT_DIR") log "process: container running, ${id:0:12} ($CONTAINER_NAME)" ;;
+                "false $SCRIPT_DIR") log "process: container ${id:0:12} has stopped — ./start.sh logs" ;;
+                "") log "process: container ${id:0:12} is gone (stale id file)" ;;
+                *) log "process: container ${id:0:12} is not ours (stale id file)" ;;
+            esac
+        fi
+    elif [ -z "$pid" ]; then
         log "process: no pid file — not started from this checkout"
     elif pid_is_ours "$pid"; then
         log "process: running, pid $pid"
@@ -651,7 +946,11 @@ do_status() {
     fi
     local kv; kv="$(kv_line || true)"
     if [ -n "$kv" ]; then log "KV:      $kv"; else log "KV:      (no KV line in $SERVE_LOG)"; fi
-    log "install: $(install_done && echo "ok, $VLLM_COMMIT" || echo 'missing or pin moved — ./start.sh install')"
+    if [ "$RUNTIME" = container ]; then
+        log "install: $(install_done && echo "image present" || echo 'image missing or pin moved — ./start.sh install'), $IMAGE"
+    else
+        log "install: $(install_done && echo "ok, $VLLM_COMMIT" || echo 'missing or pin moved — ./start.sh install')"
+    fi
     log "models:  $(models_present && echo ok || echo 'missing — ./start.sh download')"
 }
 
@@ -688,10 +987,12 @@ do_update() {
     else
         warn "update: not a git checkout — skipping the pull"
     fi
+    local pin="$VLLM_COMMIT"
+    [ "$RUNTIME" = container ] && pin="$IMAGE"
     if install_done; then
-        log "update: pin unchanged at $VLLM_COMMIT — no reinstall"
+        log "update: engine unchanged at $pin — no reinstall"
     else
-        log "update: pin moved to $VLLM_COMMIT — reinstalling"
+        log "update: engine moved to $pin — installing it"
         do_install
     fi
     do_stop
@@ -703,7 +1004,13 @@ do_update() {
 # and command. Nothing is installed, downloaded or launched.
 dry_start() {
     preflight --with-port
-    if install_done; then
+    if [ "$RUNTIME" = container ]; then
+        if command -v docker >/dev/null 2>&1 && install_done; then
+            log "install: image present — a real start would skip it"
+        else
+            log "install: a real start would pull $IMAGE"
+        fi
+    elif install_done; then
         log "install: already at $VLLM_COMMIT — a real start would skip it"
     else
         log "install: a real start would build $VENV and the vLLM fork @ $VLLM_COMMIT"
@@ -721,6 +1028,12 @@ dry_start() {
 # DRY stop/update: the lock is taken for real (that is what they check), and
 # nothing is signalled, pulled or installed.
 dry_stop() {
+    if [ "$RUNTIME" = container ]; then
+        local id; id="$(read_cid)"
+        if [ -z "$id" ]; then log "stop: DRY=1, no container started from this checkout"
+        else log "stop: DRY=1, a real stop would docker stop ${id:0:12} if it is ours"; fi
+        return 0
+    fi
     local pid; pid="$(read_pid)"
     if [ -z "$pid" ]; then
         log "stop: DRY=1, nothing started from this checkout is running"
