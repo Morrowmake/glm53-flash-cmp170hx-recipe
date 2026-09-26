@@ -327,6 +327,13 @@ container this checkout started. The first boot builds the compile caches and
 takes {{FIRST_BOOT_MIN}} minutes to become healthy; later boots take about
 {{LATER_BOOT_MIN}} minutes (weight loading and CUDA-graph capture).
 
+**The first boot after an install or an update is slower.** FlashInfer 0.7.0
+compiles two of its kernel modules (top-k, about 160 s, and sampling, about
+60 s) into the empty cache, which adds about 4–5 minutes. Later boots reuse
+them. While that build runs, the log can show lines like
+`No available shared memory broadcast block found in 60 seconds`; they are
+harmless and stop once the build finishes.
+
 **Smoke test output** on this release looks like this ({{SMOKE_SAMPLE_NOTE}}):
 
 ```

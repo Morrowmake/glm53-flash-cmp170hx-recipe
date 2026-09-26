@@ -39,6 +39,13 @@ are identical. A native install takes the runtime extras from the engine's own
 `requirements/cuda.txt`, and rebuilds the venv when those requirements change
 with the pin.
 
+**Slower first boot.** On the new base, FlashInfer 0.7.0 compiles two of its
+kernel modules (top-k, about 160 s, and sampling, about 60 s) into an empty
+cache, so the first boot after installing or updating to 1.4.0 takes about 4–5
+minutes longer; later boots reuse the cache. During that build the log can show
+`No available shared memory broadcast block found in 60 seconds`; the lines are
+harmless.
+
 ### Measured with this release's defaults
 
 180 W per card, PCIe x16 links, {{RELEASE_BOOTS}}.
