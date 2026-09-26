@@ -67,9 +67,10 @@ DFlash2 at k=3, 262,144-token context, the defaults in this repository. Three
 columns: tensor-parallel 4 with the cards talking through the host (the
 default), tensor-parallel 4 with the optional
 [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path, and pipeline-parallel 4
-(`LAYOUT=pp4`, {{PP4_P2P_STATE}}).
+(`LAYOUT=pp4`, peer-to-peer off: the setup of a stock driver on x4 cards,
+which is what this layout is for).
 
-| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4 (`LAYOUT=pp4`) |
+| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
 |---|---:|---:|---:|
 | Decode, 1 user, structured / code / prose | **{{TP4_OFF_1U}} tok/s** | **{{TP4_ON_1U}} tok/s** | **{{PP4_1U}} tok/s** |
 | Decode, 8 users, aggregate, structured / code / prose | **{{TP4_OFF_8U}} tok/s** | **{{TP4_ON_8U}} tok/s** | **{{PP4_8U}} tok/s** |
@@ -79,7 +80,8 @@ default), tensor-parallel 4 with the optional
 | KV pool at 262,144 context | {{TP4_OFF_KV}} tokens ({{TP4_OFF_KV_X}} full-length requests) | {{TP4_ON_KV}} tokens ({{TP4_ON_KV_X}}) | {{PP4_KV}} tokens ({{PP4_KV_X}}) |
 
 All at 180 W per card (a power limit we set on our cards; the scripts never
-change power, clock or fan settings), PCIe x16 links, {{RELEASE_BOOTS}}. Decode
+change power, clock or fan settings), PCIe x16 links, {{RELEASE_BOOTS}}. PP4
+with peer-to-peer on: {{PP4_P2P_ON_LINE}}. Decode
 tok/s is the per-request streaming rate on three fixed prompt types —
 structured, code and prose (400 tokens, temperature 0, median of 5); prose is
 slower because the drafter's guesses are accepted less often. Cold prefill is
@@ -317,8 +319,9 @@ done, so running it twice is safe. The same steps one at a time:
 ```
 
 The container runs the engine image with this repository's `serve.sh` as its
-entry point, the checkpoints mounted read-only and the kernel compile caches in
-`./cache`. It publishes the API on `127.0.0.1:8000` only. Its output goes to
+entry point, as your user rather than root, with the checkpoints mounted
+read-only and the kernel compile caches in `./cache` (owned by you). It
+publishes the API on `127.0.0.1:8000` only. Its output goes to
 `logs/serve.log`, as a native start's does, and `./start.sh stop` stops only the
 container this checkout started. The first boot builds the compile caches and
 takes {{FIRST_BOOT_MIN}} minutes to become healthy; later boots take about

@@ -701,6 +701,17 @@ container_env() {
     echo "CUDA_HOME=/usr/local/cuda"
     echo "HOST=0.0.0.0"
     echo "PORT=8000"
+    # The server runs as you, not root: every cache it writes (Triton,
+    # FlashInfer, TileLang, torch, vLLM, Hugging Face) goes under the mounted
+    # cache directory, owned by you. USER and LOGNAME give Python a user name
+    # for a uid the image does not know.
+    echo "HOME=/cache"
+    echo "USER=$(id -un)"
+    echo "LOGNAME=$(id -un)"
+    echo "XDG_CACHE_HOME=/cache/.cache"
+    echo "HF_HOME=/cache/huggingface"
+    echo "FLASHINFER_WORKSPACE_BASE=/cache"
+    echo "TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor"
     for k in $CONTAINER_KEYS; do
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
     done
@@ -712,6 +723,7 @@ container_env() {
 container_args() {
     local envfile="$1"
     CRUN=(docker run -d --name "$CONTAINER_NAME" --label "$LABEL=$SCRIPT_DIR"
+        --user "$(id -u):$(id -g)" --workdir /cache
         --gpus all --shm-size "$SHM_SIZE"
         -p "$(publish_addr):8000"
         --env-file "$envfile"
@@ -720,7 +732,7 @@ container_args() {
     if [ "$SPEC_MODE" = dflash ]; then
         CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")
     fi
-    CRUN+=(-v "$CACHE_DIR:/root/.cache"
+    CRUN+=(-v "$CACHE_DIR:/cache"
         --entrypoint /bin/bash "$IMAGE" /recipe/serve.sh "$SPEC_MODE")
 }
 
@@ -762,6 +774,7 @@ container_launch() {
         fi
     fi
     mkdir -p "$LOGDIR" "$CACHE_DIR"
+    [ -w "$CACHE_DIR" ] || die "$CACHE_DIR is not writable by $(id -un); the server runs as you and keeps its compile caches there. Fix its ownership or set CACHE_DIR."
     log "launch: container, $SPEC_MODE, layout $LAYOUT (TP=$TP PP=$PP), ctx ${MAX_LEN:-262144}, $(publish_addr)"
     log "  image: $IMAGE"
     log "  log: $SERVE_LOG"

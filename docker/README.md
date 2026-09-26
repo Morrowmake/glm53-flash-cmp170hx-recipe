@@ -75,13 +75,14 @@ MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"
 
-docker run -d --name glm53-flash --gpus all --shm-size 16g \
+docker run -d --name glm53-flash --user "$(id -u):$(id -g)" --workdir /cache \
+  --gpus all --shm-size 16g \
   -p 127.0.0.1:8000:8000 \
   --env-file docker/container.env \
   -v "$PWD/serve.sh:/recipe/serve.sh:ro" \
   -v "$MODELS/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro" \
   -v "$MODELS/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro" \
-  -v "$CACHE:/root/.cache" \
+  -v "$CACHE:/cache" \
   --entrypoint /bin/bash "$IMAGE" /recipe/serve.sh
 
 docker logs -f glm53-flash          # wait for "Application startup complete"
@@ -101,8 +102,11 @@ Inside the container the server listens on every interface;
 `./start.sh` does. It has **no API key**: to serve other machines, publish the
 port on another address and add `-e API_KEY=<a long random string>`.
 
-The first start compiles kernels into the cache mount and takes several
-minutes; later starts reuse them. Stop it with `docker stop -t 120 glm53-flash`
+The server runs as you (`--user`), not root: Triton, FlashInfer, TileLang,
+torch and vLLM write their compile caches under the cache mount (`HOME=/cache`
+and the cache paths in `container.env`), so `./cache` stays yours. The first
+start compiles kernels there and takes several minutes; later starts reuse
+them. Stop it with `docker stop -t 120 glm53-flash`
 and wait until `nvidia-smi` shows the cards empty before starting again. The
 API is the same as always ([Talk to it](../README.md#talk-to-it)).
 

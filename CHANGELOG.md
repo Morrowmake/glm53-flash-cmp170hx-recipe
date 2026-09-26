@@ -20,8 +20,9 @@ still override the layout.
 **Container first.** `./start.sh` now runs the engine image
 `ghcr.io/morrowmake/vllm-cmp170hx@sha256:DIGEST_PENDING` (the fork at the new
 pin on `nvidia/cuda:13.3.1-devel-ubuntu24.04`, no weights) with this
-repository's `serve.sh` as its entry point, the checkpoints mounted read-only
-and the compile caches in `./cache`. It needs Docker with the NVIDIA Container
+repository's `serve.sh` as its entry point, as the invoking user rather than
+root, with the checkpoints mounted read-only and the compile caches in
+`./cache`, owned by that user. It needs Docker with the NVIDIA Container
 Toolkit and driver 580 or newer. `install`, `download`, `stop`, `status`,
 `logs`, `smoke`, `update` and `DRY=1` all work as before; `stop` only stops the
 container this checkout started (recorded in `logs/container.id` and labelled
@@ -42,7 +43,7 @@ with the pin.
 
 180 W per card, PCIe x16 links, {{RELEASE_BOOTS}}.
 
-| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4 |
+| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off |
 |---|---:|---:|---:|
 | Decode step at 1 / 4 / 6 / 8 users, ms | {{TP4_OFF_STEPS}} | {{TP4_ON_STEPS}} | {{PP4_STEPS}} |
 | Decode, 1 user, structured / code / prose | {{TP4_OFF_1U}} tok/s | {{TP4_ON_1U}} tok/s | {{PP4_1U}} tok/s |
@@ -50,6 +51,8 @@ with the pin.
 | Cold prefill | {{TP4_OFF_PREFILL}} tok/s | {{TP4_ON_PREFILL}} tok/s | {{PP4_PREFILL}} tok/s |
 | TTFT, 6,217 / 23,255 tokens | {{TP4_OFF_TTFT}} s | {{TP4_ON_TTFT}} s | {{PP4_TTFT}} s |
 | KV pool at 262,144 | {{TP4_OFF_KV}} tokens, {{TP4_OFF_KV_X}}x | {{TP4_ON_KV}} tokens, {{TP4_ON_KV_X}}x | {{PP4_KV}} tokens, {{PP4_KV_X}}x |
+
+PP4 with peer-to-peer on: {{PP4_P2P_ON_LINE}}.
 
 Quality: TP4 perplexity {{TP4_PPL}}, GSM8K {{TP4_GSM8K}}, HumanEval
 {{TP4_HUMANEVAL}}; PP4 perplexity {{PP4_PPL}}, GSM8K {{PP4_GSM8K}}, HumanEval
