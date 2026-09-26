@@ -173,6 +173,13 @@ if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then BLOCK_ARGS=(--block-size "${B
 if [ "$TP" -gt 1 ]; then export VLLM_GLM5_REPLICATED_EMBED=${VLLM_GLM5_REPLICATED_EMBED:-0}; fi
 
 # --- pipeline-parallel (PP4) --------------------------------------------------
+# Stage 2 runs the drafter's final step. Outputs identical; paired PP4 runs
+# gained 7.1% at four users and 3.8% at eight. Kill switch: -1.
+if [ "$LAYOUT" = pp4 ]; then
+  export VLLM_PP_DRAFT_TAIL_STAGE=${VLLM_PP_DRAFT_TAIL_STAGE:-2}
+  echo "serve.sh: pipeline: DRAFT_TAIL_STAGE=$VLLM_PP_DRAFT_TAIL_STAGE"
+fi
+
 # Pipeline and drafter changes, PP only, each a kill switch at 0:
 #   VLLM_PP_SPREAD_DECODES     spread decoding requests over all in-flight
 #                              micro-batches, so no stage idles while one

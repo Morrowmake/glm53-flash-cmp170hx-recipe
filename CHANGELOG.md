@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.1 — 2026-09-27
+
+**PP4 draft tail.** Stage 2 now runs the drafter's final step. Outputs are
+identical; paired runs gained **7.1 % at four users** and **3.8 % at eight
+users**. On by default under `LAYOUT=pp4`; set
+`VLLM_PP_DRAFT_TAIL_STAGE=-1` to switch it off. No TP4 change.
+
+The engine pin is `378c37b0098a41a5cd25b3bf8b56d158e33a6cbf`.
+Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97`.
+The PP4 decode table in the README uses fresh measurements with the draft
+tail on and peer-to-peer off.
+
+**Update from 1.4.0:** `./start.sh update`.
+
 ## 1.4.0 — 2026-09-27
 
 **Install:** `./start.sh` (see the README). This release runs the engine in a

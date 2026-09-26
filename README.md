@@ -5,9 +5,9 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/9cdecd00a43d559154f9e6427466987f5beda3ea"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%209cdecd00a4-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20378c37b009-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.4.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.4.1-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -15,7 +15,7 @@
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
 cards in two layouts: tensor-parallel at 264.4 tok/s for one
 user and 763.1 tok/s across eight, or pipeline-parallel with
-6,264 tok/s cold prefill and a 2,320,328-token KV pool. The weights
+6,254 tok/s cold prefill and a 2,320,328-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. A request sent on its
 own gives the same output every time, on every install.**
@@ -61,7 +61,7 @@ What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Results
 
-### Release 1.4.0
+### Release 1.4.1
 
 DFlash2 at k=3, 262,144-token context, the defaults in this repository. Three
 columns: tensor-parallel 4 with the cards talking through the host (the
@@ -72,16 +72,18 @@ which is what this layout is for).
 
 | | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
 |---|---:|---:|---:|
-| Decode, 1 user, structured / code / prose | **264.4 / 258.5 / 189.9 tok/s** | **275.8 / 274.0 / 204.2 tok/s** | **142.2 / 138.6 / 100.7 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **763.1 / 684.7 / 512.0 tok/s** | **848.3 / 726.9 / 570.0 tok/s** | **556.3 / 503.5 / 376.8 tok/s** |
-| Decode step, 1 / 4 / 6 / 8 users | 15.87 / 29.51 / 38.91 / 44.45 ms | 15.29 / 28.23 / 35.94 / 40.39 ms | 29.35 ms at 1 user |
-| Cold prefill | **2,670 tok/s** | **3,062 tok/s** | **6,264 tok/s** |
+| Decode, 1 user, structured / code / prose | **264.4 / 258.5 / 189.9 tok/s** | **275.8 / 274.0 / 204.2 tok/s** | **141.7 / 138.4 / 100.3 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **763.1 / 684.7 / 512.0 tok/s** | **848.3 / 726.9 / 570.0 tok/s** | **542.3 / 509.8 / 383.6 tok/s** |
+| Decode step, 1 / 4 / 6 / 8 users | 15.87 / 29.51 / 38.91 / 44.45 ms | 15.29 / 28.23 / 35.94 / 40.39 ms | 29.40 ms at 1 user |
+| Cold prefill | **2,670 tok/s** | **3,062 tok/s** | **6,254 tok/s** |
 | Time to first token, 6,217 / 23,255-token prompt | 2.37 / 8.67 s | 2.05 / 7.49 s | 1.49 / 3.79 s |
 | KV pool at 262,144 context | 1,156,635 tokens (4.41 full-length requests) | 1,177,646 tokens (4.49) | 2,320,328 tokens (8.85) |
 
 All at 180 W per card (a power limit we set on our cards; the scripts never
 change power, clock or fan settings), PCIe x16 links, one server start per
-column. PP4 with peer-to-peer on: 141.0 / 139.4 / 105.1 tok/s for one user,
+column. PP4 decode, step time and cold prefill were remeasured for 1.4.1
+with the draft tail on stage 2. TP4, quality and time-to-first-token figures
+are retained from 1.4.0. PP4 with peer-to-peer on (1.4.0): 141.0 / 139.4 / 105.1 tok/s for one user,
 532.7 / 493.9 / 377.8 across eight, 6,606 tok/s cold prefill, the same KV pool.
 Under PP4 several micro-batches are in flight at once, so its step time is only
 comparable at one user. Decode
@@ -112,7 +114,7 @@ each layout.
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | 2,670 tok/s | 6,264 tok/s (2.35×) |
+| Prefill | 2,670 tok/s | 6,254 tok/s (2.34×) |
 | KV pool | 1,156,635 tokens | 2,320,328 tokens (2.01×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
@@ -219,8 +221,8 @@ prompts of the results table.)
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`9cdecd00a4`](https://github.com/Morrowmake/vllm-cmp170hx/commit/9cdecd00a43d559154f9e6427466987f5beda3ea), on upstream vLLM `e55d076f89` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca76099c68330949e4d2cbbd89f` — the engine at that pin, no weights ([docker/](docker/README.md)) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`378c37b009`](https://github.com/Morrowmake/vllm-cmp170hx/commit/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf), on upstream vLLM `e55d076f89` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97` — the engine at that pin, no weights ([docker/](docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](#choosing-a-layout) |
 | Context | 262,144 tokens |
 | KV cache | full precision, **not quantised**; TP4 1,156,635 tokens at 262,144 context (1,177,646 with peer-to-peer on), PP4 2,320,328 |
@@ -524,8 +526,9 @@ and the default allocator in one step.
 ### Kill switches
 
 Each feature is one variable. Set it to `0` and restart; no rebuild, no
-revert. Two work differently: `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` is switched
-off with `512`, and `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` is switched *on* (`1`)
+revert. The PP4 draft tail is switched off with
+`VLLM_PP_DRAFT_TAIL_STAGE=-1` (default `2`). Two others work differently:
+`VLLM_SPARSE_INDEXER_MAX_LOGITS_MB` is switched off with `512`, and `VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY` is switched *on* (`1`)
 to go back to the old schedule.
 
 ```bash
@@ -534,6 +537,7 @@ VLLM_GLM5_DECODE_KERNELS=0 ./start.sh restart
 
 | Variable | Feature | Layout |
 |---|---|---|
+| `VLLM_PP_DRAFT_TAIL_STAGE` | stage `2` runs the drafter's final step; `-1` switches it off | PP4 |
 | `VLLM_GLM5_PREFILL_OVERLAP` | prefill overlap | TP4 |
 | `VLLM_GLM5_PREFILL_KERNELS` | Ampere prefill kernels (mHC projection, sparse attention) | both |
 | `VLLM_GLM5_SMLA_PREFILL_PRED_LOAD` | sparse-attention prefill gather that skips empty slots | both |
@@ -589,6 +593,9 @@ so another container or vLLM on the same machine is never touched.
 The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 pulls the matching image whenever it changes. Uncomment `IMAGE` in `.env` to
 freeze it.
+
+**Updating from 1.4.0.** Run `./start.sh update`. The engine pin and image
+move to 1.4.1; PP4 enables the draft tail on stage 2. TP4 is unchanged.
 
 **Updating from 1.3.x.** Run `./start.sh update`, nothing else. What happens:
 
