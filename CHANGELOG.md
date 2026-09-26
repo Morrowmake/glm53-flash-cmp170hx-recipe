@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.4.0 — {{RELEASE_DATE}}
+## 1.4.0 — 2026-09-27
 
 **Install:** `./start.sh` (see the README). This release runs the engine in a
 container by default.
@@ -36,7 +36,7 @@ Toolkit and driver 580 or newer. `install`, `download`, `stop`, `status`,
 container this checkout started (recorded in `logs/container.id` and labelled
 with the checkout). The native install stays available with `RUNTIME=native`,
 and a checkout that already has one keeps using it unless `RUNTIME` says
-otherwise. {{CONTAINER_PARITY_LINE}}
+otherwise. On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670).
 
 **Engine pin moves to `9cdecd00a4`**, on upstream `e55d076f89` (vLLM 0.30.1
 development line). Installed version `0.30.1rc1.dev282+g9cdecd00a.precompiled`. The engine now pins

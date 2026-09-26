@@ -159,7 +159,7 @@ release table above; each line says what it was measured against.
   speed on one card.
 - **Container at native speed.** Release 1.3.x's image ran within 0.4% of the
   native install on decode at 1 / 4 / 8 users and on cold prefill.
-  {{CONTAINER_PARITY_LINE}}
+  On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670).
 - **A newer upstream.** The fork now sits on upstream vLLM's 0.30.1 development
   line (FlashInfer 0.7.0).
 

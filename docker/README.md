@@ -34,7 +34,7 @@ ghcr.io/morrowmake/vllm-cmp170hx@sha256:80bf2f40c1d40c6d20ae5ac101173f77bdd89ca7
 
 Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.0-9cdecd00a4`.
 
-**Measured:** {{CONTAINER_PARITY_LINE}} (Release 1.3.x's image ran within
+**Measured:** On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670). (Release 1.3.x's image ran within
 0.4 % of the native install on decode at 1 / 4 / 8 users and on cold prefill.)
 
 ## Build it
