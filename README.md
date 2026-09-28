@@ -736,26 +736,30 @@ for running it without `./start.sh`.
 
 ---
 
-## Licence
+## Licences
 
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** it installs is Apache-2.0, like upstream vLLM; our patches are
-contributed under that licence. The container image carries the same licence
-label.
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf/LICENSE).
 
-**The weights** are MIT: the quantisation
-[`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)
-and the base model
-[`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash).
+The downloaded models have separate licences:
 
-**The DFlash2 drafter**
-([`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2))
-is **CC BY-NC-ND 4.0** — research and evaluation only, non-commercial, no
-derivatives. It is the default speculator here, so read that before you deploy
-this anywhere commercial. `SPEC_MODE=mtp` serves the MTP head inside the MIT
-model checkpoint instead and does not use it at all.
+- **Target:** [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP/blob/main/README.md)
+  declares `license: mit` (MIT), inherited from the base model
+  [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash/blob/main/LICENSE).
+  Its card says: "Follow the base model's usage terms."
+- **Default drafter:** [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2/blob/main/README.md)
+  declares `license: cc-by-nc-nd-4.0` (CC BY-NC-ND 4.0). Its card says
+  "for research and evaluation. For commercial licensing, contact contact@inco.ai."
+  The [licence](https://creativecommons.org/licenses/by-nc-nd/4.0/) requires
+  attribution, prohibits commercial use, and prohibits distributing modified material.
+
+To run without the external drafter, set `SPEC_MODE=none` in `.env` (no
+speculation), or `SPEC_MODE=mtp` (the target checkpoint's built-in MTP head),
+then run `./start.sh`. Both modes skip downloading and loading the external
+drafter. For direct use of `serve.sh`, pass `none` or `mtp` as its argument.
+The performance figures above use DFlash2, not these alternatives.
 
 **The benchmark prompts** come from MiaAI-Lab's repository (AGPL-3.0) and
 their sparkDash prompt constants (MIT), used as data with attribution. No code from their repositories is included here.
