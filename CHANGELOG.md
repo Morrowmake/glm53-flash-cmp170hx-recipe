@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.4.3 — 2026-09-29
+
+**Update from 1.4.1 or 1.4.2:** `./start.sh update`. The engine pin and image
+are unchanged; no engine reinstall is needed. Your `.env` is preserved.
+Delete an explicit `PYTORCH_CUDA_ALLOC_CONF` line only to adopt the new default;
+keep it to retain your override. No other setting default changes.
+
+- Default `PYTORCH_CUDA_ALLOC_CONF` to `expandable_segments:False` independently
+  of layout and peer-to-peer. Unset configurations adopt the compatibility
+  default; explicit values, including empty or composed settings, remain intact.
+  This is not a root-cause fix for driver or virtualisation failures.
+- Print both allocator configuration variables at startup without claiming
+  precedence when both are set. Existing native/container alias forwarding is
+  unchanged. The engine pin, P2P, drafter and context settings are unchanged.
+- DFlash2 k=3 at 262,144 context: the False default measured 1,176,646 KV
+  tokens under TP4/P2P-off (+20,011 tokens / 20 physical blocks versus True)
+  and 2,334,498 under PP4 (+14,170 / 4). Four alternating starts per layout
+  passed startup, short/long decode-drift and KL-divergence checks and
+  single-request repeatability, with no new GPU Xid errors. TP4 paired
+  decode-step cost was +0.38–0.83% at 1/4/6/8 users; PP4 paired means at
+  1/4/8 differed by at most 0.21%. PP4 at six users was scheduling-confounded,
+  so no performance conclusion is drawn there.
+- Fixed-batch repeatability passed under TP4 and PP4 in eager and CUDA-graph
+  modes. Native update checks passed with `.env` preserved and no engine
+  reinstall. Conflicting allocator aliases were not GPU-validated. MTP and
+  no-drafter modes remain available but were not GPU-validated for this change.
+- Full controlled native quality, two repeats with fixed-order batches up to eight:
+  TP4/P2P-off **HumanEval 162/164 (98.78%)**, **GSM8K 1,281/1,319 (97.12%)**;
+  PP4/P2P-off **HumanEval 163/164 (99.39%)**, **GSM8K 1,284/1,319 (97.35%)**.
+  The 1.4.0 baseline and 1.4.3 configuration matched exactly on generated
+  token IDs, answers and scores in each same-layout comparison and repeat.
+  PP4's separate engine, draft-tail and allocator comparisons were also exact,
+  with no per-task gains or losses. The corrected HumanEval scorer executes
+  completions with their supplied task context; original prompts, generation
+  settings and token caps are retained. These results supersede the earlier
+  unmatched quality figures, not a claim of universal or cross-layout equivalence.
+- Separately, unchanged 1.4.0 TP4/P2P-on serving scored HumanEval 162/164
+  twice serially and 163/164, 162/164 and 162/164 under rolling eight-request
+  concurrency in three request orders. No demonstrated aggregate accuracy
+  loss, but individual gains and losses remain; this is not candidate PP4
+  validation or proof of batch invariance.
+- Existing throughput and P2P-gain figures retain their historical 1.4.1
+  scope (including retained 1.4.0 measurements and earlier allocator defaults);
+  they were not remeasured for the 1.4.3 allocator default. The earlier
+  21,011-token P2P comparison is not a P2P-only KV gain with the independent
+  False default.
+
 ## 1.4.2 — 2026-09-28
 
 **Documentation only.** The README's licence section now names each downloaded

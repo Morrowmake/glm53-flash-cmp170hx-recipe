@@ -7,18 +7,18 @@
   &nbsp;
   <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20378c37b009-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.4.1-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.4.3-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts: tensor-parallel at 264.4 tok/s for one
+cards in two layouts. Published 1.4.1 results: tensor-parallel at 264.4 tok/s for one
 user and 763.1 tok/s across eight, or pipeline-parallel with
 6,254 tok/s cold prefill and a 2,320,328-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
-FP8 anywhere, and nothing is offloaded to CPU or disk. A request sent on its
-own gives the same output every time, on every install.**
+FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
+outputs were identical across the repeated checks reported below.**
 
 This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
 cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
@@ -61,9 +61,65 @@ What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Results
 
+### Allocator compatibility default (1.4.3)
+
+With DFlash2 k=3 and a 262,144-token context, the new
+`expandable_segments:False` default measured **1,176,646 KV tokens under
+TP4/peer-to-peer off** and **2,334,498 under PP4**: respectively +20,011 tokens
+(+20 physical blocks) and +14,170 (+4) against True on the same engine.
+These are not peer-to-peer gains. Explicit allocator overrides remain intact.
+
+Four alternating True/False starts per layout passed startup checks, short/long
+decode-drift and KL-divergence comparisons, and single-request repeatability,
+with no new GPU Xid errors. TP4 paired decode-step cost was +0.38–0.83% at
+1/4/6/8 users; PP4 paired means at 1/4/8 differed by at most 0.21%. PP4 at six
+users was scheduling-confounded; no speed conclusion is drawn there.
+Fixed-batch repeatability also passed under TP4 and PP4 in both eager and
+CUDA-graph modes. Native update checks passed with `.env` preserved and no
+engine reinstall. Validation for this change is DFlash-only: MTP/no-drafter
+and conflicting allocator aliases were not GPU-validated.
+It does not establish a root-cause fix for driver or virtualisation failures.
+
+### Quality (1.4.3)
+
+Full native fixed-batch results with DFlash2 k=3, repeated twice in each configuration:
+
+| Layout | HumanEval, pass@1 (164 tasks) | GSM8K (1,319 problems) |
+|---|---:|---:|
+| TP4, peer-to-peer off | **162/164 — 98.78%** | **1,281/1,319 — 97.12%** |
+| PP4, peer-to-peer off | **163/164 — 99.39%** | **1,284/1,319 — 97.35%** |
+
+The 1.4.0 baseline and 1.4.3 configuration matched exactly on generated token
+IDs, answers and scores in both full repeats of each same-layout comparison.
+The PP4 comparisons also isolated the engine update, draft-tail enablement
+and allocator default: all were exact, with no per-task gains or losses.
+This is evidence for those measured paths, not universal equivalence across
+layouts, batches or workloads.
+
+These results use fixed-order batches of up to eight, identical prompts and
+generation settings within each comparison, and a corrected HumanEval scorer
+that executes the extracted completion with its supplied task context.
+HumanEval allows 4,096 tokens per reply; GSM8K allows 3,072. Length-capped
+outputs remain in the scores. These controlled results supersede the earlier
+unmatched quality figures; those separate runs are not release-change controls.
+
+**Rolling concurrency, separately measured:** on the unchanged 1.4.0
+TP4/peer-to-peer-on server, HumanEval scored **162/164 twice serially** and
+**163/164, 162/164 and 162/164** with up to eight continuously replenished
+requests in original, shuffled and reversed order. There was no demonstrated
+aggregate accuracy loss, but individual tasks both improved and worsened.
+This is not a 1.4.3 or PP4 comparison, nor proof of batch invariance.
+
 ### Release 1.4.1
 
-DFlash2 at k=3, 262,144-token context, the defaults in this repository. Three
+The following throughput and capacity results are historical published 1.4.1
+figures (including retained 1.4.0 measurements), not remeasurements of the new
+allocator default. That release used True under TP4/P2P-off and PP4, and False
+under TP4/P2P-on. The opening performance headline, layout comparison and
+detailed performance results below retain that scope; current default KV
+capacities and controlled quality results are reported above.
+
+DFlash2 at k=3, 262,144-token context, the defaults of release 1.4.1. Three
 columns: tensor-parallel 4 with the cards talking through the host (the
 default), tensor-parallel 4 with the optional
 [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path, and pipeline-parallel 4
@@ -82,7 +138,7 @@ which is what this layout is for).
 All at 180 W per card (a power limit we set on our cards; the scripts never
 change power, clock or fan settings), PCIe x16 links, one server start per
 column. PP4 decode, step time and cold prefill were remeasured for 1.4.1
-with the draft tail on stage 2. TP4, quality and time-to-first-token figures
+with the draft tail on stage 2. TP4 and time-to-first-token figures
 are retained from 1.4.0. PP4 with peer-to-peer on (1.4.0): 141.0 / 139.4 / 105.1 tok/s for one user,
 532.7 / 493.9 / 377.8 across eight, 6,606 tok/s cold prefill, the same KV pool.
 Under PP4 several micro-batches are in flight at once, so its step time is only
@@ -94,21 +150,13 @@ the median over real-text prompts of 23.9K to 37.9K tokens. The KV pool is the
 size the server can actually fill with prefill chunks in flight (see
 [Honest KV figures](#measured-while-building-this-release)).
 
-**Quality**, measured on each layout's default:
-
-| | TP4 (peer-to-peer off) | PP4 |
-|---|---:|---:|
-| Perplexity, fixed 60-document set | **3.2781** | **3.2735** |
-| GSM8K, all 1,319 problems | **0.972** | **0.970** |
-| HumanEval, all 164, pass@1 | **0.9634** | **0.9878** |
-
-HumanEval allows 4,096 tokens per reply and scores the last complete fenced code
-block of the reply, reasoning included: 158/164 under TP4 (8 replies hit the
-limit) and 162/164 under PP4 (16 hit it). Scoring the first code block instead
-gives 0.8110 and 0.8476. GSM8K cut 2 of 1,319 answers off at 3,072 tokens in
-each layout.
+Historical perplexity on the fixed 60-document set was **3.2781 under TP4**
+and **3.2735 under PP4** (1.4.0); it was not remeasured for the allocator change.
+Current HumanEval and GSM8K results are in [Quality (1.4.3)](#quality-143).
 
 ### Choosing a layout
+
+Prefill and KV figures in this comparison are the historical 1.4.1 results above.
 
 | | Tensor-parallel 4 (`tp4`, default) | Pipeline-parallel 4 (`pp4`) |
 |---|---|---|
@@ -124,8 +172,9 @@ switching is `LAYOUT=pp4 ./start.sh restart` and back with `LAYOUT=tp4`.
 
 ### Measured while building this release
 
-These come from development runs on the same four cards. They are not the
-release table above; each line says what it was measured against.
+These are historical 1.4.0/1.4.1 measurements on the same four cards, not
+remeasurements of the new allocator default. They are not the release table
+above; each line says what it was measured against.
 
 - **Pipeline-parallel prefill +19.5%.** New prefill kernels for 64 heads and
   whole experts — the linear-attention (KDA) prefill, the sparse-attention
@@ -225,7 +274,7 @@ prompts of the results table.)
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97` — the engine at that pin, no weights ([docker/](docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; TP4 1,156,635 tokens at 262,144 context (1,177,646 with peer-to-peer on), PP4 2,320,328 |
+| KV cache | full precision, **not quantised**; with the False allocator default at 262,144 context: TP4/peer-to-peer off 1,176,646 tokens, PP4 2,334,498. Historical peer-to-peer-on capacity is in the release table above |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
@@ -349,8 +398,8 @@ them. While that build runs, the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 
-**Smoke test output** on this release looks like this (tensor-parallel 4,
-peer-to-peer off):
+**Historical smoke test output** from the published release (tensor-parallel 4,
+peer-to-peer off, earlier True allocator default; current KV differs):
 
 ```
 ==> waiting for http://127.0.0.1:8000/health (up to 900s)
@@ -486,11 +535,12 @@ EPYC root ports, all pairs.
 path dead behind PLX switches on a Xeon, so a different board may simply not
 have it.
 
-**What you gain.** On this release, the first two columns of the
-[results table](#release-140): step time −3.7% at one user, −4.3% at four,
+**Historical gains.** With the earlier allocator defaults, the first two columns
+of the published 1.4.1 [results table](#release-141): step time −3.7% at one user, −4.3% at four,
 −7.6% at six and −9.1% at eight; single-user decode +4.3% to +7.5%; eight-user
 aggregate +6.2% to +11.3%; cold prefill +14.7% (2,670 → 3,062 tok/s); and
-21,011 more KV tokens.
+21,011 more KV tokens. That comparison changed both P2P and allocator mode;
+the KV delta is not a P2P gain with the new independent False default.
 
 **Turn it on.**
 
@@ -500,12 +550,20 @@ nvidia-smi topo -p2p r              # every pair must say OK, not GNS
 VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 ./start.sh restart
 ```
 
-`serve.sh` ties the rest to that one variable: it selects the `2stage`
-all-reduce kernel (upstream's default crossover is tuned for NVLink), the
-caching-allocator mode the peer-to-peer path needs, and NCCL's peer-to-peer
-level (`NCCL_P2P_LEVEL=SYS`), so the large prefill collectives also go card to
-card: +13.7% cold prefill with identical outputs. `GLM5_NCCL_P2P_SYS=0` turns
-that part off.
+`serve.sh` selects the `2stage` all-reduce kernel (upstream's default
+crossover is tuned for NVLink). With peer-to-peer on under TP4, it also sets
+NCCL's peer-to-peer level (`NCCL_P2P_LEVEL=SYS`), so the large prefill
+collectives go card to card: historically +13.7% cold prefill with identical
+outputs, measured before this allocator-default change.
+`GLM5_NCCL_P2P_SYS=0` turns that part off.
+
+The allocator compatibility default is `expandable_segments:False`, independent
+of layout and peer-to-peer. Explicit `PYTORCH_CUDA_ALLOC_CONF` values, including
+empty or composed settings, are preserved; the startup allocator banner reports
+both allocator variable names, not inferred precedence. `PYTORCH_ALLOC_CONF`
+is inherited for native launches but is not forwarded into the container;
+conflicting aliases are not covered by the legacy-variable default. This is a
+compatibility default, not a fix for an underlying driver or virtualisation bug.
 
 **Check it works.**
 
@@ -520,8 +578,8 @@ With it off, or if the driver does not actually grant peer access, it reads
 own rather than failing. Then run `./start.sh smoke`.
 
 **Turn it off.** Set `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0` in `.env` (or
-delete the line) and `./start.sh restart`. That restores the host-staged path
-and the default allocator in one step.
+delete the line) and `./start.sh restart`. That restores the host-staged path;
+it does not change the allocator configuration.
 
 ### Kill switches
 
@@ -594,8 +652,16 @@ The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 pulls the matching image whenever it changes. Uncomment `IMAGE` in `.env` to
 freeze it.
 
+**Updating from 1.4.1 or 1.4.2.** Run `./start.sh update`. Release 1.4.3 keeps
+the engine pin and image unchanged, so no engine reinstall is needed. Your
+`.env` is preserved. The `PYTORCH_CUDA_ALLOC_CONF` default is now
+`expandable_segments:False` for every layout and peer-to-peer setting. Delete
+an old explicit `PYTORCH_CUDA_ALLOC_CONF` line only if you want the new default;
+keep it to preserve your override. No other setting default changes.
+
 **Updating from 1.4.0.** Run `./start.sh update`. The engine pin and image
-move to 1.4.1; PP4 enables the draft tail on stage 2. TP4 is unchanged.
+move to the 1.4.1 engine; PP4 enables the draft tail on stage 2. The allocator
+compatibility default above applies when no explicit override is set.
 
 **Updating from 1.3.x.** Run `./start.sh update`, nothing else. What happens:
 
@@ -610,8 +676,8 @@ move to 1.4.1; PP4 enables the draft tail on stage 2. TP4 is unchanged.
    `No available shared memory broadcast block found in 60 seconds` lines
    meanwhile, which are harmless.
 5. The layout stays tensor-parallel 4 and peer-to-peer stays as you had it.
-   The KV line now reads 1,156,635 tokens with peer-to-peer off (1.3.x printed
-   1,174,567): the corrected figure described above.
+   With the new False allocator default, TP4/peer-to-peer off measured
+   1,176,646 KV tokens. Explicit allocator overrides are preserved.
 
 **Moving a native install to the container.** Install Docker and the NVIDIA
 Container Toolkit ([What you need](#what-you-need)), then set

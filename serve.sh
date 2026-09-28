@@ -88,10 +88,11 @@
 #                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
 #                                 needs peer-to-peer enabled at the driver level
 #                                 -- see the optional section in the README.
-#                                 On this release (TP4): decode step -3.7% at 1
+#                                 Historical 1.4.1 results (TP4): step -3.7% at 1
 #                                 user, -4.3% at 4, -7.6% at 6, -9.1% at 8, cold
 #                                 prefill +14.7% (with NCCL over peer-to-peer,
-#                                 below), KV +21,011 tokens.
+#                                 below), KV +21,011 with earlier allocator
+#                                 defaults, not a current P2P-only KV gain.
 #                                 0 keeps the host-staged path.
 #   VLLM_CUSTOM_ALLREDUCE_ALGO=   which CustomAllreduce kernel; 2stage here
 #                                 because the built-in crossover is NVLink-tuned
@@ -130,11 +131,6 @@ CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.3}"
 export CUDA_HOME
 export PATH="$VENV/bin:$CUDA_HOME/bin:$PATH"
 
-# The caching allocator is chosen further down, together with the PCIe peer-to-peer switch:
-# CustomAllreduce needs legacy CUDA IPC handles, which the expandable_segments
-# (VMM) allocator cannot provide. Record whether the caller set it explicitly so
-# that choice can win.
-ALLOC_CONF_EXPLICIT=${PYTORCH_CUDA_ALLOC_CONF+1}
 # Layout. LAYOUT=tp4 (default): TENSOR-PARALLEL 4. Every layer is split across
 # all four cards, so it is the fastest per request, but it assumes PCIe Gen2 x16
 # links: it moves ~9.4 MB per layer during prefill and ~100 small collectives
@@ -302,14 +298,15 @@ export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
 # Under PP4 there is no tensor-parallel all-reduce, so the switch does nothing
 # there; the stage-to-stage hand-off uses peer-to-peer by itself where the
 # driver offers it.
-# Measured on this release (TP4), four cards with peer-to-peer available, one
-# boot each, release defaults otherwise:
+# Historical 1.4.1 results (TP4), four cards with peer-to-peer available, one
+# boot each, earlier release defaults (allocator True at switch 0, False at 1):
 #   switch 0: decode step at 1 / 4 / 6 / 8 users 15.87 / 29.51 / 38.91 /
 #             44.45 ms, cold prefill 2,670 tok/s, KV 1,156,635
 #   switch 1: decode step at 1 / 4 / 6 / 8 users 15.29 / 28.23 / 35.94 /
 #             40.39 ms, cold prefill 3,062 tok/s, KV 1,177,646
-# The switch ties both decisions together, so 0 is a complete fallback rather
-# than a drop to NCCL: VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
+# These are not remeasurements with the independent False allocator default.
+# Switch 0 uses the host-staged path rather than dropping to NCCL:
+# VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
 export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
 # 2stage, not the built-in crossover: that crossover takes one-shot below
 # 512 KiB, which is tuned for NVLink and wrong on Gen2 x16. Forcing 1stage
@@ -317,20 +314,14 @@ export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDU
 # upstream's crossover back. Read only while a CustomAllreduce is actually
 # serving, so it is inert when the switch above is 0.
 export VLLM_CUSTOM_ALLREDUCE_ALGO=${VLLM_CUSTOM_ALLREDUCE_ALGO:-2stage}
-# CustomAllreduce registers its captured graph buffers through legacy CUDA IPC
-# handles, which the expandable_segments (VMM) allocator cannot provide, so the
-# switch also picks the allocator. Not a safety net -- the engine detects the VMM
-# allocator itself and stands the switch down with a warning rather than
-# crashing -- but with expandable_segments on, setting it would do nothing.
-# An explicit PYTORCH_CUDA_ALLOC_CONF in the environment wins.
-if [ -n "${ALLOC_CONF_EXPLICIT:-}" ]; then
-  export PYTORCH_CUDA_ALLOC_CONF
-elif [ "$TP" -gt 1 ] && [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ]; then
-  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False
-else
-  # Avoids caching-allocator fragmentation during MoE weight loading.
-  export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-fi
+# Compatibility default, independent of layout and the PCIe P2P switch.
+# Preserve explicit values verbatim, including empty and composed settings.
+# CustomAllreduce needs legacy CUDA IPC handles, unavailable with VMM
+# (expandable_segments); the engine guards that incompatible combination.
+export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF-expandable_segments:False}
+# Report configuration, not inferred allocator precedence when both aliases exist.
+printf 'serve.sh: allocator: PYTORCH_CUDA_ALLOC_CONF=%q PYTORCH_ALLOC_CONF=%q\n' \
+  "$PYTORCH_CUDA_ALLOC_CONF" "${PYTORCH_ALLOC_CONF-<unset>}"
 # NCCL over peer-to-peer (TP4 with the switch above at 1). NCCL treats these
 # cards, each on its own root port, as not peer-capable and runs its ring
 # through host memory; NCCL_P2P_LEVEL=SYS lets it use peer-to-peer instead,
