@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.2 — 2026-09-28
+
+**Documentation only.** The README's licence section now names each downloaded
+model's licence with a link to its card: the target weights are MIT; the default
+DFlash2 drafter is CC BY-NC-ND 4.0 (non-commercial). `SPEC_MODE=none` or
+`SPEC_MODE=mtp` runs without the external drafter. No engine or setting change;
+`./start.sh update` from 1.4.1 reinstalls nothing.
+
 ## 1.4.1 — 2026-09-27
 
 **PP4 draft tail.** Stage 2 now runs the drafter's final step. Outputs are
