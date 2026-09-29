@@ -18,6 +18,11 @@
   source `2749982103fd51d5bb73727532640c10844ec699`; container runtime acceptance
   is separate. No new release or performance claim is made here. Existing `.env`
   is preserved.
+- Isolate rootless local source clones from unrelated Git objects with transport
+  cloning, explicit version-tag retention and pruning beyond the selected pin.
+  Layer assembly rejects unreachable or externally shared Git object stores and
+  mismatched source HEADs. `OUT` can select a separate output directory without
+  overwriting an earlier image.
 
 ## 1.4.3 — 2026-09-29
 

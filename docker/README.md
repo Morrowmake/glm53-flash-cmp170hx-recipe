@@ -54,8 +54,16 @@ VLLM_COMMIT=2749982103fd51d5bb73727532640c10844ec699 CLONE_FROM=/path/to/source 
 ```
 
 The builder replaces `STAGE`: choose a new dedicated path. It produces a local
-OCI image in `docker/out/`, without publishing it. For Docker, add build arguments
-`VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming a source reachable inside the build.
+OCI image in `docker/out/`, without publishing it. Set `OUT=/path/to/new-output`
+to preserve earlier image evidence. Local `CLONE_FROM` sources use Git transport
+cloning (`--no-local`), never object-directory copying or hardlinks. Only the
+selected history and explicit upstream version tag are retained; objects newer
+than an overridden pin are pruned. Layer assembly checks the actual source HEAD,
+self-contained Git stores and absence of unreachable objects, including submodule
+stores. These checks supplement path scans, which cannot inspect compressed Git
+objects; they do not certify the identity/content of reachable history.
+For Docker, add build arguments `VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming
+a source reachable inside the build.
 Labels identify the supplied source, not a release. Both builders compile one
 sm_80 library without GPUs and check operator registrations. Runtime switches
 `VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` remain 0.

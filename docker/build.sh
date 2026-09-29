@@ -26,7 +26,7 @@ CRANE="${CRANE:-crane}"
 UV="${UV:-uv}"
 BUILD_CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.3}"
 STAGE="${STAGE:-/var/tmp/cmp170hx-image/stage}"
-OUT="$HERE/out"
+OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="ampere-glm53"
@@ -51,16 +51,11 @@ export GIT_CONFIG_GLOBAL=/dev/null
 mkdir -p "$OUT"
 log() { printf '[%s] %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 
-build_tree() {
-    rm -rf "$STAGE"; mkdir -p "$STAGE/opt"
-    log "python $PYTHON_VERSION"
-    UV_PYTHON_INSTALL_DIR="$STAGE/python-dl" "$UV" python install "$PYTHON_VERSION"
-    mv "$STAGE"/python-dl/cpython-${PYTHON_VERSION}.*-linux-x86_64-gnu "$STAGE/opt/python"
-    rm -rf "$STAGE/python-dl"
-    "$UV" venv --relocatable --python "$STAGE/opt/python/bin/python$PYTHON_VERSION" "$STAGE/opt/venv"
-
+clone_source() {
     log "engine source @ $VLLM_COMMIT"
-    git clone --filter=blob:none --single-branch --branch "${CLONE_BRANCH:-$VLLM_BRANCH}" \
+    # Local clone optimisations copy unrelated objects, even with single-branch.
+    # Use transport negotiation and retain only the explicit version tag.
+    git clone --no-local --no-tags --single-branch --branch "${CLONE_BRANCH:-$VLLM_BRANCH}" \
         "${CLONE_FROM:-$VLLM_REPO}" "$STAGE/opt/vllm-src"
     git -C "$STAGE/opt/vllm-src" remote set-url origin "$VLLM_REPO"
     git -C "$STAGE/opt/vllm-src" checkout -B "$VLLM_BRANCH" "$VLLM_COMMIT"
@@ -69,15 +64,31 @@ build_tree() {
         git -C "$STAGE/opt/vllm-src" update-ref -d "refs/remotes/origin/$CLONE_BRANCH"
         git -C "$STAGE/opt/vllm-src" remote set-branches origin "$VLLM_BRANCH"
     fi
+    git -C "$STAGE/opt/vllm-src" update-ref "refs/remotes/origin/$VLLM_BRANCH" "$VLLM_COMMIT"
+    git -C "$STAGE/opt/vllm-src" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$VLLM_BRANCH"
     # The installed version string comes from the nearest upstream release tag
     # (setuptools-scm); make sure the clone has it even when CLONE_FROM does not.
     if ! git -C "$STAGE/opt/vllm-src" rev-parse -q --verify "refs/tags/$VERSION_TAG" >/dev/null; then
-        git -C "$STAGE/opt/vllm-src" fetch --filter=blob:none --no-tags "$UPSTREAM_REPO" \
+        git -C "$STAGE/opt/vllm-src" fetch --no-tags "$UPSTREAM_REPO" \
             "refs/tags/$VERSION_TAG:refs/tags/$VERSION_TAG"
     fi
     git -C "$STAGE/opt/vllm-src" merge-base --is-ancestor "$VERSION_TAG" HEAD \
         || { echo "$VERSION_TAG is not an ancestor of $VLLM_COMMIT" >&2; exit 1; }
     git -C "$STAGE/opt/vllm-src" submodule update --init --recursive --depth 1
+    # A pin older than the branch tip must not retain the later objects.
+    git -C "$STAGE/opt/vllm-src" reflog expire --expire=now --all
+    git -C "$STAGE/opt/vllm-src" repack -ad
+    git -C "$STAGE/opt/vllm-src" prune --expire=now
+}
+
+build_tree() {
+    rm -rf "$STAGE"; mkdir -p "$STAGE/opt"
+    log "python $PYTHON_VERSION"
+    UV_PYTHON_INSTALL_DIR="$STAGE/python-dl" "$UV" python install "$PYTHON_VERSION"
+    mv "$STAGE"/python-dl/cpython-${PYTHON_VERSION}.*-linux-x86_64-gnu "$STAGE/opt/python"
+    rm -rf "$STAGE/python-dl"
+    "$UV" venv --relocatable --python "$STAGE/opt/python/bin/python$PYTHON_VERSION" "$STAGE/opt/venv"
+    clone_source
 
     export VIRTUAL_ENV="$STAGE/opt/venv"
     log "torch"
@@ -153,6 +164,28 @@ layer() {
     expected="$(cat "$STAGE/opt/venv/.ampere-marlin-image-stamp")"
     actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.abi3.so" | cut -d' ' -f1)"
     [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch; run a full build for this source pin" >&2; exit 1; }
+    # Byte scans cannot inspect compressed Git objects. Fail closed on detached
+    # object stores or unreachable history, including nested submodules.
+    python3 - "$STAGE/opt/vllm-src" "$VLLM_COMMIT" <<'PY'
+import pathlib, subprocess, sys
+root = pathlib.Path(sys.argv[1])
+def git(*args):
+    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+if git("rev-parse", "HEAD") != sys.argv[2]:
+    raise SystemExit("Packaged source HEAD differs from the image pin")
+stores = [root / ".git"]
+modules = root / ".git" / "modules"
+if modules.exists():
+    stores.extend(p.parent for p in modules.rglob("HEAD") if (p.parent / "objects").is_dir())
+for store in stores:
+    if not store.is_dir() or (store / "objects/info/alternates").exists():
+        raise SystemExit("Packaged Git object store must be self-contained")
+    result = subprocess.run(["git", "--git-dir", str(store), "fsck", "--full",
+                             "--unreachable", "--no-reflogs"], capture_output=True, text=True)
+    if result.returncode or result.stdout.strip() or result.stderr.strip():
+        raise SystemExit("Packaged Git object integrity/reachability check failed")
+print(f"Git object integrity/reachability verified: {len(stores)} stores")
+PY
     log "layer"
     tar --sort=name --owner=0 --group=0 --numeric-owner \
         --mtime='2026-09-26 00:00:00Z' --format=posix \
