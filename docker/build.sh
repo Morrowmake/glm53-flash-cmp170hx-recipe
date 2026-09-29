@@ -119,7 +119,7 @@ from vllm.ampere_marlin import require_extension
 require_extension()
 print("sm_80 patch modules and optional Marlin registrations ok")
 PY
-    { printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.so" | cut -d' ' -f1; } > "$STAGE/opt/venv/.ampere-marlin-image-stamp"
+    { printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.abi3.so" | cut -d' ' -f1; } > "$STAGE/opt/venv/.ampere-marlin-image-stamp"
     unset VIRTUAL_ENV
 }
 
@@ -151,7 +151,7 @@ relocate() {
 layer() {
     local expected actual
     expected="$(cat "$STAGE/opt/venv/.ampere-marlin-image-stamp")"
-    actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.so" | cut -d' ' -f1)"
+    actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.abi3.so" | cut -d' ' -f1)"
     [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch; run a full build for this source pin" >&2; exit 1; }
     log "layer"
     tar --sort=name --owner=0 --group=0 --numeric-owner \

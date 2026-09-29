@@ -482,10 +482,12 @@ reqs_hash() {
 install_ampere_marlin() {
     [ "$VLLM_BUILD_AMPERE_MARLIN" = 1 ] || return 0
     local builder="$VLLM_SRC/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py"
-    local binary="$VLLM_SRC/vllm/_ampere_marlin_C.so" stamp="$VENV/.ampere-marlin-stamp"
+    local binary="$VLLM_SRC/vllm/_ampere_marlin_C.abi3.so" stamp="$VENV/.ampere-marlin-stamp"
     [ -f "$builder" ] || die "VLLM_BUILD_AMPERE_MARLIN=1: this engine pin has no optional Marlin builder; select a compatible VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT (see README)."
     [ -x "$CUDA_HOME/bin/nvcc" ] || die "VLLM_BUILD_AMPERE_MARLIN=1 needs nvcc at $CUDA_HOME/bin/nvcc; set CUDA_HOME to a CUDA toolkit."
     command -v "${CXX:-c++}" >/dev/null || die "VLLM_BUILD_AMPERE_MARLIN=1 needs a C++ compiler (CXX)."
+    # Remove obsolete import-precedence variants of this optional module only.
+    rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VLLM_SRC/vllm"/_ampere_marlin_C.cpython-*.so
     local key digest have
     key="$({
         git -C "$VLLM_SRC" rev-parse HEAD &&
@@ -560,7 +562,8 @@ do_install() {
         fi
         uv venv --clear --python "$PYTHON_VERSION" "$VENV"
     fi
-    rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VENV/.ampere-marlin-stamp"
+    rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VLLM_SRC/vllm/_ampere_marlin_C.abi3.so" \
+        "$VLLM_SRC/vllm"/_ampere_marlin_C.cpython-*.so "$VENV/.ampere-marlin-stamp"
     export VIRTUAL_ENV="$VENV"
 
     local pip_args=(--extra-index-url https://flashinfer.ai/whl/)

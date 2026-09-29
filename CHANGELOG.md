@@ -8,6 +8,8 @@
 - Add independent default-off `VLLM_GLM5_MARLIN_DECODE_CUDA` and
   `VLLM_GLM5_MARLIN_PREFILL_CUDA` switches with enabled-only startup validation.
   One prebuilt library supports both layouts; changing layouts never rebuilds it.
+  Standalone and source builds use the same `_ampere_marlin_C.abi3.so` filename;
+  native installation removes obsolete optional-module suffix variants.
 - Container build sources prebuild that library from a compatible source override.
   Released engine/image pins remain unchanged and do not contain the extension.
   No new release or performance claim is made here. Existing `.env` is preserved.
