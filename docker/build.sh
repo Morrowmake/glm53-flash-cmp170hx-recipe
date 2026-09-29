@@ -100,7 +100,7 @@ build_tree() {
         CUDA_HOME="$BUILD_CUDA_HOME" PATH="$STAGE/opt/venv/bin:$BUILD_CUDA_HOME/bin:$PATH" \
         "$STAGE/opt/venv/bin/python" "$builder" --out "$STAGE/opt/vllm-src/vllm" \
         --build-dir "$STAGE/ampere-marlin-build" )
-    log "verify imports (no GPU)
+    log "verify imports (no GPU)"
     CUDA_VISIBLE_DEVICES= "$STAGE/opt/venv/bin/python" - <<'PY' | tee "$OUT/verify.txt"
 import importlib, sys, torch
 print(f"python      {sys.version.split()[0]}")
