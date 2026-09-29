@@ -253,7 +253,7 @@ for flag in VLLM_GLM5_MARLIN_DECODE_CUDA VLLM_GLM5_MARLIN_PREFILL_CUDA; do
   case "${!flag}" in 0|1) ;; *) echo "serve.sh: $flag must be 0 or 1" >&2; exit 2 ;; esac
 done
 echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA prefill=$VLLM_GLM5_MARLIN_PREFILL_CUDA (prebuilt library required when enabled)"
-if [ -z "${DRY:-}" ] && { [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ] || [ "$VLLM_GLM5_MARLIN_PREFILL_CUDA" = 1 ]; }; then
+if [ "${DRY:-0}" != 1 ] && { [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ] || [ "$VLLM_GLM5_MARLIN_PREFILL_CUDA" = 1 ]; }; then
   CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY' || exit 1
 try:
     from vllm.ampere_marlin import require_extension
