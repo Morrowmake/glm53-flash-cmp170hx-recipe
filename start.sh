@@ -515,7 +515,10 @@ install_ampere_marlin() {
 }
 
 do_install() {
-    if [ "$RUNTIME" = container ]; then container_install; return; fi
+    if [ "$RUNTIME" = container ]; then
+        [ "$VLLM_BUILD_AMPERE_MARLIN" = 0 ] || die "VLLM_BUILD_AMPERE_MARLIN is native-only: set RUNTIME=native, or use docker/build.sh to build an image and unset this install flag."
+        container_install; return
+    fi
     if install_done && [ "${FORCE_INSTALL:-0}" != "1" ]; then
         log "install: already at $(head -n1 "$STAMP" | cut -c1-10) — skipping (FORCE_INSTALL=1 to redo)"
         install_ampere_marlin
