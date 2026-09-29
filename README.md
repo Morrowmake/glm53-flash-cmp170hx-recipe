@@ -273,6 +273,12 @@ VLLM_GLM5_MARLIN_DECODE_CUDA=1 ./start.sh restart
 VLLM_GLM5_MARLIN_PREFILL_CUDA=1 ./start.sh restart
 ```
 
+The candidate decode path is limited to eligible small batches in TP4 and PP4.
+The compiled prefill path is PP4-only, within the engine's validated shape and
+token bounds; TP4 prefill retains the released implementation. Unsupported
+shapes use the released paths. These are not universal kernel replacements,
+and no whole-server speedup is claimed here.
+
 Use these only with a compatible prebuilt image (`IMAGE` override), or install
 natively using `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
 For an unpublished source, set `VLLM_REPO=/path/to/source`,

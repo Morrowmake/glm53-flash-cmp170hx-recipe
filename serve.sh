@@ -35,7 +35,8 @@
 # Optional compiled Marlin (both default 0; needs a compatible engine/library):
 #   VLLM_GLM5_MARLIN_DECODE_CUDA=1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=1
 #   Native install: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
-#   These switches never compile at startup or when changing layouts.
+#   Decode: eligible TP4/PP4 small batches. Prefill: PP4 only; TP4 unchanged.
+#   Engine shape/token gates apply; no startup or layout-change compilation.
 # Layout (LAYOUT):
 #   tp4 (default)  tensor-parallel 4 (PP=1, TP=4). Fastest per request; one or
 #                  two interactive users. Assumes PCIe Gen2 x16 links.
@@ -122,7 +123,7 @@
 set -euo pipefail
 MODE=${1:-dflash}
 case "$MODE" in
-  -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,48p' "$0"; exit 0 ;;
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac

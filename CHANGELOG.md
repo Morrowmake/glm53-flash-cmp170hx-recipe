@@ -10,6 +10,8 @@
   One prebuilt library supports both layouts; changing layouts never rebuilds it.
   Standalone and source builds use the same `_ampere_marlin_C.abi3.so` filename;
   native installation removes obsolete optional-module suffix variants.
+  Decode targets eligible TP4/PP4 small batches; compiled prefill is PP4-only.
+  Engine shape/token gates apply; TP4 prefill retains its released path.
 - Container build sources prebuild that library from a compatible source override.
   Released engine/image pins remain unchanged and do not contain the extension.
   No new release or performance claim is made here. Existing `.env` is preserved.
