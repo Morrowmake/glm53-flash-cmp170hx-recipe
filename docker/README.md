@@ -57,11 +57,25 @@ The builder replaces `STAGE`: choose a new dedicated path. It produces a local
 OCI image in `docker/out/`, without publishing it. Set `OUT=/path/to/new-output`
 to preserve earlier image evidence. Local `CLONE_FROM` sources use Git transport
 cloning (`--no-local`), never object-directory copying or hardlinks. Only the
-selected history and explicit upstream version tag are retained; objects newer
-than an overridden pin are pruned. Layer assembly checks the actual source HEAD,
-self-contained Git stores and absence of unreachable objects, including submodule
-stores. These checks supplement path scans, which cannot inspect compressed Git
-objects; they do not certify the identity/content of reachable history.
+selected history and explicit upstream version tag are retained during the build;
+objects newer than an overridden pin are pruned. Before removal, the actual
+source HEAD, self-contained Git stores and absence of unreachable objects are
+checked, including submodule stores. After version construction, both builders
+remove all Git metadata **before** copying or archiving the application payload
+into any final runtime layer. No contaminated application layer is reused.
+
+The final source tree remains editable Python source, but is not a Git checkout.
+Its root-owned, read-only `/opt/vllm-src/provenance.json` records `schema` (1),
+`engine_commit` (full hash), `engine_repository` (public fork URL) and
+`engine_version` (installed version). The OCI revision label retains the same
+commit. Native installations remain Git checkouts and keep their update behavior.
+Layer assembly rejects retained Git metadata/object stores and forbidden build
+paths, including standard nested gzip, bzip2, xz, tar and zip payloads. Set
+`IMAGE_FORBIDDEN_STRINGS` to a JSON array of additional identifying strings for
+the rootless build. Do not pass private identifier lists through Docker build
+arguments or labels; use a separate private audit of the resulting image. Broad
+name matches still need attribution review; upstream copyright/author notices
+are retained.
 For Docker, add build arguments `VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming
 a source reachable inside the build.
 Labels identify the supplied source, not a release. Both builders compile one

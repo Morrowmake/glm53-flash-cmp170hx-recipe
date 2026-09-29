@@ -159,33 +159,17 @@ relocate() {
     [ "$bad" = 0 ] || { echo "relocate: leftover host paths (above)" >&2; exit 1; }
 }
 
+finalize_tree() {
+    python3 "$HERE/runtime_tree.py" finalize "$STAGE/opt" "$VLLM_COMMIT" \
+        --forbid "$HOME/" --forbid "$STAGE/"
+}
+
 layer() {
     local expected actual
     expected="$(cat "$STAGE/opt/venv/.ampere-marlin-image-stamp")"
     actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.abi3.so" | cut -d' ' -f1)"
     [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch; run a full build for this source pin" >&2; exit 1; }
-    # Byte scans cannot inspect compressed Git objects. Fail closed on detached
-    # object stores or unreachable history, including nested submodules.
-    python3 - "$STAGE/opt/vllm-src" "$VLLM_COMMIT" <<'PY'
-import pathlib, subprocess, sys
-root = pathlib.Path(sys.argv[1])
-def git(*args):
-    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
-if git("rev-parse", "HEAD") != sys.argv[2]:
-    raise SystemExit("Packaged source HEAD differs from the image pin")
-stores = [root / ".git"]
-modules = root / ".git" / "modules"
-if modules.exists():
-    stores.extend(p.parent for p in modules.rglob("HEAD") if (p.parent / "objects").is_dir())
-for store in stores:
-    if not store.is_dir() or (store / "objects/info/alternates").exists():
-        raise SystemExit("Packaged Git object store must be self-contained")
-    result = subprocess.run(["git", "--git-dir", str(store), "fsck", "--full",
-                             "--unreachable", "--no-reflogs"], capture_output=True, text=True)
-    if result.returncode or result.stdout.strip() or result.stderr.strip():
-        raise SystemExit("Packaged Git object integrity/reachability check failed")
-print(f"Git object integrity/reachability verified: {len(stores)} stores")
-PY
+    python3 "$HERE/runtime_tree.py" check "$STAGE/opt" "$VLLM_COMMIT"         --forbid "$HOME/" --forbid "$STAGE/"
     log "layer"
     tar --sort=name --owner=0 --group=0 --numeric-owner \
         --mtime='2026-09-26 00:00:00Z' --format=posix \
@@ -241,8 +225,8 @@ PY
 }
 
 case "${STEP:-all}" in
-    all) build_tree; relocate; layer; assemble ;;
-    relocate) relocate; layer; assemble ;;
+    all) build_tree; relocate; finalize_tree; layer; assemble ;;
+    relocate) relocate; finalize_tree; layer; assemble ;;
     assemble) layer; assemble ;;
     *) echo "unknown STEP" >&2; exit 2 ;;
 esac

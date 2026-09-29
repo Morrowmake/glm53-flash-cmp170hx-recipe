@@ -18,11 +18,14 @@
   source `2749982103fd51d5bb73727532640c10844ec699`; container runtime acceptance
   is separate. No new release or performance claim is made here. Existing `.env`
   is preserved.
-- Isolate rootless local source clones from unrelated Git objects with transport
-  cloning, explicit version-tag retention and pruning beyond the selected pin.
-  Layer assembly rejects unreachable or externally shared Git object stores and
-  mismatched source HEADs. `OUT` can select a separate output directory without
-  overwriting an earlier image.
+- Keep transport-isolated Git history only during container builds, with source
+  pin and object-integrity checks before removal. Both image builders remove
+  all Git databases before creating final runtime application layers, and reject
+  retained metadata or identifying build paths, including nested archives.
+- Preserve the exact engine pin in the OCI revision and a read-only
+  `/opt/vllm-src/provenance.json` record alongside the installed version.
+  Runtime Python sources and compiled libraries are unchanged; native installs
+  retain Git-based updates. `OUT` selects a separate rootless output directory.
 
 ## 1.4.3 — 2026-09-29
 

@@ -26,10 +26,12 @@
 
 ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
 
+ARG VLLM_COMMIT=378c37b0098a41a5cd25b3bf8b56d158e33a6cbf
+
 FROM ${BASE} AS build
 ARG VLLM_REPO=https://github.com/Morrowmake/vllm-cmp170hx.git
 ARG VLLM_BRANCH=ampere-glm53
-ARG VLLM_COMMIT=378c37b0098a41a5cd25b3bf8b56d158e33a6cbf
+ARG VLLM_COMMIT
 ARG VLLM_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
 ARG PYTHON_VERSION=3.12
 ARG UV_VERSION=0.12.11
@@ -47,13 +49,18 @@ RUN uv python install "${PYTHON_VERSION}" \
  && grep -rlI --null /opt/python-dl/ /opt/python \
     | xargs -0 -r sed -i -E "s#/opt/python-dl/cpython-[^/\"' ]+#/opt/python#g" \
  && uv venv --relocatable --python /opt/python/bin/python${PYTHON_VERSION} /opt/venv
-# Blobless, not shallow: the precompiled-wheel lookup needs the history.
-RUN git clone --filter=blob:none --branch "${VLLM_BRANCH}" "${VLLM_REPO}" /opt/vllm-src \
+# Full transport clone: version construction and wheel lookup need history.
+RUN git clone --no-local --no-tags --single-branch --branch "${VLLM_BRANCH}" "${VLLM_REPO}" /opt/vllm-src \
  && git -C /opt/vllm-src checkout -B "${VLLM_BRANCH}" "${VLLM_COMMIT}" \
- && (git -C /opt/vllm-src rev-parse -q --verify refs/tags/v0.30.1rc0 >/dev/null \
-     || git -C /opt/vllm-src fetch --filter=blob:none --no-tags https://github.com/vllm-project/vllm.git \
-            refs/tags/v0.30.1rc0:refs/tags/v0.30.1rc0) \
- && git -C /opt/vllm-src submodule update --init --recursive --depth 1
+ && git -C /opt/vllm-src update-ref "refs/remotes/origin/${VLLM_BRANCH}" "${VLLM_COMMIT}" \
+ && git -C /opt/vllm-src fetch --no-tags https://github.com/vllm-project/vllm.git \
+            refs/tags/v0.30.1rc0:refs/tags/v0.30.1rc0 \
+ && git -C /opt/vllm-src merge-base --is-ancestor v0.30.1rc0 HEAD \
+ && git -C /opt/vllm-src submodule update --init --recursive --depth 1 \
+ && git -C /opt/vllm-src reflog expire --expire=now --all \
+ && git -C /opt/vllm-src repack -ad \
+ && git -C /opt/vllm-src prune --expire=now
+COPY runtime_tree.py /tmp/runtime_tree.py
 ENV VIRTUAL_ENV=/opt/venv
 RUN uv pip install --extra-index-url https://flashinfer.ai/whl/ \
         "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
@@ -76,7 +83,8 @@ RUN cd /opt/vllm-src && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
 RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "from vllm.ampere_marlin import require_extension; require_extension()"
 RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "import torch, vllm, vllm._C_stable_libtorch, vllm._moe_C_stable_libtorch, vllm._custom_ops, triton, tilelang, flashinfer, humming; from vllm.v1.attention.backends.mla import triton_mla_sparse; from vllm.v1.attention.ops import triton_mqa_logits, triton_e4m3; from vllm.v1.worker.gpu import prologue_fuse; from vllm.distributed.device_communicators import host_shm_all_reduce; print(vllm.__version__, torch.__version__, torch.version.cuda)" \
  && find /opt/python /opt/venv /opt/vllm-src -name __pycache__ -type d -prune -exec rm -rf {} + \
- && rm -rf /opt/vllm-src/.git/logs
+ && /opt/venv/bin/python /tmp/runtime_tree.py finalize /opt "${VLLM_COMMIT}" \
+ && /opt/venv/bin/python /tmp/runtime_tree.py check /opt "${VLLM_COMMIT}"
 
 FROM ${BASE}
 ARG VLLM_COMMIT
