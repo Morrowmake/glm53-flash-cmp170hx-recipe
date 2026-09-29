@@ -191,8 +191,6 @@ assemble() {
         --entrypoint /opt/venv/bin/vllm \
         --exposed-ports 8000/tcp \
         -e PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-        -e VLLM_GLM5_MARLIN_DECODE_CUDA=0 \
-        -e VLLM_GLM5_MARLIN_PREFILL_CUDA=0 \
         -e VIRTUAL_ENV=/opt/venv \
         -e CUDA_HOME=/usr/local/cuda \
         -e 'NVIDIA_REQUIRE_CUDA=cuda>=13.0' \

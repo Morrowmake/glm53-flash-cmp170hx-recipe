@@ -5,19 +5,22 @@
 - Add optional native sm_80 Marlin installation with `VLLM_BUILD_AMPERE_MARLIN=1`,
   including same-pin install/update, dependency-aware reuse and stale-binary
   invalidation. Normal native installs retain the precompiled base engine.
-- Add independent default-off `VLLM_GLM5_MARLIN_DECODE_CUDA` and
+- Add independent `VLLM_GLM5_MARLIN_DECODE_CUDA` and
   `VLLM_GLM5_MARLIN_PREFILL_CUDA` switches with enabled-only startup validation.
+  Unset decode defaults off under TP4 and on under PP4 when the library is
+  installed; unset prefill defaults off in both layouts. CPU-only presence
+  discovery does not load the extension or probe CUDA. Missing libraries default
+  PP4 decode off with a banner; requested/default-enabled incompatible paths fail.
+  Explicit 0/1 overrides survive updates. Fresh templates and image configuration
+  leave the flags unset so the launcher can select per-layout defaults.
   One prebuilt library supports both layouts; changing layouts never rebuilds it.
   Standalone and source builds use the same `_ampere_marlin_C.abi3.so` filename;
   native installation removes obsolete optional-module suffix variants.
   Decode targets eligible TP4/PP4 small batches; compiled prefill is PP4-only.
   Engine shape/token gates apply; TP4 prefill retains its released path.
 - Container build sources prebuild that library from a compatible source override.
-  Released engine/image pins remain unchanged and do not contain the extension.
-  Native install and rootless image construction were checked on unreleased
-  source `2749982103fd51d5bb73727532640c10844ec699`; container runtime acceptance
-  is separate. No new release or performance claim is made here. Existing `.env`
-  is preserved.
+  Public engine/image pins remain unchanged pending acceptance. No new release
+  or performance claim is made here. Existing `.env` is preserved.
 - Keep transport-isolated Git history only during container builds, with source
   pin and object-integrity checks before removal. Both image builders remove
   all Git databases before creating final runtime application layers, and reject

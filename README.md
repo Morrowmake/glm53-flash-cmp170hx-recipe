@@ -263,15 +263,26 @@ prompts of the results table.)
 
 ## Optional compiled Marlin (unreleased)
 
-The released engine pin and image do **not** include this extension. This branch
-adds installation support, not a release or default enablement. A compatible
-source provides one `vllm._ampere_marlin_C` library for both layouts; changing
-`LAYOUT` never rebuilds it. Decode and prefill remain independently off:
+This unreleased launcher selects TP4 compiled decode off, PP4 compiled decode on
+when the optional library is installed, and compiled prefill off in both layouts.
+The effective `PP=4 TP=1` configuration selects the PP4 default even when those
+dimensions override `LAYOUT`. One `vllm._ampere_marlin_C` library serves both
+layouts; changing layout never rebuilds it. The independent switches override
+these defaults explicitly:
 
 ```bash
 VLLM_GLM5_MARLIN_DECODE_CUDA=1 ./start.sh restart
 VLLM_GLM5_MARLIN_PREFILL_CUDA=1 ./start.sh restart
 ```
+
+An explicit `0` or `1` in the environment or `.env` remains authoritative across
+updates. Leave the flags commented out to follow the defaults. Unset PP4 decode
+uses CPU-only module discovery, without importing the extension or probing CUDA.
+If the library is absent it defaults off with a banner; if present it defaults on
+and startup must validate compatibility. Explicit `1` with an absent or incompatible
+library, or default-on with an incompatible library, fails before serving, never
+silently disabling the requested feature. Both flags off means no extension load.
+`DRY=1` prints the resolved flags and command but skips compatibility validation.
 
 The candidate decode path is limited to eligible small batches in TP4 and PP4.
 The compiled prefill path is PP4-only, within the engine's validated shape and
@@ -281,13 +292,9 @@ and no whole-server speedup is claimed here.
 
 Use these only with a compatible prebuilt image (`IMAGE` override), or install
 natively using `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
-Native installation and a local rootless image build have been checked against
-unreleased source `2749982103fd51d5bb73727532640c10844ec699`; this is not a
-published engine pin or an accepted container runtime. For that local source,
-set `VLLM_REPO=/path/to/source`, `VLLM_BRANCH=ampere-marlin-optional`,
-`VLLM_COMMIT=2749982103fd51d5bb73727532640c10844ec699`, and
-`VLLM_PRECOMPILED_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069`
-in `.env`. Keep these overrides until a compatible release is available.
+Select a compatible engine source or image override; the public pins below remain
+unchanged while release acceptance is pending. Installation support and selected
+launcher defaults do not constitute image or full-task quality acceptance.
 
 Normal native installs use the precompiled base engine without compiling this
 library. Opting in requires a CUDA toolkit (`CUDA_HOME`) and C++ compiler.

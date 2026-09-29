@@ -79,8 +79,13 @@ are retained.
 For Docker, add build arguments `VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming
 a source reachable inside the build.
 Labels identify the supplied source, not a release. Both builders compile one
-sm_80 library without GPUs and check operator registrations. Runtime switches
-`VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` remain 0.
+sm_80 library without GPUs and check operator registrations. Image configuration
+leaves `VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` unset.
+With the mounted `serve.sh`, TP4 decode defaults off, PP4 decode defaults on when
+installed, and compiled prefill defaults off. Explicit 0/1 values override each
+switch independently. The bare `vllm` entry point retains engine-code defaults;
+the recipe's layout defaults require its launcher. Missing libraries default
+unset PP4 decode off with a banner; enabled paths must pass compatibility checks.
 TP4/PP4 changes never rebuild the library. Other engine kernels still use the
 existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin.
 

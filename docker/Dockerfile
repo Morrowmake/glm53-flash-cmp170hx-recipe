@@ -92,8 +92,6 @@ COPY --from=build /opt/python /opt/python
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/vllm-src /opt/vllm-src
 ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-    VLLM_GLM5_MARLIN_DECODE_CUDA=0 \
-    VLLM_GLM5_MARLIN_PREFILL_CUDA=0 \
     VIRTUAL_ENV=/opt/venv \
     CUDA_HOME=/usr/local/cuda \
     NVIDIA_REQUIRE_CUDA=cuda>=13.0

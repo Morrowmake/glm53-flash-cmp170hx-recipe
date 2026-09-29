@@ -32,7 +32,7 @@
 #   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
 #   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
 #
-# Optional compiled Marlin (both default 0; needs a compatible engine/library):
+# Optional compiled Marlin (TP decode off; PP decode on if installed; prefill off):
 #   VLLM_GLM5_MARLIN_DECODE_CUDA=1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=1
 #   Native install: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
 #   Decode: eligible TP4/PP4 small batches. Prefill: PP4 only; TP4 unchanged.
@@ -247,9 +247,30 @@ export VLLM_KV_MAMBA_INFLIGHT_STATES=${VLLM_KV_MAMBA_INFLIGHT_STATES:-1}
 export VLLM_KV_SWA_INFLIGHT_SCRATCH=${VLLM_KV_SWA_INFLIGHT_SCRATCH:-1}
 echo "serve.sh: KV accounting: MAMBA_INFLIGHT_STATES=$VLLM_KV_MAMBA_INFLIGHT_STATES SWA_INFLIGHT_SCRATCH=$VLLM_KV_SWA_INFLIGHT_SCRATCH"
 
-# Optional compiled paths are independent and default off in both layouts.
-export VLLM_GLM5_MARLIN_DECODE_CUDA=${VLLM_GLM5_MARLIN_DECODE_CUDA:-0}
-export VLLM_GLM5_MARLIN_PREFILL_CUDA=${VLLM_GLM5_MARLIN_PREFILL_CUDA:-0}
+# Independent compiled paths: PP4 decode defaults on only when installed.
+# Discover the module file without importing vllm, torch or the extension.
+# Explicit values (including invalid empty values) are never replaced.
+if [ "${VLLM_GLM5_MARLIN_DECODE_CUDA+x}" != x ]; then
+  VLLM_GLM5_MARLIN_DECODE_CUDA=0
+  if [ "$PP" = 4 ] && [ "$TP" = 1 ]; then
+    VLLM_GLM5_MARLIN_DECODE_CUDA="$(CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY'
+import importlib.machinery
+import importlib.util
+
+package = importlib.util.find_spec("vllm")
+locations = package.submodule_search_locations if package is not None else None
+extension = (importlib.machinery.PathFinder.find_spec("vllm._ampere_marlin_C", locations)
+             if locations is not None else None)
+print("1" if extension is not None else "0")
+PY
+    )" || { echo "serve.sh: cannot determine optional Marlin installation" >&2; exit 1; }
+    if [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 0 ]; then
+      echo "serve.sh: [ampere-marlin] optional library absent; unset PP4 decode defaults OFF (native build remains opt-in)"
+    fi
+  fi
+fi
+export VLLM_GLM5_MARLIN_DECODE_CUDA
+export VLLM_GLM5_MARLIN_PREFILL_CUDA=${VLLM_GLM5_MARLIN_PREFILL_CUDA-0}
 for flag in VLLM_GLM5_MARLIN_DECODE_CUDA VLLM_GLM5_MARLIN_PREFILL_CUDA; do
   case "${!flag}" in 0|1) ;; *) echo "serve.sh: $flag must be 0 or 1" >&2; exit 2 ;; esac
 done
@@ -262,7 +283,7 @@ try:
 except (ImportError, RuntimeError, OSError) as exc:
     raise SystemExit("Optional Marlin requested but unavailable: use a compatible engine/image; "
                      "for native run VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install. "
-                     "The released image does not contain this library. Details: " + str(exc))
+                     "Use an image that includes the compatible optional library. Details: " + str(exc))
 PY
 fi
 

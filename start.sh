@@ -42,8 +42,8 @@
 # Native optional Marlin: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
 # requires a compatible source pin and CUDA toolkit; normal installs do not compile it.
 # Runtime switches VLLM_GLM5_MARLIN_DECODE_CUDA=1 and
-# VLLM_GLM5_MARLIN_PREFILL_CUDA=1 are independent and default off.
-# The released image/pin does not include this optional library.
+# VLLM_GLM5_MARLIN_PREFILL_CUDA=1 are independent. Unset: TP4 decode off,
+# PP4 decode on if installed, prefill off. Enabled paths require compatibility.
 #
 # Config lives in .env, copied from .env.example on first run. A prefix env
 # assignment beats .env for every key:
