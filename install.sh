@@ -10,6 +10,8 @@
 # Already there? Exits 0 without touching it.
 # Pull or reinstall anyway:  FORCE_INSTALL=1 ./install.sh
 # Native only:
+#   Optional common sm_80 library (compatible source required):
+#                            VLLM_BUILD_AMPERE_MARLIN=1 ./install.sh
 #   Rebuild the venv:        VENV_CLEAR=1 ./install.sh
 #   Compile the CUDA extensions instead of using upstream's precompiled ones:
 #                            BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh

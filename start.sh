@@ -39,6 +39,12 @@
 #   ./start.sh smoke           one chat request and one tool call
 #   ./start.sh help            this text
 #
+# Native optional Marlin: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
+# requires a compatible source pin and CUDA toolkit; normal installs do not compile it.
+# Runtime switches VLLM_GLM5_MARLIN_DECODE_CUDA=1 and
+# VLLM_GLM5_MARLIN_PREFILL_CUDA=1 are independent and default off.
+# The released image/pin does not include this optional library.
+#
 # Config lives in .env, copied from .env.example on first run. A prefix env
 # assignment beats .env for every key:
 #
@@ -160,6 +166,8 @@ DFLASH_MODEL="${DFLASH_MODEL:-$MODELS_DIR/${DRAFTER_REPO##*/}}"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 CUDA_HOME="${CUDA_HOME:-/usr/local/cuda-13.3}"
 BUILD_FROM_SOURCE="${BUILD_FROM_SOURCE:-0}"
+VLLM_BUILD_AMPERE_MARLIN="${VLLM_BUILD_AMPERE_MARLIN:-0}"
+case "$VLLM_BUILD_AMPERE_MARLIN" in 0|1) ;; *) die "VLLM_BUILD_AMPERE_MARLIN must be 0 or 1" ;; esac
 MAX_JOBS="${MAX_JOBS:-16}"
 HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
@@ -458,6 +466,7 @@ install_done() {
     have="$(head -n1 "$STAMP" 2>/dev/null || echo "??")"
     [ "$want" = "$have" ] || return 1
     [ "$(git -C "$VLLM_SRC" rev-parse HEAD 2>/dev/null || echo '???')" = "$want" ] || return 1
+    [ "$(reqs_hash)" = "$(sed -n 's/^reqs //p' "$STAMP")" ] || return 1
     return 0
 }
 
@@ -469,10 +478,47 @@ reqs_hash() {
         | sha256sum | cut -c1-16
 }
 
+# One optional library, independent of layout and the base-engine stamp.
+install_ampere_marlin() {
+    [ "$VLLM_BUILD_AMPERE_MARLIN" = 1 ] || return 0
+    local builder="$VLLM_SRC/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py"
+    local binary="$VLLM_SRC/vllm/_ampere_marlin_C.so" stamp="$VENV/.ampere-marlin-stamp"
+    [ -f "$builder" ] || die "VLLM_BUILD_AMPERE_MARLIN=1: this engine pin has no optional Marlin builder; select a compatible VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT (see README)."
+    [ -x "$CUDA_HOME/bin/nvcc" ] || die "VLLM_BUILD_AMPERE_MARLIN=1 needs nvcc at $CUDA_HOME/bin/nvcc; set CUDA_HOME to a CUDA toolkit."
+    command -v "${CXX:-c++}" >/dev/null || die "VLLM_BUILD_AMPERE_MARLIN=1 needs a C++ compiler (CXX)."
+    local key digest have
+    key="$({
+        git -C "$VLLM_SRC" rev-parse HEAD &&
+        git -C "$VLLM_SRC" diff HEAD -- csrc cmake CMakeLists.txt &&
+        reqs_hash &&
+        CUDA_VISIBLE_DEVICES= "$VENV/bin/python" -c 'import sysconfig, torch; print(torch.__version__, torch.version.cuda, torch._C._GLIBCXX_USE_CXX11_ABI, sysconfig.get_config_var("SOABI"))' &&
+        "$CUDA_HOME/bin/nvcc" --version &&
+        "${CXX:-c++}" --version
+    } | sha256sum | cut -d' ' -f1)" || die "cannot fingerprint optional Marlin build dependencies"
+    digest="$(sha256sum "$binary" 2>/dev/null | cut -d' ' -f1 || true)"
+    have="$(cat "$stamp" 2>/dev/null || true)"
+    if [ -n "$digest" ] && [ "$have" = "$key $digest" ]; then
+        log "  optional Marlin: matching sm_80 library already installed (both layouts)"
+        return 0
+    fi
+    # Invalidate before compiling: a failed rebuild cannot leave a usable stale library.
+    rm -f "$binary" "$stamp"
+    log "  optional Marlin: building one sm_80 library for decode and prefill"
+    ( cd "$VLLM_SRC" && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
+        CUDA_HOME="$CUDA_HOME" MAX_JOBS="$MAX_JOBS" PATH="$VENV/bin:$CUDA_HOME/bin:$PATH" \
+        "$VENV/bin/python" "$builder" --out "$VLLM_SRC/vllm" \
+        --build-dir "$VENV/.ampere-marlin-build/$key" ) \
+        || { rm -f "$binary" "$stamp"; die "optional Marlin build failed; fix the compiler/toolkit error and rerun VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install"; }
+    [ -s "$binary" ] || die "optional Marlin builder did not produce $binary"
+    digest="$(sha256sum "$binary" | cut -d' ' -f1)"
+    printf '%s %s\n' "$key" "$digest" >"$stamp"
+}
+
 do_install() {
     if [ "$RUNTIME" = container ]; then container_install; return; fi
     if install_done && [ "${FORCE_INSTALL:-0}" != "1" ]; then
         log "install: already at $(head -n1 "$STAMP" | cut -c1-10) — skipping (FORCE_INSTALL=1 to redo)"
+        install_ampere_marlin
         return 0
     fi
     log "install: venv + vLLM fork @ $VLLM_COMMIT"
@@ -511,6 +557,7 @@ do_install() {
         fi
         uv venv --clear --python "$PYTHON_VERSION" "$VENV"
     fi
+    rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VENV/.ampere-marlin-stamp"
     export VIRTUAL_ENV="$VENV"
 
     local pip_args=(--extra-index-url https://flashinfer.ai/whl/)
@@ -521,16 +568,15 @@ do_install() {
     log "  torch 2.13.0 (cu130)"
     uv pip install "${pip_args[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
 
-    # Every patch on ampere-glm53 is Python, Triton or TileLang: the diff against
-    # upstream touches no .cu, .cpp or CMakeLists, so upstream's precompiled
-    # extensions are the right ones and already carry sm_80 cubins.
+    # Keep the base engine precompiled; the optional sm_80 library is built
+    # separately below and does not replace upstream extensions.
     if [ "$BUILD_FROM_SOURCE" = "1" ]; then
         log "  vLLM (compiling extensions, MAX_JOBS=$MAX_JOBS)"
         [ -d "$CUDA_HOME" ] || die "BUILD_FROM_SOURCE=1 needs a CUDA toolkit at $CUDA_HOME"
         env -u VLLM_USE_PRECOMPILED \
             TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}" \
             CMAKE_BUILD_PARALLEL_LEVEL="$MAX_JOBS" MAX_JOBS="$MAX_JOBS" NVCC_THREADS=2 \
-            VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
+            VLLM_BUILD_AMPERE_MARLIN=0 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
             uv pip install "${pip_args[@]}" --no-build-isolation -e "$VLLM_SRC"
     else
         # The extensions come from upstream's nightly wheel for the fork's
@@ -545,7 +591,7 @@ do_install() {
         fi
         log "  vLLM (upstream precompiled extensions${wheel_commit:+ from wheel ${wheel_commit:0:10}})"
         env ${wheel_commit:+VLLM_PRECOMPILED_WHEEL_COMMIT="$wheel_commit"} \
-            VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
+            VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
             uv pip install "${pip_args[@]}" -e "$VLLM_SRC"
     fi
 
@@ -574,6 +620,7 @@ from vllm.distributed.device_communicators import host_shm_all_reduce   # noqa: 
 print("    sm_80 patch modules ok")
 PY
     { git -C "$VLLM_SRC" rev-parse HEAD; echo "reqs $reqs"; } >"$STAMP"
+    install_ampere_marlin
     log "install: done"
 }
 
@@ -586,6 +633,7 @@ container_install() {
     log "install: docker pull (the engine image, several GB)"
     log "  $IMAGE"
     docker pull "$IMAGE"
+    install_ampere_marlin
     log "install: done"
 }
 
@@ -716,7 +764,7 @@ container_env() {
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
     done
     env | LC_ALL=C sort | grep -E '^(VLLM_|GLM5_|NCCL_|PYTORCH_CUDA_ALLOC_CONF=)' \
-        | grep -vE '^VLLM_(COMMIT|REPO|BRANCH|SRC|USE_PRECOMPILED|PRECOMPILED_[A-Z_]*|API_KEY)=' || true
+        | grep -vE '^VLLM_(COMMIT|REPO|BRANCH|SRC|BUILD_AMPERE_MARLIN|USE_PRECOMPILED|PRECOMPILED_[A-Z_]*|API_KEY)=' || true
 }
 
 # The docker run arguments, into the array CRUN.
@@ -1012,6 +1060,7 @@ do_update() {
     [ "$RUNTIME" = container ] && pin="$IMAGE"
     if install_done; then
         log "update: engine unchanged at $pin — no reinstall"
+        [ "$RUNTIME" != native ] || install_ampere_marlin
     else
         log "update: engine moved to $pin — installing it"
         do_install

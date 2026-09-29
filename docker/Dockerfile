@@ -1,5 +1,5 @@
 # vLLM (Morrowmake/vllm-cmp170hx, branch ampere-glm53) for GLM-5.3-Flash W4A16
-# on 4x NVIDIA CMP 170HX, as pinned by glm53-flash-cmp170hx-recipe 1.4.1.
+# on 4x NVIDIA CMP 170HX, with optional sm_80 Marlin (unreleased).
 #
 # The engine is installed the way the recipe's native install does it: Python
 # 3.12, torch 2.13.0 (CUDA 13.0 build), the fork checked out at the pinned
@@ -57,7 +57,7 @@ RUN git clone --filter=blob:none --branch "${VLLM_BRANCH}" "${VLLM_REPO}" /opt/v
 ENV VIRTUAL_ENV=/opt/venv
 RUN uv pip install --extra-index-url https://flashinfer.ai/whl/ \
         "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
-RUN VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="${VLLM_WHEEL_COMMIT}" \
+RUN VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="${VLLM_WHEEL_COMMIT}" \
     VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 \
     uv pip install --extra-index-url https://flashinfer.ai/whl/ -e /opt/vllm-src
 RUN uv pip install --extra-index-url https://flashinfer.ai/whl/ \
@@ -66,24 +66,35 @@ RUN uv pip install --extra-index-url https://flashinfer.ai/whl/ \
         "flashinfer-python==0.7.0" "flashinfer-cubin==0.7.0" \
         "tilelang==0.1.12" "apache-tvm-ffi==0.1.11" "ninja" "huggingface_hub[hf_xet]>=1.0" \
  && uv pip freeze > /opt/venv/requirements.lock.txt
+RUN test -f /opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py \
+    || (echo "Set VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT to a source with optional Marlin support" >&2; exit 1)
+RUN cd /opt/vllm-src && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
+    PATH=/opt/venv/bin:$PATH /opt/venv/bin/python \
+    csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py --out /opt/vllm-src/vllm \
+    --build-dir /tmp/ampere-marlin-build \
+ && rm -rf /tmp/ampere-marlin-build
+RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "from vllm.ampere_marlin import require_extension; require_extension()"
 RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "import torch, vllm, vllm._C_stable_libtorch, vllm._moe_C_stable_libtorch, vllm._custom_ops, triton, tilelang, flashinfer, humming; from vllm.v1.attention.backends.mla import triton_mla_sparse; from vllm.v1.attention.ops import triton_mqa_logits, triton_e4m3; from vllm.v1.worker.gpu import prologue_fuse; from vllm.distributed.device_communicators import host_shm_all_reduce; print(vllm.__version__, torch.__version__, torch.version.cuda)" \
  && find /opt/python /opt/venv /opt/vllm-src -name __pycache__ -type d -prune -exec rm -rf {} + \
  && rm -rf /opt/vllm-src/.git/logs
 
 FROM ${BASE}
+ARG VLLM_COMMIT
 COPY --from=build /opt/python /opt/python
 COPY --from=build /opt/venv /opt/venv
 COPY --from=build /opt/vllm-src /opt/vllm-src
 ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    VLLM_GLM5_MARLIN_DECODE_CUDA=0 \
+    VLLM_GLM5_MARLIN_PREFILL_CUDA=0 \
     VIRTUAL_ENV=/opt/venv \
     CUDA_HOME=/usr/local/cuda \
     NVIDIA_REQUIRE_CUDA=cuda>=13.0
 LABEL org.opencontainers.image.title="vllm-cmp170hx" \
-      org.opencontainers.image.description="vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) as pinned by glm53-flash-cmp170hx-recipe 1.4.1; weights not included" \
+      org.opencontainers.image.description="vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) with optional sm_80 Marlin (unreleased); weights not included" \
       org.opencontainers.image.source="https://github.com/Morrowmake/vllm-cmp170hx" \
-      org.opencontainers.image.revision="378c37b0098a41a5cd25b3bf8b56d158e33a6cbf" \
-      org.opencontainers.image.url="https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/tree/v1.4.1" \
-      org.opencontainers.image.version="1.4.1-378c37b009" \
+      org.opencontainers.image.revision="${VLLM_COMMIT}" \
+      org.opencontainers.image.url="https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe" \
+      org.opencontainers.image.version="unreleased" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"

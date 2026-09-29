@@ -261,6 +261,39 @@ prompts of the results table.)
 
 ---
 
+## Optional compiled Marlin (unreleased)
+
+The released engine pin and image do **not** include this extension. This branch
+adds installation support, not a release or default enablement. A compatible
+source provides one `vllm._ampere_marlin_C` library for both layouts; changing
+`LAYOUT` never rebuilds it. Decode and prefill remain independently off:
+
+```bash
+VLLM_GLM5_MARLIN_DECODE_CUDA=1 ./start.sh restart
+VLLM_GLM5_MARLIN_PREFILL_CUDA=1 ./start.sh restart
+```
+
+Use these only with a compatible prebuilt image (`IMAGE` override), or install
+natively using `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
+For an unpublished source, set `VLLM_REPO=/path/to/source`,
+`VLLM_BRANCH=source-branch`, `VLLM_COMMIT` to its full SHA, and
+`VLLM_PRECOMPILED_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069`
+in `.env`. Keep these overrides until a compatible release is available.
+
+Normal native installs use the precompiled base engine without compiling this
+library. Opting in requires a CUDA toolkit (`CUDA_HOME`) and C++ compiler.
+`install` and `update` add the library even at an unchanged engine pin. A separate
+stamp includes source, requirements, Python/torch ABI, compiler/toolkit versions
+and binary digest; matching builds are reused. Engine reinstalls invalidate the
+optional binary, without demanding its toolkit when build is off. Failed rebuilds
+cannot leave a stale library in service. Enabling a runtime switch without the
+library fails before serving, never silently falling back. Both switches off
+means no optional-extension load. Existing `.env` and release pins are preserved.
+
+The [container build](docker/README.md#build-it) prebuilds the same library with
+no visible GPUs. Marlin needs no startup compiler or layout-specific rebuild;
+other engine kernels still need the image's existing toolkit.
+
 ## What runs
 
 | | |

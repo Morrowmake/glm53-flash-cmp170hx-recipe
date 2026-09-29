@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Add optional native sm_80 Marlin installation with `VLLM_BUILD_AMPERE_MARLIN=1`,
+  including same-pin install/update, dependency-aware reuse and stale-binary
+  invalidation. Normal native installs retain the precompiled base engine.
+- Add independent default-off `VLLM_GLM5_MARLIN_DECODE_CUDA` and
+  `VLLM_GLM5_MARLIN_PREFILL_CUDA` switches with enabled-only startup validation.
+  One prebuilt library supports both layouts; changing layouts never rebuilds it.
+- Container build sources prebuild that library from a compatible source override.
+  Released engine/image pins remain unchanged and do not contain the extension.
+  No new release or performance claim is made here. Existing `.env` is preserved.
+
 ## 1.4.3 — 2026-09-29
 
 **Update from 1.4.1 or 1.4.2:** `./start.sh update`. The engine pin and image

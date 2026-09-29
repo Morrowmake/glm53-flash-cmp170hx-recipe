@@ -39,6 +39,28 @@ Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.1-378c37b009`.
 
 ## Build it
 
+**Unreleased optional Marlin:** these build sources require a compatible engine
+with `csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py`. The released
+pin/image above do not contain it. Supply a full `VLLM_COMMIT` and compatible
+source. Missing support fails the build rather than omitting the library.
+For unpublished local source, the rootless builder supports:
+
+```bash
+VLLM_COMMIT=<full-source-sha> CLONE_FROM=/path/to/source CLONE_BRANCH=source-branch \
+  STAGE=/path/to/new-owned-staging-directory ./docker/build.sh
+```
+
+The builder replaces `STAGE`: choose a new dedicated path. It produces a local
+OCI image in `docker/out/`, without publishing it. For Docker, add build arguments
+`VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming a source reachable inside the build.
+Labels identify the supplied source, not a release. Both builders compile one
+sm_80 library without GPUs and check operator registrations. Runtime switches
+`VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` remain 0.
+TP4/PP4 changes never rebuild the library. Other engine kernels still use the
+existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin.
+
+The earlier released-image command below now requires compatible source overrides:
+
 ```bash
 docker build -t vllm-cmp170hx:1.4.1-378c37b009 docker/
 ```

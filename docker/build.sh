@@ -34,12 +34,12 @@ VLLM_COMMIT="${VLLM_COMMIT:-378c37b0098a41a5cd25b3bf8b56d158e33a6cbf}"
 # Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
 # wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
 VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"
-RELEASE="1.4.1"
+RELEASE="unreleased"
 # Upstream release tag the pin's base descends from (sets the version string).
 VERSION_TAG="v0.30.1rc0"
 UPSTREAM_REPO="https://github.com/vllm-project/vllm.git"
 PYTHON_VERSION="3.12"
-REG="127.0.0.1:5055"
+REG="${REG:-127.0.0.1:5055}"
 NAME="vllm-cmp170hx"
 TAG="$RELEASE-${VLLM_COMMIT:0:10}"
 PIP=(--extra-index-url https://flashinfer.ai/whl/)
@@ -83,7 +83,7 @@ build_tree() {
     log "torch"
     "$UV" pip install "${PIP[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
     log "vllm (upstream precompiled extensions)"
-    VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="$VLLM_WHEEL_COMMIT" \
+    VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="$VLLM_WHEEL_COMMIT" \
         VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 CUDA_HOME="$BUILD_CUDA_HOME" \
         "$UV" pip install "${PIP[@]}" -e "$STAGE/opt/vllm-src"
     log "runtime extras (requirements/cuda.txt: flashinfer 0.7.0, humming-kernels 0.1.16, ...)"
@@ -93,7 +93,14 @@ build_tree() {
         "tilelang==0.1.12" "apache-tvm-ffi==0.1.11" "ninja" "huggingface_hub[hf_xet]>=1.0"
     "$UV" pip freeze > "$STAGE/opt/venv/requirements.lock.txt"
 
-    log "verify imports (no GPU)"
+    log "optional Marlin (sm_80, both layouts; no GPU)"
+    local builder="$STAGE/opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py"
+    [ -f "$builder" ] || { echo "This image build requires an engine with optional Marlin support; set VLLM_COMMIT, CLONE_FROM and CLONE_BRANCH to a compatible source." >&2; exit 1; }
+    ( cd "$STAGE/opt/vllm-src" && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
+        CUDA_HOME="$BUILD_CUDA_HOME" PATH="$STAGE/opt/venv/bin:$BUILD_CUDA_HOME/bin:$PATH" \
+        "$STAGE/opt/venv/bin/python" "$builder" --out "$STAGE/opt/vllm-src/vllm" \
+        --build-dir "$STAGE/ampere-marlin-build" )
+    log "verify imports (no GPU)
     CUDA_VISIBLE_DEVICES= "$STAGE/opt/venv/bin/python" - <<'PY' | tee "$OUT/verify.txt"
 import importlib, sys, torch
 print(f"python      {sys.version.split()[0]}")
@@ -108,8 +115,11 @@ from vllm.v1.attention.backends.mla import triton_mla_sparse            # noqa: 
 from vllm.v1.attention.ops import triton_mqa_logits, triton_e4m3        # noqa: F401
 from vllm.v1.worker.gpu import prologue_fuse                            # noqa: F401
 from vllm.distributed.device_communicators import host_shm_all_reduce   # noqa: F401
-print("sm_80 patch modules ok")
+from vllm.ampere_marlin import require_extension
+require_extension()
+print("sm_80 patch modules and optional Marlin registrations ok")
 PY
+    { printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.so" | cut -d' ' -f1; } > "$STAGE/opt/venv/.ampere-marlin-image-stamp"
     unset VIRTUAL_ENV
 }
 
@@ -139,6 +149,10 @@ relocate() {
 }
 
 layer() {
+    local expected actual
+    expected="$(cat "$STAGE/opt/venv/.ampere-marlin-image-stamp")"
+    actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.so" | cut -d' ' -f1)"
+    [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch; run a full build for this source pin" >&2; exit 1; }
     log "layer"
     tar --sort=name --owner=0 --group=0 --numeric-owner \
         --mtime='2026-09-26 00:00:00Z' --format=posix \
@@ -160,14 +174,16 @@ assemble() {
         --entrypoint /opt/venv/bin/vllm \
         --exposed-ports 8000/tcp \
         -e PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+        -e VLLM_GLM5_MARLIN_DECODE_CUDA=0 \
+        -e VLLM_GLM5_MARLIN_PREFILL_CUDA=0 \
         -e VIRTUAL_ENV=/opt/venv \
         -e CUDA_HOME=/usr/local/cuda \
         -e 'NVIDIA_REQUIRE_CUDA=cuda>=13.0' \
         -l org.opencontainers.image.title=vllm-cmp170hx \
-        -l "org.opencontainers.image.description=vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) as pinned by glm53-flash-cmp170hx-recipe $RELEASE; weights not included" \
+        -l "org.opencontainers.image.description=vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) with optional sm_80 Marlin ($RELEASE); weights not included" \
         -l org.opencontainers.image.source=https://github.com/Morrowmake/vllm-cmp170hx \
         -l org.opencontainers.image.revision=$VLLM_COMMIT \
-        -l org.opencontainers.image.url=https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/tree/v$RELEASE \
+        -l org.opencontainers.image.url=https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe \
         -l org.opencontainers.image.version=$TAG \
         -l org.opencontainers.image.licenses=Apache-2.0 \
         -l org.opencontainers.image.base.name=docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04 \

@@ -32,6 +32,10 @@
 #   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
 #   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
 #
+# Optional compiled Marlin (both default 0; needs a compatible engine/library):
+#   VLLM_GLM5_MARLIN_DECODE_CUDA=1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=1
+#   Native install: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
+#   These switches never compile at startup or when changing layouts.
 # Layout (LAYOUT):
 #   tp4 (default)  tensor-parallel 4 (PP=1, TP=4). Fastest per request; one or
 #                  two interactive users. Assumes PCIe Gen2 x16 links.
@@ -118,7 +122,7 @@
 set -euo pipefail
 MODE=${1:-dflash}
 case "$MODE" in
-  -h|--help) sed -n '2,43p' "$0"; exit 0 ;;
+  -h|--help) sed -n '2,47p' "$0"; exit 0 ;;
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
@@ -241,6 +245,25 @@ fi
 export VLLM_KV_MAMBA_INFLIGHT_STATES=${VLLM_KV_MAMBA_INFLIGHT_STATES:-1}
 export VLLM_KV_SWA_INFLIGHT_SCRATCH=${VLLM_KV_SWA_INFLIGHT_SCRATCH:-1}
 echo "serve.sh: KV accounting: MAMBA_INFLIGHT_STATES=$VLLM_KV_MAMBA_INFLIGHT_STATES SWA_INFLIGHT_SCRATCH=$VLLM_KV_SWA_INFLIGHT_SCRATCH"
+
+# Optional compiled paths are independent and default off in both layouts.
+export VLLM_GLM5_MARLIN_DECODE_CUDA=${VLLM_GLM5_MARLIN_DECODE_CUDA:-0}
+export VLLM_GLM5_MARLIN_PREFILL_CUDA=${VLLM_GLM5_MARLIN_PREFILL_CUDA:-0}
+for flag in VLLM_GLM5_MARLIN_DECODE_CUDA VLLM_GLM5_MARLIN_PREFILL_CUDA; do
+  case "${!flag}" in 0|1) ;; *) echo "serve.sh: $flag must be 0 or 1" >&2; exit 2 ;; esac
+done
+echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA prefill=$VLLM_GLM5_MARLIN_PREFILL_CUDA (prebuilt library required when enabled)"
+if [ -z "${DRY:-}" ] && { [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ] || [ "$VLLM_GLM5_MARLIN_PREFILL_CUDA" = 1 ]; }; then
+  CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY' || exit 1
+try:
+    from vllm.ampere_marlin import require_extension
+    require_extension()
+except (ImportError, RuntimeError, OSError) as exc:
+    raise SystemExit("Optional Marlin requested but unavailable: use a compatible engine/image; "
+                     "for native run VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install. "
+                     "The released image does not contain this library. Details: " + str(exc))
+PY
+fi
 
 # --- sm_80 feature flags (see the header for the kill switches) -------------
 # Prefill overlap: split each mHC layer's post-attention part into S token
