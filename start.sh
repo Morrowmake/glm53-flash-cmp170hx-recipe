@@ -636,7 +636,6 @@ container_install() {
     log "install: docker pull (the engine image, several GB)"
     log "  $IMAGE"
     docker pull "$IMAGE"
-    install_ampere_marlin
     log "install: done"
 }
 
