@@ -281,8 +281,11 @@ and no whole-server speedup is claimed here.
 
 Use these only with a compatible prebuilt image (`IMAGE` override), or install
 natively using `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
-For an unpublished source, set `VLLM_REPO=/path/to/source`,
-`VLLM_BRANCH=source-branch`, `VLLM_COMMIT` to its full SHA, and
+Native installation and a local rootless image build have been checked against
+unreleased source `2749982103fd51d5bb73727532640c10844ec699`; this is not a
+published engine pin or an accepted container runtime. For that local source,
+set `VLLM_REPO=/path/to/source`, `VLLM_BRANCH=ampere-marlin-optional`,
+`VLLM_COMMIT=2749982103fd51d5bb73727532640c10844ec699`, and
 `VLLM_PRECOMPILED_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069`
 in `.env`. Keep these overrides until a compatible release is available.
 

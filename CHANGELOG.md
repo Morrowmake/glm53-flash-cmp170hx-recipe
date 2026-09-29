@@ -14,7 +14,10 @@
   Engine shape/token gates apply; TP4 prefill retains its released path.
 - Container build sources prebuild that library from a compatible source override.
   Released engine/image pins remain unchanged and do not contain the extension.
-  No new release or performance claim is made here. Existing `.env` is preserved.
+  Native install and rootless image construction were checked on unreleased
+  source `2749982103fd51d5bb73727532640c10844ec699`; container runtime acceptance
+  is separate. No new release or performance claim is made here. Existing `.env`
+  is preserved.
 
 ## 1.4.3 — 2026-09-29
 

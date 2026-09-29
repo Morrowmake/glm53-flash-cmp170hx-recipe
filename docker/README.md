@@ -43,10 +43,13 @@ Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.1-378c37b009`.
 with `csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py`. The released
 pin/image above do not contain it. Supply a full `VLLM_COMMIT` and compatible
 source. Missing support fails the build rather than omitting the library.
-For unpublished local source, the rootless builder supports:
+The native installer and local rootless build were checked with unreleased
+source `2749982103fd51d5bb73727532640c10844ec699` (branch
+`ampere-marlin-optional`). This does not claim Docker startup acceptance or a
+published image. For that local source, the rootless builder supports:
 
 ```bash
-VLLM_COMMIT=<full-source-sha> CLONE_FROM=/path/to/source CLONE_BRANCH=source-branch \
+VLLM_COMMIT=2749982103fd51d5bb73727532640c10844ec699 CLONE_FROM=/path/to/source CLONE_BRANCH=ampere-marlin-optional \
   STAGE=/path/to/new-owned-staging-directory ./docker/build.sh
 ```
 
