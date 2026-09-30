@@ -92,7 +92,7 @@
 #   VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1  device-memory custom all-reduce over
 #                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
 #                                 needs peer-to-peer enabled at the driver level
-#                                 -- see the optional section in the README.
+#                                 -- see the optional section in docs/how-to-use.md.
 #                                 Historical 1.4.1 results (TP4): step -3.7% at 1
 #                                 user, -4.3% at 4, -7.6% at 6, -9.1% at 8, cold
 #                                 prefill +14.7% (with NCCL over peer-to-peer,

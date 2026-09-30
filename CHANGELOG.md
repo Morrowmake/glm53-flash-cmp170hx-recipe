@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Documentation: shorter README with a quick start; details moved to `docs/`;
+  `docker-compose.yml` example.
+- Client examples in `examples/` (curl, Python, streaming, tool calls, layout
+  `.env` files), issue and pull-request templates.
+
 ## 1.5.0 — 2026-09-30
 
 **Update:** `./start.sh update`. Explicit engine/image overrides and `.env`

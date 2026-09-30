@@ -387,8 +387,8 @@ preflight() {
                 warn "  $narrow card(s) are below x16 and TP=$TP. Tensor parallelism moves ~9.4 MB per"
                 warn "  layer during prefill and ~100 small collectives per decode step, so TP will be"
                 warn "  far slower than the published numbers on narrow links. The pipeline-parallel"
-                warn "  layout (LAYOUT=pp4) needs far less link bandwidth; see \"Link width\" in the"
-                warn "  README. Continuing anyway."
+                warn "  layout (LAYOUT=pp4) needs far less link bandwidth; see \"Link width\" in"
+                warn "  docs/how-to-use.md. Continuing anyway."
             fi
         fi
     else
@@ -483,7 +483,7 @@ install_ampere_marlin() {
     [ "$VLLM_BUILD_AMPERE_MARLIN" = 1 ] || return 0
     local builder="$VLLM_SRC/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py"
     local binary="$VLLM_SRC/vllm/_ampere_marlin_C.abi3.so" stamp="$VENV/.ampere-marlin-stamp"
-    [ -f "$builder" ] || die "VLLM_BUILD_AMPERE_MARLIN=1: this engine pin has no optional Marlin builder; select a compatible VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT (see README)."
+    [ -f "$builder" ] || die "VLLM_BUILD_AMPERE_MARLIN=1: this engine pin has no optional Marlin builder; select a compatible VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT (see docs/compiled-marlin.md)."
     [ -x "$CUDA_HOME/bin/nvcc" ] || die "VLLM_BUILD_AMPERE_MARLIN=1 needs nvcc at $CUDA_HOME/bin/nvcc; set CUDA_HOME to a CUDA toolkit."
     command -v "${CXX:-c++}" >/dev/null || die "VLLM_BUILD_AMPERE_MARLIN=1 needs a C++ compiler (CXX)."
     # Remove obsolete import-precedence variants of this optional module only.

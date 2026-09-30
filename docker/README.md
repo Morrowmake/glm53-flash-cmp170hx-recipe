@@ -2,7 +2,7 @@
 
 The engine in a container: the way this recipe runs by default. `./start.sh`
 pulls the image, starts it and manages it for you (see the
-[main README](../README.md#how-to-use-this-repo)); this page describes the
+[How to use this repo](../docs/how-to-use.md)); this page describes the
 image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
@@ -110,7 +110,7 @@ runtime before distributing any rebuilt image.
 You need:
 
 - the four cards and NVIDIA driver **580 or newer**
-  ([What you need](../README.md#what-you-need));
+  ([What you need](../docs/how-to-use.md#what-you-need));
 - Docker with the
   [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
   so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi`
@@ -141,7 +141,9 @@ docker logs -f glm53-flash          # wait for "Application startup complete"
 curl http://127.0.0.1:8000/health
 ```
 
-If you built the image yourself, use your tag in place of `$IMAGE`.
+If you built the image yourself, use your tag in place of `$IMAGE`. The same
+launch as a Compose file is [`docker-compose.yml`](../docker-compose.yml) at the
+root of this repository ([Docker Compose](../docs/how-to-use.md#docker-compose)).
 
 **Layout.** [`container.env`](container.env) sets `LAYOUT=tp4`; change it to
 `LAYOUT=pp4` for pipeline-parallel 4. `serve.sh` inside the container turns
@@ -160,13 +162,13 @@ and the cache paths in `container.env`), so `./cache` stays yours. The first
 start compiles kernels there and takes several minutes; later starts reuse
 them. Stop it with `docker stop -t 120 glm53-flash`
 and wait until `nvidia-smi` shows the cards empty before starting again. The
-API is the same as always ([Talk to it](../README.md#talk-to-it)).
+API is the same as always ([Talk to it](../docs/how-to-use.md#talk-to-it)).
 
 **PCIe peer-to-peer is off** (`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0`). If peer
 access already works on your cards
-([PCIe peer-to-peer](../README.md#pcie-peer-to-peer-optional)), set it to `1` in
+([PCIe peer-to-peer](../docs/how-to-use.md#pcie-peer-to-peer-optional)), set it to `1` in
 `container.env`; `serve.sh` picks the matching allocator. The container changes
 no driver setting.
 
-The kill switches in the [main README](../README.md#kill-switches) work the
+The [kill switches](../docs/how-to-use.md#kill-switches) work the
 same way: set the variable in `container.env` or add `-e NAME=0`.
