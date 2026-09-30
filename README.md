@@ -13,9 +13,9 @@
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts. Published 1.4.1 results: tensor-parallel at 264.4 tok/s for one
-user and 763.1 tok/s across eight, or pipeline-parallel with
-6,254 tok/s cold prefill and a 2,320,328-token KV pool. The weights
+cards in two layouts. Native 1.5.0 results: tensor-parallel at 267.3 tok/s for one
+user and 758.9 tok/s across eight, or pipeline-parallel with
+6,575 tok/s cold prefill and a 2,334,498-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
 outputs were identical across the repeated checks reported below.**
@@ -64,9 +64,9 @@ What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 ### Optional Marlin and image packaging (1.5.0)
 
 Release 1.5.0 adds optional compiled Marlin and a Git-free runtime image.
-The performance and quality tables below retain their explicitly named historical
-release scope; they are not new 1.5.0 throughput measurements or universal
-exactness claims.
+The throughput tables below were remeasured on the native 1.5.0 engine with
+the optional library installed. Quality results retain their explicitly named
+release scope; throughput measurements are not quality or universal exactness claims.
 See [Optional compiled Marlin](#optional-compiled-marlin) for defaults and limits.
 
 ### Allocator compatibility default (1.4.3)
@@ -118,16 +118,16 @@ requests in original, shuffled and reversed order. There was no demonstrated
 aggregate accuracy loss, but individual tasks both improved and worsened.
 This is not a 1.4.3 or PP4 comparison, nor proof of batch invariance.
 
-### Release 1.4.1
+### Release 1.5.0 throughput
 
-The following throughput and capacity results are historical published 1.4.1
-figures (including retained 1.4.0 measurements), not remeasurements of the new
-allocator default. That release used True under TP4/P2P-off and PP4, and False
-under TP4/P2P-on. The opening performance headline, layout comparison and
-detailed performance results below retain that scope; current default KV
-capacities and controlled quality results are reported above.
+Measured on 2026-09-30 using the original throughput workloads and the released
+engine and launcher. These are native measurements, not a new container-speed
+comparison. The optional library was installed: compiled decode uses its release
+defaults (off for TP4, on for PP4), compiled prefill is off, and
+`expandable_segments:False` applies to all three columns. Native installations
+without the optional library do not use the measured PP4 compiled-decode path.
 
-DFlash2 at k=3, 262,144-token context, the defaults of release 1.4.1. Three
+DFlash2 at k=3, 262,144-token context, the defaults of release 1.5.0. Three
 columns: tensor-parallel 4 with the cards talking through the host (the
 default), tensor-parallel 4 with the optional
 [PCIe peer-to-peer](#pcie-peer-to-peer-optional) path, and pipeline-parallel 4
@@ -136,27 +136,38 @@ which is what this layout is for).
 
 | | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
 |---|---:|---:|---:|
-| Decode, 1 user, structured / code / prose | **264.4 / 258.5 / 189.9 tok/s** | **275.8 / 274.0 / 204.2 tok/s** | **141.7 / 138.4 / 100.3 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **763.1 / 684.7 / 512.0 tok/s** | **848.3 / 726.9 / 570.0 tok/s** | **542.3 / 509.8 / 383.6 tok/s** |
-| Decode step, 1 / 4 / 6 / 8 users | 15.87 / 29.51 / 38.91 / 44.45 ms | 15.29 / 28.23 / 35.94 / 40.39 ms | 29.40 ms at 1 user |
-| Cold prefill | **2,670 tok/s** | **3,062 tok/s** | **6,254 tok/s** |
-| Time to first token, 6,217 / 23,255-token prompt | 2.37 / 8.67 s | 2.05 / 7.49 s | 1.49 / 3.79 s |
-| KV pool at 262,144 context | 1,156,635 tokens (4.41 full-length requests) | 1,177,646 tokens (4.49) | 2,320,328 tokens (8.85) |
+| Streaming decode, 1 user, structured / code / prose | **267.3 / 260.9 / 186.0 tok/s** | **282.0 / 274.0 / 198.5 tok/s** | **141.8 / 139.8 / 103.5 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **758.9 / 674.1 / 531.1 tok/s** | **816.8 / 741.1 / 563.7 tok/s** | **603.0 / 577.2 / 445.1 tok/s** |
+| Cold prefill | **2,657 tok/s** | **3,053 tok/s** | **6,575 tok/s** |
+| One-token response time, 6,217 / 23,255-token prompt | 2.39 / 8.73 s | 2.05 / 7.52 s | 1.46 / 3.64 s |
+| KV pool at 262,144 context | 1,176,646 tokens (4.49 full-length requests) | 1,177,646 tokens (4.49) | 2,334,498 tokens (8.91) |
 
 All at 180 W per card (a power limit we set on our cards; the scripts never
 change power, clock or fan settings), PCIe x16 links, one server start per
-column. PP4 decode, step time and cold prefill were remeasured for 1.4.1
-with the draft tail on stage 2. TP4 and time-to-first-token figures
-are retained from 1.4.0. PP4 with peer-to-peer on (1.4.0): 141.0 / 139.4 / 105.1 tok/s for one user,
-532.7 / 493.9 / 377.8 across eight, 6,606 tok/s cold prefill, the same KV pool.
-Under PP4 several micro-batches are in flight at once, so its step time is only
-comparable at one user. Decode
-tok/s is the per-request streaming rate on three fixed prompt types —
-structured, code and prose (400 tokens, temperature 0, median of 5); prose is
-slower because the drafter's guesses are accepted less often. Cold prefill is
-the median over real-text prompts of 23.9K to 37.9K tokens. The KV pool is the
-size the server can actually fill with prefill chunks in flight (see
-[Honest KV figures](#measured-while-building-this-release)).
+column. Decode uses three fixed prompt types—structured, code and prose—with
+a 400-token cap, temperature 0 and median of five runs. Single-user tok/s
+measures streaming decode after the first token. Eight-user aggregate is actual
+completion tokens divided by concurrent batch wall time, including prefill and
+client overhead; it is not the per-stream rate multiplied by eight.
+
+Two of the 855 measured decode requests stopped at 298 tokens rather than the
+400-token cap: one structured eight-user request under TP4/P2P-on and one under
+PP4. Both began with instruction-analysis prose, misinterpreting the original
+`(stream 4/8)` prompt suffix as splitting the counting task. They remain included
+using their actual token counts, with no selective rerun or exclusion. These are
+throughput observations, not evidence of output correctness or a quality comparison.
+
+Cold prefill is the median of nine rates on the same three real-text prompts
+of 23,945, 34,299 and 37,905 tokens, with zero observed prefix-cache hits.
+The one-token response row retains the original nonstreaming elapsed-time
+measurement (median of three); it includes response handling and is distinct
+from streamed time to first token. The KV pool accounts for prefill chunks in
+flight (see [Honest KV figures](#measured-while-building-this-release)).
+
+For historical reference, PP4 with peer-to-peer on was measured in 1.4.0 at
+141.0 / 139.4 / 105.1 tok/s for one user, 532.7 / 493.9 / 377.8 across eight,
+6,606 tok/s cold prefill. That fourth configuration was not remeasured here.
+Older release comparisons below retain their original scope.
 
 Historical perplexity on the fixed 60-document set was **3.2781 under TP4**
 and **3.2735 under PP4** (1.4.0); it was not remeasured for the allocator change.
@@ -164,14 +175,14 @@ Current HumanEval and GSM8K results are in [Quality (1.4.3)](#quality-143).
 
 ### Choosing a layout
 
-Prefill and KV figures in this comparison are the historical 1.4.1 results above.
+Prefill and KV figures compare the native 1.5.0 peer-to-peer-off columns above.
 
 | | Tensor-parallel 4 (`tp4`, default) | Pipeline-parallel 4 (`pp4`) |
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | 2,670 tok/s | 6,254 tok/s (2.34×) |
-| KV pool | 1,156,635 tokens | 2,320,328 tokens (2.01×) |
+| Prefill | 2,657 tok/s | 6,575 tok/s (2.47×) |
+| KV pool | 1,176,646 tokens | 2,334,498 tokens (1.98×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
 
@@ -224,48 +235,49 @@ above; each line says what it was measured against.
 
 ### Decode and prefill in detail
 
-Release 1.4.0, tensor-parallel 4 with the defaults (peer-to-peer off),
-temperature 0, median of 5. Against release 1.0.0, one user now decodes at
-264.4 tok/s instead of 238.7 on structured text,
-258.5 instead of 232.4 on code and 189.9 instead
-of 165.1 on prose.
+Release 1.5.0, native tensor-parallel 4 with peer-to-peer off and the
+configuration described above: temperature 0, median of five, original
+structured/code/prose prompts and cache-busting nonces.
 
 **Decode**, 400 max tokens. `Stream` is per request,
-`(completion_tokens − 1) / (end − first token)`; `Agg` is
-`sum(completion_tokens) / wall` across all streams. Each request carries a
-unique nonce so nothing hits the prefix cache.
+`(completion_tokens − 1) / (end − first token)`; concurrent aggregate is
+`sum(completion_tokens) / batch wall`, including prefill and client overhead.
+At one user the original client's aggregate field duplicates its streaming
+rate, so it is omitted here rather than presented as end-to-end throughput.
+Each request carries a unique nonce to prevent prefix-cache reuse.
 
 | Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
 |---|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | **264.4** | **264.4** | 63 ms |
-|  | ×2 | **200.5** | **372.7** | 110 ms |
-|  | ×4 | **151.9** | **553.2** | 247 ms |
-|  | ×8 | **106.1** | **763.1** | 305 ms |
-| Code (clamp_00…clamp_49) | ×1 | **258.5** | **258.5** | 156 ms |
-|  | ×2 | **182.7** | **325.7** | 246 ms |
-|  | ×4 | **140.7** | **487.7** | 390 ms |
-|  | ×8 | **99.2** | **684.7** | 620 ms |
-| Prose (hash map) | ×1 | **189.9** | **189.9** | 68 ms |
-|  | ×2 | **141.1** | **264.1** | 161 ms |
-|  | ×4 | **108.5** | **390.4** | 250 ms |
-|  | ×8 | **70.7** | **512.0** | 312 ms |
+| Structured (count 1→200) | ×1 | **267.3** | — | 0.063 s |
+|  | ×2 | **209.7** | **393.1** | 0.109 s |
+|  | ×4 | **149.5** | **533.2** | 0.247 s |
+|  | ×8 | **105.7** | **758.9** | 0.312 s |
+| Code (clamp_00…clamp_49) | ×1 | **260.9** | — | 0.158 s |
+|  | ×2 | **183.4** | **324.8** | 0.248 s |
+|  | ×4 | **140.9** | **489.9** | 0.392 s |
+|  | ×8 | **98.6** | **674.1** | 0.617 s |
+| Prose (hash map) | ×1 | **186.0** | — | 0.067 s |
+|  | ×2 | **136.8** | **260.5** | 0.158 s |
+|  | ×4 | **106.1** | **392.0** | 0.253 s |
+|  | ×8 | **73.1** | **531.1** | 0.311 s |
 
 Prose decodes slower than structured or code text because the drafter's guesses
 are accepted less often.
 
-**Cold prefill by prompt length**, pipeline-parallel 4 (peer-to-peer off),
-unique uncached text, `max_tokens=1`, median of 2, `prompt tokens / TTFT`
-measured client side. (Tensor-parallel 4 runs at 2,670 tok/s on the 24K–38K
-prompts of the results table.)
+**Cold prefill by prompt length**, native release 1.5.0 pipeline-parallel 4
+(peer-to-peer off), original real-text corpus and unique uncached windows,
+`max_tokens=1`, median of two, `prompt tokens / streamed TTFT` measured client
+side. All twelve requests recorded zero prefix-cache hits. (Tensor-parallel 4
+runs at 2,657 tok/s on the separate 24K–38K prompts of the results table.)
 
 | Prompt | TTFT | tok/s |
 |---:|---:|---:|
-| ~8k | 1.97 s | **4,048** |
-| ~16k | 2.93 s | **5,459** |
-| ~32k | 5.13 s | **6,223** |
-| ~64k | 9.62 s | **6,663** |
-| ~128k | 18.91 s | **6,747** |
-| ~250k | 37.48 s | **6,678** |
+| ~8k | 1.91 s | **4,171** |
+| ~16k | 2.78 s | **5,738** |
+| ~32k | 4.83 s | **6,616** |
+| ~64k | 9.04 s | **7,082** |
+| ~128k | 17.78 s | **7,177** |
+| ~250k | 35.38 s | **7,074** |
 
 ---
 
@@ -329,7 +341,7 @@ other engine kernels still need the image's existing toolkit.
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663` — the engine at that pin, no weights ([docker/](docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; with the False allocator default at 262,144 context: TP4/peer-to-peer off 1,176,646 tokens, PP4 2,334,498. Historical peer-to-peer-on capacity is in the release table above |
+| KV cache | full precision, **not quantised**; measured with the False allocator default at 262,144 context in native 1.5.0: TP4/peer-to-peer off 1,176,646 tokens, TP4/peer-to-peer on 1,177,646, PP4 2,334,498 |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
@@ -591,7 +603,7 @@ path dead behind PLX switches on a Xeon, so a different board may simply not
 have it.
 
 **Historical gains.** With the earlier allocator defaults, the first two columns
-of the published 1.4.1 [results table](#release-141): step time −3.7% at one user, −4.3% at four,
+of the published 1.4.1 [results table](https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/blob/v1.4.1/README.md#results): step time −3.7% at one user, −4.3% at four,
 −7.6% at six and −9.1% at eight; single-user decode +4.3% to +7.5%; eight-user
 aggregate +6.2% to +11.3%; cold prefill +14.7% (2,670 → 3,062 tok/s); and
 21,011 more KV tokens. That comparison changed both P2P and allocator mode;
