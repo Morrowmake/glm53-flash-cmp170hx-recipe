@@ -34,10 +34,12 @@ answer with the previous release: TP4 **160/164 and 1,280/1,319** (previous
 answers flip in both directions when decoded text changes; no suite shows a
 significant net loss.
 
-**Long-context and repeatability checks** on this release: needle retrieval
-30/30 up to 262K tokens, copy fidelity no worse than the previous baseline,
-no cross-request leaks, and bit-identical outputs for the same batch run twice
-in eager and CUDA-graph modes, in both layouts.
+**Long-context and repeatability checks.** The full tier-2 long-context and
+repeatability checks ran on the same engine build: needle retrieval 30/30 up
+to 262K tokens, copy fidelity no worse than the previous baseline, no
+cross-request leaks, and bit-identical outputs for the same batch run twice in
+eager and CUDA-graph modes, in both layouts. The README numbers and the needle
+and repeatability checks were re-measured on the final candidate.
 
 ## Release 1.6.0 throughput
 
