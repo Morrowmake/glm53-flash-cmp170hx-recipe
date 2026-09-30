@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.5.1 — 2026-10-01
 
 - Documentation: shorter README with a quick start; details moved to `docs/`;
   `docker-compose.yml` example.
