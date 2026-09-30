@@ -147,7 +147,8 @@ root of this repository ([Docker Compose](../docs/how-to-use.md#docker-compose))
 
 **Layout.** [`container.env`](container.env) sets `LAYOUT=tp4`; change it to
 `LAYOUT=pp4` for pipeline-parallel 4. `serve.sh` inside the container turns
-the layout and any other setting from [`.env.example`](../.env.example) that
+the layout and any other setting from [`.env.example`](../.env.example) or
+[`.env.advanced.example`](../.env.advanced.example) that
 you add to `container.env` into the same flags as a native start, so the
 server is the same either way.
 
@@ -170,5 +171,5 @@ access already works on your cards
 `container.env`; `serve.sh` picks the matching allocator. The container changes
 no driver setting.
 
-The [kill switches](../docs/how-to-use.md#kill-switches) work the
+The [engine switches](../docs/engine-switches.md) work the
 same way: set the variable in `container.env` or add `-e NAME=0`.

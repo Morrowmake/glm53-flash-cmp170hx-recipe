@@ -112,6 +112,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
   kill switches, day to day, updates and rollback, native install, containers
 - [Optional compiled Marlin](docs/compiled-marlin.md): defaults, switches, building it
 - [How it works](docs/how-it-works.md): what makes it fast and correct, and what runs
+- [Engine switches](docs/engine-switches.md): the engine's internal switches, for troubleshooting
 - [Status and known limits](docs/known-limits.md)
 - [Examples](examples/README.md): curl, Python, streaming, tool calls, layout `.env` files
 - [Container image](docker/README.md) and [CHANGELOG.md](CHANGELOG.md)

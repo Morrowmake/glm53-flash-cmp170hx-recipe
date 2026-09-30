@@ -4,7 +4,7 @@
 
 All of this is in the fork. The Ampere backends and the correctness fixes are
 always on. Every performance feature can be turned off with a single variable
-(see [Kill switches](how-to-use.md#kill-switches)): nearly all ship off in the engine code
+(see [Engine switches](engine-switches.md)): nearly all ship off in the engine code
 and are switched on by this repository's `serve.sh`; the retuned
 sparse-attention decode schedule is on in the engine itself.
 

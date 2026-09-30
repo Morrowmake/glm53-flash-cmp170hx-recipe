@@ -6,6 +6,11 @@
   `docker-compose.yml` example.
 - Client examples in `examples/` (curl, Python, streaming, tool calls, layout
   `.env` files), issue and pull-request templates.
+- `.env.example` now holds only the common settings (layout, address, port,
+  API key, model name, models directory, runtime, peer-to-peer); every other
+  setting moved, unchanged, to `.env.advanced.example`, and the engine switches
+  are documented in `docs/engine-switches.md`. `./start.sh` still reads only
+  `.env`; existing `.env` files and all defaults are unchanged.
 
 ## 1.5.0 — 2026-09-30
 

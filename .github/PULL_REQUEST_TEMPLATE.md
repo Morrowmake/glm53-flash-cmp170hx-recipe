@@ -8,6 +8,6 @@
 - [ ] Layout(s) tested: TP4 / PP4 / not applicable
 - [ ] `./start.sh smoke` passes after the change (if it touches the scripts)
 - [ ] Existing `.env` settings still work, and updating needs no manual step
-- [ ] Any new setting is commented out in `.env.example` with its default
+- [ ] Any new setting is commented out, with its default, in `.env.example` (common) or `.env.advanced.example`
 - [ ] Documentation updated (`README.md` or `docs/`), with every link resolving
 - [ ] No API keys, tokens, home paths or host names in the diff
