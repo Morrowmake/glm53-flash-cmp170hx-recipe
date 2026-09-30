@@ -26,9 +26,6 @@ The base-extension wheel remains upstream `b6761e8ded57ef85b708f34af8cab1649eae1
   Decode targets eligible TP4/PP4 small batches; compiled prefill is PP4-only.
   Engine shape/token gates apply; TP4 prefill retains its released path.
 - The pinned container prebuilds the same optional library for both layouts.
-  Native installation and private-container fresh/update checks passed.
-  Public distribution fresh/update acceptance is separate; no new throughput
-  or universal output-equivalence claim is made here.
 - Keep transport-isolated Git history only during container builds, with source
   pin and object-integrity checks before removal. Both image builders remove
   all Git databases before creating final runtime application layers, and reject

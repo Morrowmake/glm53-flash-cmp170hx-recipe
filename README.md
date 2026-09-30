@@ -64,11 +64,9 @@ What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 ### Optional Marlin and image packaging (1.5.0)
 
 Release 1.5.0 adds optional compiled Marlin and a Git-free runtime image.
-Native installation, kernel/runtime checks and private-container fresh/update
-checks passed for the pinned artifacts. Those checks do not establish public
-registry availability or public fresh/update acceptance. The performance and
-quality tables below retain their explicitly named historical release scope;
-they are not new 1.5.0 throughput measurements or universal exactness claims.
+The performance and quality tables below retain their explicitly named historical
+release scope; they are not new 1.5.0 throughput measurements or universal
+exactness claims.
 See [Optional compiled Marlin](#optional-compiled-marlin) for defaults and limits.
 
 ### Allocator compatibility default (1.4.3)
