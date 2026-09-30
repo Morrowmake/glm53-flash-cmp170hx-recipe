@@ -1,15 +1,26 @@
 # Optional compiled Marlin
 
-The launcher selects TP4 compiled decode off, PP4 compiled decode on
-when the optional library is installed, and compiled prefill off in both layouts.
-The effective `PP=4 TP=1` configuration selects the PP4 default even when those
-dimensions override `LAYOUT`. One `vllm._ampere_marlin_C` library serves both
-layouts; changing layout never rebuilds it. The independent switches override
-these defaults explicitly:
+The launcher turns compiled decode on in both layouts when the optional
+library is installed, and leaves compiled prefill off in both layouts. The
+effective `TP=4 PP=1` or `PP=4 TP=1` configuration selects the default even when
+those dimensions override `LAYOUT`. One `vllm._ampere_marlin_C` library serves
+both layouts; changing layout never rebuilds it. The independent switches
+override these defaults explicitly:
 
 ```bash
-VLLM_GLM5_MARLIN_DECODE_CUDA=1 ./start.sh restart
+VLLM_GLM5_MARLIN_DECODE_CUDA=0 ./start.sh restart
 VLLM_GLM5_MARLIN_PREFILL_CUDA=1 ./start.sh restart
+```
+
+Compiled decode has two reduction orders in the same library, chosen by
+`VLLM_GLM5_MARLIN_DECODE_VARIANT`. `orig` (the default) splits the first MoE
+projection four ways along K; it is faster, and because it adds in a different
+order the decoded text can differ from the released kernels, within their
+accuracy bounds. `exact` keeps the released summation order. The startup log
+names the active variant:
+
+```bash
+VLLM_GLM5_MARLIN_DECODE_VARIANT=exact ./start.sh restart
 ```
 
 An explicit `0` or `1` in the environment or `.env` remains authoritative across

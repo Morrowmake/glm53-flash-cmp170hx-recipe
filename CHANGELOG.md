@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.6.0 — 2026-10-01 (unreleased draft)
+
+**Update:** `./start.sh update`. Explicit `.env` values and engine/image
+overrides are preserved.
+
+Engine: `05317762a8e0dd266843f3a44b5ec216c4f78f4a` (on upstream `e55d076f89`, as 1.5.x).
+Image: pending (built from this engine before release).
+The base-extension wheel remains upstream `b6761e8ded57ef85b708f34af8cab1649eae1069`.
+
+- Load-adaptive DFlash2 depth, on by default in both layouts
+  (`VLLM_GLM5_DFLASH_ADAPTIVE_K`, default `1`): 5 drafts verified at one
+  request, 4 at two, `SPEC_N` (3) under load. One-user decode +27.0 / +22.2 /
+  −0.5 % (TP4, structured / code / prose) and +31.6 / +20.5 / −5.3 % (PP4)
+  against 1.5.x; eight users +1.4 / +2.7 / +2.7 % (TP4) and +0.5 / +2.0 / +6.1 %
+  (PP4).
+- Compiled Marlin decode on by default in both layouts when the optional
+  library is installed (the image includes it), in the original reduction
+  order. New `VLLM_GLM5_MARLIN_DECODE_VARIANT` (`orig` default, `exact` =
+  the 1.5.x order); the startup log names the variant. The library now carries
+  both variants; an older library is rejected at startup.
+- TP4 batched-token default follows the draft slots (3456 + max(4, slots)):
+  3461 with the adaptive depth, keeping 3,456-token prefill chunks. Cold
+  prefill unchanged (2,671 / 3,056 / 6,586 tok/s).
+- KV pool at 262,144 context: TP4 1,125,277 tokens (−4.4 %), PP4 2,064,638
+  (−11.6 %).
+- Quality, fixed batch, per answer against the previous release: TP4
+  HumanEval 160/164, GSM8K 1,280/1,319; PP4 162/164, 1,280/1,319; no
+  significant net loss.
+- DFlash2 is the only supported speculative mode; `SPEC_MODE=mtp|none` remain
+  in the launcher, unsupported and untested. Known limits notes the drafter's
+  non-commercial licence.
+- Changed defaults to review in an existing `.env`: none are written by
+  `./start.sh`; to keep 1.5.x behaviour set `VLLM_GLM5_DFLASH_ADAPTIVE_K=0`
+  and `VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` (`VLLM_GLM5_MARLIN_DECODE_CUDA=0`
+  for TP4).
+
 ## 1.5.1 — 2026-10-01
 
 - Documentation: shorter README with a quick start; details moved to `docs/`;

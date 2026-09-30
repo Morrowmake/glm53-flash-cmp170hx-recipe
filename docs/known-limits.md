@@ -25,8 +25,10 @@
 - **Context and KV are a trade.** Raising `MAX_LEN` lowers how many full-length
   requests fit at once. With `MM_CAP=0` (the default) the memory profiler also
   reserves room for a context-filling video, roughly 150k KV tokens.
-- **The DFlash2 checkpoint is needed for the default mode.** `SPEC_MODE=mtp`
-  uses the MTP head inside the model checkpoint, and `none` turns speculation
-  off; both are slower.
+- **DFlash2 is the only supported speculative mode.** The launcher still
+  accepts other `SPEC_MODE` values, but they are unsupported and untested: no
+  validation, no issue support. The DFlash2 drafter's licence is
+  non-commercial (CC BY-NC-ND 4.0), so commercial users need their own
+  evaluation.
 - **Host-staged all-reduce is only for cards without peer access.** Where
   peer-to-peer works, it stands aside for the device-memory path.

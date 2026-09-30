@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Launch GLM-5.3-Flash W4A16 on 4x CMP 170HX from the patched vLLM checkout.
 #
-# Usage: serve.sh [dflash|mtp|none|--help]
+# Usage: serve.sh [dflash|mtp|none|--help]   (dflash is the only supported mode;
+#   mtp and none are unsupported, untested: no validation, no issue support)
 #   (no argument)  same as "dflash" -- the default.
 #   dflash         DFlash2 drafter, num_speculative_tokens = SPEC_N (default 3).
 #   mtp            MTP drafter,     num_speculative_tokens = SPEC_N (default 3).
@@ -26,14 +27,16 @@
 #                   HOST:PORT can use the model.
 #   SERVED_MODEL_NAME  model id clients send (default glm-5.3-flash; the older
 #                   name SERVED_NAME is still read if this one is unset)
-# Env overrides: LAYOUT, MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3460 =
-#   3,456-token prefill chunks under TP4, 2312 = 2,304-token chunks under PP4),
+# Env overrides: LAYOUT, MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3456 + draft
+#   slots, at least 3460 = 3,456-token prefill chunks under TP4; 3461 with the
+#   adaptive depth; 2312 = 2,304-token chunks under PP4),
 #   PREFILL_CAP (upstream long-prefill chunk cap, UNCONDITIONAL; default 0 = off
 #   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
 #   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
 #
-# Optional compiled Marlin (TP decode off; PP decode on if installed; prefill off):
-#   VLLM_GLM5_MARLIN_DECODE_CUDA=1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=1
+# Optional compiled Marlin (decode on if installed, both layouts; prefill off):
+#   VLLM_GLM5_MARLIN_DECODE_CUDA=0|1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=0|1
+#   VLLM_GLM5_MARLIN_DECODE_VARIANT=orig (default, faster) | exact (released order)
 #   Native install: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
 #   Decode: eligible TP4/PP4 small batches. Prefill: PP4 only; TP4 unchanged.
 #   Engine shape/token gates apply; no startup or layout-change compilation.
@@ -247,12 +250,12 @@ export VLLM_KV_MAMBA_INFLIGHT_STATES=${VLLM_KV_MAMBA_INFLIGHT_STATES:-1}
 export VLLM_KV_SWA_INFLIGHT_SCRATCH=${VLLM_KV_SWA_INFLIGHT_SCRATCH:-1}
 echo "serve.sh: KV accounting: MAMBA_INFLIGHT_STATES=$VLLM_KV_MAMBA_INFLIGHT_STATES SWA_INFLIGHT_SCRATCH=$VLLM_KV_SWA_INFLIGHT_SCRATCH"
 
-# Independent compiled paths: PP4 decode defaults on only when installed.
+# Independent compiled paths: decode defaults on in both layouts when installed.
 # Discover the module file without importing vllm, torch or the extension.
 # Explicit values (including invalid empty values) are never replaced.
 if [ "${VLLM_GLM5_MARLIN_DECODE_CUDA+x}" != x ]; then
   VLLM_GLM5_MARLIN_DECODE_CUDA=0
-  if [ "$PP" = 4 ] && [ "$TP" = 1 ]; then
+  if { [ "$PP" = 4 ] && [ "$TP" = 1 ]; } || { [ "$TP" = 4 ] && [ "$PP" = 1 ]; }; then
     VLLM_GLM5_MARLIN_DECODE_CUDA="$(CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY'
 import importlib.machinery
 import importlib.util
@@ -265,7 +268,7 @@ print("1" if extension is not None else "0")
 PY
     )" || { echo "serve.sh: cannot determine optional Marlin installation" >&2; exit 1; }
     if [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 0 ]; then
-      echo "serve.sh: [ampere-marlin] optional library absent; unset PP4 decode defaults OFF (native build remains opt-in)"
+      echo "serve.sh: [ampere-marlin] optional library absent; unset decode defaults OFF (native build remains opt-in)"
     fi
   fi
 fi
@@ -274,7 +277,12 @@ export VLLM_GLM5_MARLIN_PREFILL_CUDA=${VLLM_GLM5_MARLIN_PREFILL_CUDA-0}
 for flag in VLLM_GLM5_MARLIN_DECODE_CUDA VLLM_GLM5_MARLIN_PREFILL_CUDA; do
   case "${!flag}" in 0|1) ;; *) echo "serve.sh: $flag must be 0 or 1" >&2; exit 2 ;; esac
 done
-echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA prefill=$VLLM_GLM5_MARLIN_PREFILL_CUDA (prebuilt library required when enabled)"
+# Decode reduction order: orig (default) splits the first MoE projection along K
+# (faster; decoded text can differ from the released order within its accuracy
+# bounds); exact keeps the released order.
+export VLLM_GLM5_MARLIN_DECODE_VARIANT=${VLLM_GLM5_MARLIN_DECODE_VARIANT-orig}
+case "$VLLM_GLM5_MARLIN_DECODE_VARIANT" in orig|exact) ;; *) echo "serve.sh: VLLM_GLM5_MARLIN_DECODE_VARIANT must be orig or exact" >&2; exit 2 ;; esac
+echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA variant=$VLLM_GLM5_MARLIN_DECODE_VARIANT prefill=$VLLM_GLM5_MARLIN_PREFILL_CUDA (prebuilt library required when enabled)"
 if [ "${DRY:-0}" != 1 ] && { [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ] || [ "$VLLM_GLM5_MARLIN_PREFILL_CUDA" = 1 ]; }; then
   CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY' || exit 1
 try:
@@ -492,11 +500,31 @@ echo "serve.sh: KV headroom: MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-
 # 180 W per card, for about 35,600 fewer KV tokens (-3%, a larger chunk raises the
 # activation peak the memory profiler reserves for). Decode step unchanged.
 # Contended prefill is unaffected (FAIR_PREFILL caps it at 384 while anything
-# decodes). If SPEC_N goes above 4, raise MAX_BATCHED to 3456 + SPEC_N to
-# keep 3,456-token chunks. Under PP4 the default is 2312 (2,304-token chunks),
+# decodes). The TP4 default follows the draft slots (SPEC_N, or the deepest
+# adaptive depth) to keep 3,456-token chunks: 3460 up to 4 slots, 3461 at 5. Under PP4 the default is 2312 (2,304-token chunks),
 # the chunk it was validated with.
 # Kill switch: MAX_BATCHED=2048 restores 1.2.0's chunking.
-if [ "$TP" -gt 1 ]; then MAX_BATCHED_DEFAULT=3460; else MAX_BATCHED_DEFAULT=2312; fi
+# Load-adaptive DFlash depth (both layouts, dflash only): verify deeper drafts
+# while few requests run (VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS, default 5,4 for
+# 1, 2 requests) and SPEC_N under load. The engine then reserves the deepest
+# depth as draft slots. Banner: "load-adaptive DFlash depth active".
+# Kill switch: VLLM_GLM5_DFLASH_ADAPTIVE_K=0.
+if [ "$MODE" = dflash ]; then
+  export VLLM_GLM5_DFLASH_ADAPTIVE_K=${VLLM_GLM5_DFLASH_ADAPTIVE_K:-1}
+fi
+SPEC_DEPTH=${SPEC_N:-3}
+if [ "$MODE" = dflash ] && [ "${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0}" = 1 ]; then
+  for d in $(echo "${VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS:-5,4}" | tr ',' ' '); do
+    [ "$d" -gt "$SPEC_DEPTH" ] 2>/dev/null && SPEC_DEPTH=$d
+  done
+fi
+echo "serve.sh: [adaptive-depth] ADAPTIVE_K=${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0} draft slots=$SPEC_DEPTH"
+# TP4 keeps 3,456-token chunks for any draft depth: 3456 + max(4, depth).
+if [ "$TP" -gt 1 ]; then
+  MAX_BATCHED_DEFAULT=$((3456 + (SPEC_DEPTH > 4 ? SPEC_DEPTH : 4)))
+else
+  MAX_BATCHED_DEFAULT=2312
+fi
 # Fair prefill: decode-aware chunking, passed as real serve args below rather
 # than through EXTRA_ARGS so EXTRA_ARGS stays free for callers.
 FAIR_ARGS=()

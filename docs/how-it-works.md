@@ -80,12 +80,12 @@ sparse-attention decode schedule is on in the engine itself.
 | Model id | `glm-5.3-flash` |
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
-| Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`e77f89da20`](https://github.com/Morrowmake/vllm-cmp170hx/commit/e77f89da2016c3949dba8550c6455b9421ed7365), on upstream vLLM `e55d076f89` |
+| Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), load-adaptive depth: 5 draft tokens per step at one request, 4 at two, 3 under load |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`05317762a8`](https://github.com/Morrowmake/vllm-cmp170hx/commit/05317762a8e0dd266843f3a44b5ec216c4f78f4a), on upstream vLLM `e55d076f89` |
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; measured with the False allocator default at 262,144 context in native 1.5.0: TP4/peer-to-peer off 1,176,646 tokens, TP4/peer-to-peer on 1,177,646, PP4 2,334,498 |
+| KV cache | full precision, **not quantised**; measured at 262,144 context in native 1.6.0: TP4/peer-to-peer off 1,125,277 tokens, TP4/peer-to-peer on 1,126,248, PP4 2,064,638 |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |

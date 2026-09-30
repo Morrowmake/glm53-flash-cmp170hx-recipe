@@ -1,5 +1,62 @@
 # Results
 
+## Release 1.6.0: faster decode for one or two users
+
+Two engine changes, both on by default in both layouts:
+
+- **Load-adaptive draft depth.** The DFlash2 drafter's guesses are verified
+  five at a time when one request is running, four at two, and three (the
+  previous fixed depth) under heavier load. More accepted tokens per step for a
+  single user; unchanged behaviour under load. Kill switch
+  `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` ([engine switches](engine-switches.md)).
+- **Compiled Marlin decode on by default, original reduction order.** The
+  optional library's decode kernels now run in both layouts, in a faster order
+  that sums the first MoE projection in four fixed K slices. Decoded text can
+  differ from the released order; quality was checked per answer (below).
+  `VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` keeps the previous order
+  ([Optional compiled Marlin](compiled-marlin.md)).
+
+**The trade: KV pool.** Deeper drafts reserve more per-request scratch, so the
+KV pool at 262,144 context is 1,125,277 tokens under TP4 (−4.4 % against
+1.5.x) and 2,064,638 under PP4 (−11.6 %; about 2,000 tokens of that is the
+compiled decode's scratch). Cold prefill is unchanged.
+
+**Against 1.5.x, same protocol:** one user +27.0 / +22.2 / −0.5 %
+(structured / code / prose) under TP4 and +31.6 / +20.5 / −5.3 % under PP4;
+eight users +1.4 / +2.7 / +2.7 % (TP4) and +0.5 / +2.0 / +6.1 % (PP4).
+Prose gains least: its drafts are accepted less often, so a deeper draft adds
+step time without adding accepted tokens.
+
+**Quality**, fixed-batch HumanEval (164) and GSM8K (1,319), compared per
+answer with the previous release: TP4 **160/164 and 1,280/1,319** (previous
+162 and 1,281; 3 losses and 1 gain on HumanEval, McNemar p 0.63), PP4
+**162/164 and 1,280/1,319** (previous 163 and 1,284; p 1.0 and 0.22). Individual
+answers flip in both directions when decoded text changes; no suite shows a
+significant net loss.
+
+**Long-context and repeatability checks** on this release: needle retrieval
+30/30 up to 262K tokens, copy fidelity no worse than the previous baseline,
+no cross-request leaks, and bit-identical outputs for the same batch run twice
+in eager and CUDA-graph modes, in both layouts.
+
+## Release 1.6.0 throughput
+
+Measured on 2026-10-01 with the released engine and launcher defaults, the
+same workloads and client as the 1.5.0 table below: DFlash2 with load-adaptive
+depth, 262,144-token context, 180 W per card, PCIe x16 links, one server start
+per column, decode median of five runs.
+
+| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
+|---|---:|---:|---:|
+| Streaming decode, 1 user, structured / code / prose | **339.4 / 318.7 / 185.0 tok/s** | **372.6 / 350.3 / 199.4 tok/s** | **186.6 / 168.5 / 98.0 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **769.7 / 692.1 / 545.7 tok/s** | **821.2 / 749.2 / 591.9 tok/s** | **606.3 / 588.5 / 472.2 tok/s** |
+| Cold prefill | **2,671 tok/s** | **3,056 tok/s** | **6,586 tok/s** |
+| One-token response time, 6,217 / 23,255-token prompt | 2.38 / 8.68 s | 2.06 / 7.49 s | 1.46 / 3.64 s |
+| KV pool at 262,144 context | 1,125,277 tokens (4.29 full-length requests) | 1,126,248 tokens (4.30) | 2,064,638 tokens (7.88) |
+
+Of the 855 measured decode requests, one (TP4 peer-to-peer off, structured,
+four users) stopped at 340 tokens; all others ran to the 400-token cap.
+
 ## Optional Marlin and image packaging (1.5.0)
 
 Release 1.5.0 adds optional compiled Marlin and a Git-free runtime image.
@@ -23,8 +80,8 @@ with no new GPU Xid errors. TP4 paired decode-step cost was +0.38–0.83% at
 users was scheduling-confounded; no speed conclusion is drawn there.
 Fixed-batch repeatability also passed under TP4 and PP4 in both eager and
 CUDA-graph modes. Native update checks passed with `.env` preserved and no
-engine reinstall. Validation for this change is DFlash-only: MTP/no-drafter
-and conflicting allocator aliases were not GPU-validated.
+engine reinstall. Validation for this change is DFlash-only; conflicting
+allocator aliases were not GPU-validated.
 It does not establish a root-cause fix for driver or virtualisation failures.
 
 ## Quality (1.4.3)
@@ -57,7 +114,7 @@ requests in original, shuffled and reversed order. There was no demonstrated
 aggregate accuracy loss, but individual tasks both improved and worsened.
 This is not a 1.4.3 or PP4 comparison, nor proof of batch invariance.
 
-## Release 1.5.0 throughput
+## Release 1.5.0 throughput (previous release)
 
 Measured on 2026-09-30 using the original throughput workloads and the released
 engine and launcher. These are native measurements, not a new container-speed
@@ -114,14 +171,14 @@ Current HumanEval and GSM8K results are in [Quality (1.4.3)](#quality-143).
 
 ## Choosing a layout
 
-Prefill and KV figures compare the native 1.5.0 peer-to-peer-off columns above.
+Prefill and KV figures compare the native 1.6.0 peer-to-peer-off columns above.
 
 | | Tensor-parallel 4 (`tp4`, default) | Pipeline-parallel 4 (`pp4`) |
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | 2,657 tok/s | 6,575 tok/s (2.47×) |
-| KV pool | 1,176,646 tokens | 2,334,498 tokens (1.98×) |
+| Prefill | 2,671 tok/s | 6,586 tok/s (2.47×) |
+| KV pool | 1,125,277 tokens | 2,064,638 tokens (1.83×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
 
@@ -174,7 +231,7 @@ above; each line says what it was measured against.
 
 ## Decode and prefill in detail
 
-Release 1.5.0, native tensor-parallel 4 with peer-to-peer off and the
+Release 1.6.0, native tensor-parallel 4 with peer-to-peer off and the
 configuration described above: temperature 0, median of five, original
 structured/code/prose prompts and cache-busting nonces.
 
@@ -187,33 +244,33 @@ Each request carries a unique nonce to prevent prefix-cache reuse.
 
 | Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
 |---|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | **267.3** | — | 0.063 s |
-|  | ×2 | **209.7** | **393.1** | 0.109 s |
-|  | ×4 | **149.5** | **533.2** | 0.247 s |
-|  | ×8 | **105.7** | **758.9** | 0.312 s |
-| Code (clamp_00…clamp_49) | ×1 | **260.9** | — | 0.158 s |
-|  | ×2 | **183.4** | **324.8** | 0.248 s |
-|  | ×4 | **140.9** | **489.9** | 0.392 s |
-|  | ×8 | **98.6** | **674.1** | 0.617 s |
-| Prose (hash map) | ×1 | **186.0** | — | 0.067 s |
-|  | ×2 | **136.8** | **260.5** | 0.158 s |
-|  | ×4 | **106.1** | **392.0** | 0.253 s |
-|  | ×8 | **73.1** | **531.1** | 0.311 s |
+| Structured (count 1→200) | ×1 | **339.4** | — | 0.063 s |
+|  | ×2 | **239.0** | **436.3** | 0.111 s |
+|  | ×4 | **156.8** | **565.0** | 0.256 s |
+|  | ×8 | **106.1** | **769.7** | 0.315 s |
+| Code (clamp_00…clamp_49) | ×1 | **318.7** | — | 0.158 s |
+|  | ×2 | **192.7** | **339.5** | 0.250 s |
+|  | ×4 | **141.4** | **495.9** | 0.393 s |
+|  | ×8 | **101.1** | **692.1** | 0.618 s |
+| Prose (hash map) | ×1 | **185.0** | — | 0.067 s |
+|  | ×2 | **153.4** | **276.8** | 0.161 s |
+|  | ×4 | **112.4** | **416.0** | 0.255 s |
+|  | ×8 | **74.2** | **545.7** | 0.316 s |
 
 Prose decodes slower than structured or code text because the drafter's guesses
 are accepted less often.
 
-**Cold prefill by prompt length**, native release 1.5.0 pipeline-parallel 4
+**Cold prefill by prompt length**, native release 1.6.0 pipeline-parallel 4
 (peer-to-peer off), original real-text corpus and unique uncached windows,
 `max_tokens=1`, median of two, `prompt tokens / streamed TTFT` measured client
 side. All twelve requests recorded zero prefix-cache hits. (Tensor-parallel 4
-runs at 2,657 tok/s on the separate 24K–38K prompts of the results table.)
+runs at 2,671 tok/s on the separate 24K–38K prompts of the results table.)
 
 | Prompt | TTFT | tok/s |
 |---:|---:|---:|
-| ~8k | 1.91 s | **4,171** |
-| ~16k | 2.78 s | **5,738** |
-| ~32k | 4.83 s | **6,616** |
-| ~64k | 9.04 s | **7,082** |
-| ~128k | 17.78 s | **7,177** |
-| ~250k | 35.38 s | **7,074** |
+| ~8k | 1.90 s | **4,197** |
+| ~16k | 2.77 s | **5,762** |
+| ~32k | 4.83 s | **6,604** |
+| ~64k | 9.06 s | **7,068** |
+| ~128k | 17.79 s | **7,172** |
+| ~250k | 35.41 s | **7,067** |

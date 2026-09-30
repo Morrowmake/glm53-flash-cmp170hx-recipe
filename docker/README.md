@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/e77f89da2016c3949dba8550c6455b9421ed7365)
-  pinned at `e77f89da20` (1.5.0, on upstream `e55d076f89`), installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/05317762a8e0dd266843f3a44b5ec216c4f78f4a)
+  pinned at `05317762a8` (1.6.0, on upstream `e55d076f89`), installed
   the way the native install does it: Python 3.12, torch 2.13.0 (CUDA 13.0
   build), the fork installed editable in `/opt/venv` with upstream's
   precompiled extensions, then the runtime extras the engine pins (FlashInfer
@@ -33,7 +33,7 @@ Release image, pinned to the exact artifact accepted in private-container checks
 ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
 ```
 
-Its OCI version is `1.5.0-e77f89da20`. Private fresh/update checks are not proof
+Its OCI version is `1.6.0-05317762a8`. Private fresh/update checks are not proof
 of public registry availability or public-distribution fresh/update acceptance.
 
 **Measured in 1.4.0:** On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670). (Release 1.3.x's image ran within
@@ -90,7 +90,7 @@ existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin
 Build the release source with Docker:
 
 ```bash
-docker build -t vllm-cmp170hx:1.5.0-e77f89da20 docker/
+docker build -t vllm-cmp170hx:1.6.0-05317762a8 docker/
 ```
 
 The build needs no GPU. It clones the fork at the pinned commit and downloads

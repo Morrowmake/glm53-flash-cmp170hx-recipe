@@ -22,11 +22,11 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   docker build -t vllm-cmp170hx:1.5.0-e77f89da20 docker/
+#   docker build -t vllm-cmp170hx:1.6.0-05317762a8 docker/
 
 ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
 
-ARG VLLM_COMMIT=e77f89da2016c3949dba8550c6455b9421ed7365
+ARG VLLM_COMMIT=05317762a8e0dd266843f3a44b5ec216c4f78f4a
 
 FROM ${BASE} AS build
 ARG VLLM_REPO=https://github.com/Morrowmake/vllm-cmp170hx.git
@@ -100,7 +100,7 @@ LABEL org.opencontainers.image.title="vllm-cmp170hx" \
       org.opencontainers.image.source="https://github.com/Morrowmake/vllm-cmp170hx" \
       org.opencontainers.image.revision="${VLLM_COMMIT}" \
       org.opencontainers.image.url="https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe" \
-      org.opencontainers.image.version="1.5.0" \
+      org.opencontainers.image.version="1.6.0" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"

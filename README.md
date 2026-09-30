@@ -5,17 +5,17 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/e77f89da2016c3949dba8550c6455b9421ed7365"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20e77f89da20-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/05317762a8e0dd266843f3a44b5ec216c4f78f4a"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2005317762a8-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.5.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.6.0-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts. Native 1.5.0 results: tensor-parallel at 267.3 tok/s for one
-user and 758.9 tok/s across eight, or pipeline-parallel with
-6,575 tok/s cold prefill and a 2,334,498-token KV pool. The weights
+cards in two layouts. Native 1.6.0 results: tensor-parallel at 339.4 tok/s for one
+user and 769.7 tok/s across eight, or pipeline-parallel with
+6,586 tok/s cold prefill and a 2,064,638-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
 outputs were identical across the repeated checks in [Results](docs/results.md).**
@@ -58,20 +58,21 @@ image, so the engine and its Python environment stay out of your system.
 
 ## Headline numbers
 
-Release 1.5.0, native, DFlash2 k=3, 262,144-token context, peer-to-peer off
-(the default), 180 W per card, PCIe x16 links.
+Release 1.6.0, native, DFlash2 (load-adaptive depth: 5 drafts at one request,
+4 at two, 3 under load), 262,144-token context, peer-to-peer off (the default),
+180 W per card, PCIe x16 links.
 
 | | Tensor-parallel 4 (default) | Pipeline-parallel 4 (`LAYOUT=pp4`) |
 |---|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **267.3 / 260.9 / 186.0 tok/s** | **141.8 / 139.8 / 103.5 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **758.9 / 674.1 / 531.1 tok/s** | **603.0 / 577.2 / 445.1 tok/s** |
-| Cold prefill | **2,657 tok/s** | **6,575 tok/s** |
-| KV pool at 262,144 context | 1,176,646 tokens | 2,334,498 tokens |
-| HumanEval pass@1 / GSM8K (1.4.3) | 162/164 / 97.12% | 163/164 / 97.35% |
+| Streaming decode, 1 user, structured / code / prose | **339.4 / 318.7 / 185.0 tok/s** | **186.6 / 168.5 / 98.0 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **769.7 / 692.1 / 545.7 tok/s** | **606.3 / 588.5 / 472.2 tok/s** |
+| Cold prefill | **2,671 tok/s** | **6,586 tok/s** |
+| KV pool at 262,144 context | 1,125,277 tokens | 2,064,638 tokens |
+| HumanEval pass@1 / GSM8K | 160/164 / 97.04% | 162/164 / 97.04% |
 
 With the optional [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional)
-path, tensor-parallel 4 measured 282.0 tok/s for one user, 816.8 across eight
-and 3,053 tok/s cold prefill. Method, the per-user decode table, the prefill
+path, tensor-parallel 4 measured 372.6 tok/s for one user, 821.2 across eight
+and 3,056 tok/s cold prefill. Method, the per-user decode table, the prefill
 ladder up to ~250k tokens and quality detail: [Results](docs/results.md).
 
 ## Quick start
@@ -102,7 +103,7 @@ streaming and tool-call clients are in [examples/](examples/README.md).
 Tensor-parallel 4 (`tp4`, the default) gives one or two interactive users the
 fastest answer per request and needs x16 links. Pipeline-parallel 4 (`pp4`)
 suits many parallel users, long prompts and x4 links, with 2.47× the prefill
-and 1.98× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
+and 1.83× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
 in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 
 ## Documentation
@@ -132,7 +133,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/e77f89da2016c3949dba8550c6455b9421ed7365/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/05317762a8e0dd266843f3a44b5ec216c4f78f4a/LICENSE).
 
 The downloaded models have separate licences:
 
@@ -146,11 +147,9 @@ The downloaded models have separate licences:
   The [licence](https://creativecommons.org/licenses/by-nc-nd/4.0/) requires
   attribution, prohibits commercial use, and prohibits distributing modified material.
 
-To run without the external drafter, set `SPEC_MODE=none` in `.env` (no
-speculation), or `SPEC_MODE=mtp` (the target checkpoint's built-in MTP head),
-then run `./start.sh`. Both modes skip downloading and loading the external
-drafter. For direct use of `serve.sh`, pass `none` or `mtp` as its argument.
-The performance figures on this page use DFlash2, not these alternatives.
+DFlash2 is the only supported speculative mode; every figure on this page uses
+it. Because its licence is non-commercial, commercial users need to make their
+own evaluation ([Known limits](docs/known-limits.md)).
 
 **The benchmark prompts** come from MiaAI-Lab's repository (AGPL-3.0) and
 their sparkDash prompt constants (MIT), used as data with attribution. No code from their repositories is included here.

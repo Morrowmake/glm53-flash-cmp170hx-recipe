@@ -141,7 +141,7 @@ Commonly used from `.env.advanced.example`:
 | `MAX_LEN` | `262144` | context ceiling; lower it for more concurrent full-length requests |
 | `MAX_SEQS` | `8` | concurrent requests |
 | `GPU_UTIL` | `0.95` | share of each card's memory the engine may use |
-| `SPEC_MODE` / `SPEC_N` | `dflash` / `3` | speculative drafter and draft depth; `mtp` uses the MTP head in the model checkpoint, `none` turns speculation off |
+| `SPEC_N` | `3` | draft depth under load for the DFlash2 drafter (the only supported mode) |
 | `MAX_BATCHED` | `3460` (TP4), `2312` (PP4) | sets the prefill chunk: 3,456 / 2,304 tokens; `2048` gives 1,152 |
 | `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | fair prefill and its slice size while others decode |
 | `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it cost 15% prefill here and turns the prefill features off |
@@ -184,6 +184,16 @@ The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 pulls the matching image whenever it changes. Set `IMAGE` in `.env` (see
 [`.env.advanced.example`](../.env.advanced.example)) to
 freeze it.
+
+**Updating from 1.5.x.** Run `./start.sh update`. Release 1.6.0 moves the
+engine and image pins. Two defaults change: compiled Marlin decode is now on
+in both layouts when the optional library is installed (the image includes it),
+in the faster `orig` reduction order, and the drafter's depth follows the load.
+The KV pool shrinks by 4.4 % (TP4) and 11.6 % (PP4); see
+[Results](results.md#release-160-faster-decode-for-one-or-two-users). To keep
+the 1.5.x behaviour, set `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` and
+`VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` (or `VLLM_GLM5_MARLIN_DECODE_CUDA=0`
+under TP4) in `.env`. Explicit `.env` values are preserved.
 
 **Updating from 1.4.x.** Run `./start.sh update`. Release 1.5.0 moves the
 engine and image pins; your `.env`, including explicit `IMAGE`, `VLLM_COMMIT`
