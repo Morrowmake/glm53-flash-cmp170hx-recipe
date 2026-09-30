@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf)
-  pinned at `378c37b009` (the 1.4.1 pin, on upstream `e55d076f89`), installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/e77f89da2016c3949dba8550c6455b9421ed7365)
+  pinned at `e77f89da20` (1.5.0, on upstream `e55d076f89`), installed
   the way the native install does it: Python 3.12, torch 2.13.0 (CUDA 13.0
   build), the fork installed editable in `/opt/venv` with upstream's
   precompiled extensions, then the runtime extras the engine pins (FlashInfer
@@ -16,6 +16,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
   wheel of its own, so the extensions come from upstream `b6761e8ded`'s wheel,
   whose C++, CUDA and Rust sources are identical. The installed package list
   is in `/opt/venv/requirements.lock.txt`.
+- **Optional Marlin:** a distinct compiled CUDA/C++ library, included for both
+  layouts without replacing the upstream base extensions.
 - **Base:** `nvidia/cuda:13.3.1-devel-ubuntu24.04`, pinned by digest. It is the
   devel image because Triton, TileLang, FlashInfer and the host-memory
   all-reduce compile kernels at run time and need `nvcc` and `g++`.
@@ -25,31 +27,27 @@ image, how to build it, and how to run it by hand without `./start.sh`.
   settings are baked in.
 - **No weights.** The two checkpoints are mounted from the host.
 
-Image (compressed size 10.63 GB), pulled by digest to get exactly the
-tested image:
+Release image, pinned to the exact artifact accepted in private-container checks:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97
+ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
 ```
 
-Also tagged `ghcr.io/morrowmake/vllm-cmp170hx:1.4.1-378c37b009`.
+Its OCI version is `1.5.0-e77f89da20`. Private fresh/update checks are not proof
+of public registry availability or public-distribution fresh/update acceptance.
 
 **Measured in 1.4.0:** On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670). (Release 1.3.x's image ran within
 0.4 % of the native install on decode at 1 / 4 / 8 users and on cold prefill.)
 
 ## Build it
 
-**Unreleased optional Marlin:** these build sources require a compatible engine
-with `csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py`. The released
-pin/image above do not contain it. Supply a full `VLLM_COMMIT` and compatible
-source. Missing support fails the build rather than omitting the library.
-The native installer and local rootless build were checked with unreleased
-source `2749982103fd51d5bb73727532640c10844ec699` (branch
-`ampere-marlin-optional`). This does not claim Docker startup acceptance or a
-published image. For that local source, the rootless builder supports:
+**Optional Marlin:** both builders use the release engine pin, which includes
+`csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py`. Missing support
+fails the build rather than omitting the library. To build from another local
+source, supply its full commit and branch explicitly:
 
 ```bash
-VLLM_COMMIT=2749982103fd51d5bb73727532640c10844ec699 CLONE_FROM=/path/to/source CLONE_BRANCH=ampere-marlin-optional \
+VLLM_COMMIT=<full-engine-commit> CLONE_FROM=/path/to/source CLONE_BRANCH=<source-branch> \
   STAGE=/path/to/new-owned-staging-directory ./docker/build.sh
 ```
 
@@ -78,7 +76,7 @@ name matches still need attribution review; upstream copyright/author notices
 are retained.
 For Docker, add build arguments `VLLM_REPO`, `VLLM_BRANCH`, `VLLM_COMMIT` naming
 a source reachable inside the build.
-Labels identify the supplied source, not a release. Both builders compile one
+The revision label identifies the supplied source. Both builders compile one
 sm_80 library without GPUs and check operator registrations. Image configuration
 leaves `VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` unset.
 With the mounted `serve.sh`, TP4 decode defaults off, PP4 decode defaults on when
@@ -89,21 +87,23 @@ unset PP4 decode off with a banner; enabled paths must pass compatibility checks
 TP4/PP4 changes never rebuild the library. Other engine kernels still use the
 existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin.
 
-The earlier released-image command below now requires compatible source overrides:
+Build the release source with Docker:
 
 ```bash
-docker build -t vllm-cmp170hx:1.4.1-378c37b009 docker/
+docker build -t vllm-cmp170hx:1.5.0-e77f89da20 docker/
 ```
 
 The build needs no GPU. It clones the fork at the pinned commit and downloads
 torch, the precompiled extensions and the runtime extras, so it takes a while
 and needs network access.
 
-The release image was assembled with [`build.sh`](build.sh) instead, which
-runs the same steps on the host without a Docker daemon and appends the result
-to the pinned base as one layer with
-[crane](https://github.com/google/go-containerregistry). The contents are the
-same; the digest of a `docker build` will differ.
+The pinned release artifact uses the rootless application-layer assembly
+approach in [`build.sh`](build.sh): prepare the runtime tree on the host without
+a Docker daemon and append it to the pinned base with
+[crane](https://github.com/google/go-containerregistry). Rebuilding with either
+builder produces a separate artifact; it does not reproduce or revalidate the
+frozen digest automatically. Validate the resulting provenance, layers and
+runtime before distributing any rebuilt image.
 
 ## Run it by hand
 
@@ -122,7 +122,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"

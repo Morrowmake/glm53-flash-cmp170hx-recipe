@@ -5,9 +5,9 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20378c37b009-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/e77f89da2016c3949dba8550c6455b9421ed7365"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20e77f89da20-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.4.3-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.5.0-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -60,6 +60,16 @@ What changed in this release is in [CHANGELOG.md](CHANGELOG.md).
 ---
 
 ## Results
+
+### Optional Marlin and image packaging (1.5.0)
+
+Release 1.5.0 adds optional compiled Marlin and a Git-free runtime image.
+Native installation, kernel/runtime checks and private-container fresh/update
+checks passed for the pinned artifacts. Those checks do not establish public
+registry availability or public fresh/update acceptance. The performance and
+quality tables below retain their explicitly named historical release scope;
+they are not new 1.5.0 throughput measurements or universal exactness claims.
+See [Optional compiled Marlin](#optional-compiled-marlin) for defaults and limits.
 
 ### Allocator compatibility default (1.4.3)
 
@@ -261,9 +271,9 @@ prompts of the results table.)
 
 ---
 
-## Optional compiled Marlin (unreleased)
+## Optional compiled Marlin
 
-This unreleased launcher selects TP4 compiled decode off, PP4 compiled decode on
+The launcher selects TP4 compiled decode off, PP4 compiled decode on
 when the optional library is installed, and compiled prefill off in both layouts.
 The effective `PP=4 TP=1` configuration selects the PP4 default even when those
 dimensions override `LAYOUT`. One `vllm._ampere_marlin_C` library serves both
@@ -284,17 +294,15 @@ library, or default-on with an incompatible library, fails before serving, never
 silently disabling the requested feature. Both flags off means no extension load.
 `DRY=1` prints the resolved flags and command but skips compatibility validation.
 
-The candidate decode path is limited to eligible small batches in TP4 and PP4.
+The compiled decode path is limited to eligible small batches in TP4 and PP4.
 The compiled prefill path is PP4-only, within the engine's validated shape and
 token bounds; TP4 prefill retains the released implementation. Unsupported
 shapes use the released paths. These are not universal kernel replacements,
 and no whole-server speedup is claimed here.
 
-Use these only with a compatible prebuilt image (`IMAGE` override), or install
-natively using `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
-Select a compatible engine source or image override; the public pins below remain
-unchanged while release acceptance is pending. Installation support and selected
-launcher defaults do not constitute image or full-task quality acceptance.
+The pinned container image includes the optional library. To build it natively,
+use `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
+Native compilation is opt-in; it is independent of runtime enablement.
 
 Normal native installs use the precompiled base engine without compiling this
 library. Opting in requires a CUDA toolkit (`CUDA_HOME`) and C++ compiler.
@@ -304,7 +312,7 @@ and binary digest; matching builds are reused. Engine reinstalls invalidate the
 optional binary, without demanding its toolkit when build is off. Failed rebuilds
 cannot leave a stale library in service. Enabling a runtime switch without the
 library fails before serving, never silently falling back. Both switches off
-means no optional-extension load. Existing `.env` and release pins are preserved.
+means no optional-extension load. Existing `.env` and explicit pin overrides are preserved.
 
 The [container build](docker/README.md#build-it) prebuilds the same library with
 no visible GPUs. Marlin needs no startup compiler or layout-specific rebuild;
@@ -319,8 +327,8 @@ other engine kernels still need the image's existing toolkit.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), 3 draft tokens per step |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`378c37b009`](https://github.com/Morrowmake/vllm-cmp170hx/commit/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf), on upstream vLLM `e55d076f89` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97` — the engine at that pin, no weights ([docker/](docker/README.md)) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere-glm53` @ [`e77f89da20`](https://github.com/Morrowmake/vllm-cmp170hx/commit/e77f89da2016c3949dba8550c6455b9421ed7365), on upstream vLLM `e55d076f89` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663` — the engine at that pin, no weights ([docker/](docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](#choosing-a-layout) |
 | Context | 262,144 tokens |
 | KV cache | full precision, **not quantised**; with the False allocator default at 262,144 context: TP4/peer-to-peer off 1,176,646 tokens, PP4 2,334,498. Historical peer-to-peer-on capacity is in the release table above |
@@ -701,16 +709,14 @@ The engine pin lives in `start.sh`, so a `git pull` can move it, and `start.sh`
 pulls the matching image whenever it changes. Uncomment `IMAGE` in `.env` to
 freeze it.
 
-**Updating from 1.4.1 or 1.4.2.** Run `./start.sh update`. Release 1.4.3 keeps
-the engine pin and image unchanged, so no engine reinstall is needed. Your
-`.env` is preserved. The `PYTORCH_CUDA_ALLOC_CONF` default is now
-`expandable_segments:False` for every layout and peer-to-peer setting. Delete
-an old explicit `PYTORCH_CUDA_ALLOC_CONF` line only if you want the new default;
-keep it to preserve your override. No other setting default changes.
-
-**Updating from 1.4.0.** Run `./start.sh update`. The engine pin and image
-move to the 1.4.1 engine; PP4 enables the draft tail on stage 2. The allocator
-compatibility default above applies when no explicit override is set.
+**Updating from 1.4.x.** Run `./start.sh update`. Release 1.5.0 moves the
+engine and image pins; your `.env`, including explicit `IMAGE`, `VLLM_COMMIT`
+and runtime-switch overrides, is preserved. Remove an old explicit pin only
+if you want to follow this release. The image includes optional Marlin:
+unset PP4 decode enables it, TP4 decode and both prefill defaults remain off.
+Native users must opt in to compilation as described above; without an installed
+library, unset PP4 decode remains off. The allocator default remains
+`expandable_segments:False`, with explicit allocator overrides preserved.
 
 **Updating from 1.3.x.** Run `./start.sh update`, nothing else. What happens:
 
@@ -791,10 +797,10 @@ sudo apt-get update
 sudo apt-get install -y cuda-toolkit-13-3
 ```
 
-The install uses upstream's **precompiled** CUDA extensions, which is why it
-takes minutes: the fork's patches are Python, Triton and TileLang and touch no
-CUDA or C++ source, so the compiled objects are the same, and upstream's
-already carry sm_80 code. To compile them yourself:
+The install uses upstream's **precompiled** base CUDA extensions, which already
+carry sm_80 code. Those base extensions remain usable: the optional Marlin
+CUDA/C++ extension is distinct and is compiled only with
+`VLLM_BUILD_AMPERE_MARLIN=1`. To compile the base extensions yourself:
 `BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` (full toolkit, ~60 GB of
 scratch, one to two hours).
 
@@ -856,7 +862,7 @@ for running it without `./start.sh`.
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/378c37b0098a41a5cd25b3bf8b56d158e33a6cbf/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/e77f89da2016c3949dba8550c6455b9421ed7365/LICENSE).
 
 The downloaded models have separate licences:
 

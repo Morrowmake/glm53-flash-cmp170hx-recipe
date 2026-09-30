@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.5.0 — 2026-09-30
+
+**Update:** `./start.sh update`. Explicit engine/image overrides and `.env`
+are preserved. Native optional compilation remains opt-in.
+
+Engine: `e77f89da2016c3949dba8550c6455b9421ed7365`.
+Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663`.
+The base-extension wheel remains upstream `b6761e8ded57ef85b708f34af8cab1649eae1069`.
 
 - Add optional native sm_80 Marlin installation with `VLLM_BUILD_AMPERE_MARLIN=1`,
   including same-pin install/update, dependency-aware reuse and stale-binary
@@ -18,17 +25,19 @@
   native installation removes obsolete optional-module suffix variants.
   Decode targets eligible TP4/PP4 small batches; compiled prefill is PP4-only.
   Engine shape/token gates apply; TP4 prefill retains its released path.
-- Container build sources prebuild that library from a compatible source override.
-  Public engine/image pins remain unchanged pending acceptance. No new release
-  or performance claim is made here. Existing `.env` is preserved.
+- The pinned container prebuilds the same optional library for both layouts.
+  Native installation and private-container fresh/update checks passed.
+  Public distribution fresh/update acceptance is separate; no new throughput
+  or universal output-equivalence claim is made here.
 - Keep transport-isolated Git history only during container builds, with source
   pin and object-integrity checks before removal. Both image builders remove
   all Git databases before creating final runtime application layers, and reject
   retained metadata or identifying build paths, including nested archives.
 - Preserve the exact engine pin in the OCI revision and a read-only
   `/opt/vllm-src/provenance.json` record alongside the installed version.
-  Runtime Python sources and compiled libraries are unchanged; native installs
-  retain Git-based updates. `OUT` selects a separate rootless output directory.
+  Removing Git metadata preserves runtime Python sources and compiled libraries;
+  native installs retain Git-based updates. `OUT` selects a separate rootless
+  output directory.
 
 ## 1.4.3 — 2026-09-29
 

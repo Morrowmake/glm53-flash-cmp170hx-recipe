@@ -153,9 +153,9 @@ VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
 # compiled extensions match that commit's upstream base (e55d076f89 has no
 # wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
 # it), and the container image built from them, pinned by digest.
-RELEASE_VLLM_COMMIT=378c37b0098a41a5cd25b3bf8b56d158e33a6cbf
+RELEASE_VLLM_COMMIT=e77f89da2016c3949dba8550c6455b9421ed7365
 RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:14d7b380cc623eb9145db06307c0e432024f1060de1460bf14f893abd9792a97
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"

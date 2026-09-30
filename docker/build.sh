@@ -30,11 +30,11 @@ OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="ampere-glm53"
-VLLM_COMMIT="${VLLM_COMMIT:-378c37b0098a41a5cd25b3bf8b56d158e33a6cbf}"
+VLLM_COMMIT="${VLLM_COMMIT:-e77f89da2016c3949dba8550c6455b9421ed7365}"
 # Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
 # wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
 VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"
-RELEASE="unreleased"
+RELEASE="1.5.0"
 # Upstream release tag the pin's base descends from (sets the version string).
 VERSION_TAG="v0.30.1rc0"
 UPSTREAM_REPO="https://github.com/vllm-project/vllm.git"

@@ -1,5 +1,5 @@
 # vLLM (Morrowmake/vllm-cmp170hx, branch ampere-glm53) for GLM-5.3-Flash W4A16
-# on 4x NVIDIA CMP 170HX, with optional sm_80 Marlin (unreleased).
+# on 4x NVIDIA CMP 170HX, with optional sm_80 Marlin.
 #
 # The engine is installed the way the recipe's native install does it: Python
 # 3.12, torch 2.13.0 (CUDA 13.0 build), the fork checked out at the pinned
@@ -22,11 +22,11 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   docker build -t vllm-cmp170hx:1.4.1-378c37b009 docker/
+#   docker build -t vllm-cmp170hx:1.5.0-e77f89da20 docker/
 
 ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
 
-ARG VLLM_COMMIT=378c37b0098a41a5cd25b3bf8b56d158e33a6cbf
+ARG VLLM_COMMIT=e77f89da2016c3949dba8550c6455b9421ed7365
 
 FROM ${BASE} AS build
 ARG VLLM_REPO=https://github.com/Morrowmake/vllm-cmp170hx.git
@@ -96,11 +96,11 @@ ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin
     CUDA_HOME=/usr/local/cuda \
     NVIDIA_REQUIRE_CUDA=cuda>=13.0
 LABEL org.opencontainers.image.title="vllm-cmp170hx" \
-      org.opencontainers.image.description="vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) with optional sm_80 Marlin (unreleased); weights not included" \
+      org.opencontainers.image.description="vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) with optional sm_80 Marlin; weights not included" \
       org.opencontainers.image.source="https://github.com/Morrowmake/vllm-cmp170hx" \
       org.opencontainers.image.revision="${VLLM_COMMIT}" \
       org.opencontainers.image.url="https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe" \
-      org.opencontainers.image.version="unreleased" \
+      org.opencontainers.image.version="1.5.0" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
