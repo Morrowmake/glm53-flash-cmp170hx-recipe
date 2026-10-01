@@ -187,7 +187,11 @@ SPEC_MODE="${SPEC_MODE:-dflash}"
 # keeps running natively unless RUNTIME is set; a fresh checkout uses the
 # container.
 if [ -z "${RUNTIME:-}" ]; then
-    if [ -f "${VENV}/.recipe-stamp" ]; then RUNTIME=native; else RUNTIME=container; fi
+    if [ -f "${VENV}/.recipe-stamp" ] || [ -f "${VENV}/.recipe-reqs" ]; then
+        RUNTIME=native
+    else
+        RUNTIME=container
+    fi
 fi
 case "$RUNTIME" in
     container|native) ;;
@@ -212,6 +216,11 @@ PIDFILE="$LOGDIR/vllm.pid"
 LOCKFILE="$LOGDIR/lifecycle.lock"
 LOCKPID="$LOGDIR/lifecycle.lock.pid"
 STAMP="$VENV/.recipe-stamp"
+INSTALL_STEPS="$VENV/.recipe-install-steps"
+NATIVE_INSTALL_RESUME="${NATIVE_INSTALL_RESUME:-1}"
+FLASHINFER_INSTALL_ATTEMPTS="${FLASHINFER_INSTALL_ATTEMPTS:-3}"
+FLASHINFER_HTTP_TIMEOUT="${FLASHINFER_HTTP_TIMEOUT:-30}"
+FLASHINFER_INSTALL_TIMEOUT="${FLASHINFER_INSTALL_TIMEOUT:-600}"
 CIDFILE="$LOGDIR/container.id"
 LABEL="glm53-recipe.checkout"
 
@@ -470,6 +479,7 @@ install_done() {
     [ "$want" = "$have" ] || return 1
     [ "$(git -C "$VLLM_SRC" rev-parse HEAD 2>/dev/null || echo '???')" = "$want" ] || return 1
     [ "$(reqs_hash)" = "$(sed -n 's/^reqs //p' "$STAMP")" ] || return 1
+    [ "$(native_install_key)" = "$(sed -n 's/^native //p' "$STAMP")" ] || return 1
     return 0
 }
 
@@ -519,16 +529,73 @@ install_ampere_marlin() {
     printf '%s %s\n' "$key" "$digest" >"$stamp"
 }
 
+# FlashInfer is restored after the editable install at the release lock's pins.
+flashinfer_requirements() {
+    local package pin
+    for package in flashinfer-python flashinfer-cubin; do
+        pin="$(awk -v p="$package" '$0 ~ "^" p "==" {print}' "$SCRIPT_DIR/docker/CONSTRAINTS")" \
+            || return 1
+        [[ "$pin" =~ ^$package==[0-9][A-Za-z0-9.+_-]*$ ]] \
+            || { warn "missing or ambiguous $package pin in docker/CONSTRAINTS"; return 1; }
+        printf '%s\n' "$pin"
+    done
+}
+
+native_install_key() {
+    local pins
+    pins="$(flashinfer_requirements)" || return 1
+    { printf '%s\n' native-install-v1 "$pins" "$BUILD_FROM_SOURCE" \
+        "${VLLM_PRECOMPILED_WHEEL_COMMIT:-$RELEASE_WHEEL_COMMIT}" \
+        "${TORCH_INDEX_URL:-}" "$CUDA_HOME"; git -C "$VLLM_SRC" rev-parse HEAD; reqs_hash; } \
+        | sha256sum | cut -d' ' -f1
+}
+
+install_step_done() {
+    [ "$NATIVE_INSTALL_RESUME" = 1 ] && [ "${FORCE_INSTALL:-0}" != 1 ] \
+        && [ "$(cat "$INSTALL_STEPS/$1" 2>/dev/null || true)" = "$2" ]
+}
+
+write_install_step() {
+    mkdir -p "$INSTALL_STEPS"
+    printf '%s\n' "$2" >"$INSTALL_STEPS/$1.tmp"
+    mv "$INSTALL_STEPS/$1.tmp" "$INSTALL_STEPS/$1"
+}
+
+install_flashinfer() {
+    local pins attempt
+    pins="$(flashinfer_requirements)" || die "cannot read FlashInfer pins from docker/CONSTRAINTS"
+    local packages=()
+    mapfile -t packages <<<"$pins"
+    command -v timeout >/dev/null 2>&1 || die "FlashInfer install needs the timeout command (coreutils)"
+    log "  FlashInfer: ${packages[*]} from https://flashinfer.ai/whl/"
+    for ((attempt=1; attempt<=FLASHINFER_INSTALL_ATTEMPTS; attempt++)); do
+        if timeout --kill-after=5s "${FLASHINFER_INSTALL_TIMEOUT}s" \
+            env UV_HTTP_TIMEOUT="$FLASHINFER_HTTP_TIMEOUT" UV_HTTP_RETRIES=0 \
+            uv pip install --no-deps --extra-index-url https://flashinfer.ai/whl/ "${packages[@]}"; then
+            return 0
+        fi
+        warn "FlashInfer install attempt $attempt/$FLASHINFER_INSTALL_ATTEMPTS failed (index https://flashinfer.ai/whl/)"
+        [ "$attempt" -eq "$FLASHINFER_INSTALL_ATTEMPTS" ] || sleep "$((attempt * 2))"
+    done
+    die "FlashInfer install failed from https://flashinfer.ai/whl/ after $FLASHINFER_INSTALL_ATTEMPTS attempts (HTTP timeout ${FLASHINFER_HTTP_TIMEOUT}s, attempt timeout ${FLASHINFER_INSTALL_TIMEOUT}s). Rerun ./start.sh install to resume completed steps."
+}
+
 do_install() {
     if [ "$RUNTIME" = container ]; then
         [ "$VLLM_BUILD_AMPERE_MARLIN" = 0 ] || die "VLLM_BUILD_AMPERE_MARLIN is native-only: set RUNTIME=native, or use docker/build.sh to build an image and unset this install flag."
         container_install; return
     fi
-    if install_done && [ "${FORCE_INSTALL:-0}" != "1" ]; then
+    if install_done && [ "${FORCE_INSTALL:-0}" != "1" ] && [ "${VENV_CLEAR:-0}" != "1" ]; then
         log "install: already at $(head -n1 "$STAMP" | cut -c1-10) — skipping (FORCE_INSTALL=1 to redo)"
         install_ampere_marlin
         return 0
     fi
+    case "$NATIVE_INSTALL_RESUME" in 0|1) ;; *) die "NATIVE_INSTALL_RESUME must be 0 or 1" ;; esac
+    local setting
+    for setting in FLASHINFER_INSTALL_ATTEMPTS FLASHINFER_HTTP_TIMEOUT FLASHINFER_INSTALL_TIMEOUT; do
+        [[ "${!setting}" =~ ^[1-9][0-9]*$ ]] || die "$setting must be a positive integer"
+    done
+    log "[native-install] resume=$NATIVE_INSTALL_RESUME (NATIVE_INSTALL_RESUME=0 to repeat pending steps)"
     log "install: venv + vLLM fork @ $VLLM_COMMIT"
     export PATH="$CUDA_HOME/bin:$PATH"
 
@@ -554,9 +621,9 @@ do_install() {
     git -C "$VLLM_SRC" submodule update --init --recursive --depth 1
     log "  HEAD: $(git -C "$VLLM_SRC" log --oneline -1)"
 
-    local reqs old_reqs
+    local reqs old_reqs key
     reqs="$(reqs_hash)"
-    old_reqs="$(sed -n 's/^reqs //p' "$STAMP" 2>/dev/null || true)"
+    old_reqs="$(cat "$VENV/.recipe-reqs" 2>/dev/null || sed -n 's/^reqs //p' "$STAMP" 2>/dev/null || true)"
     if [ -x "$VENV/bin/python" ] && [ "${VENV_CLEAR:-0}" != "1" ] && [ "$reqs" = "$old_reqs" ]; then
         log "  reusing venv at $VENV (VENV_CLEAR=1 to rebuild)"
     else
@@ -565,50 +632,86 @@ do_install() {
         fi
         uv venv --clear --python "$PYTHON_VERSION" "$VENV"
     fi
-    rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VLLM_SRC/vllm/_ampere_marlin_C.abi3.so" \
-        "$VLLM_SRC/vllm"/_ampere_marlin_C.cpython-*.so "$VENV/.ampere-marlin-stamp"
+    printf '%s\n' "$reqs" >"$VENV/.recipe-reqs.tmp"
+    mv "$VENV/.recipe-reqs.tmp" "$VENV/.recipe-reqs"
+    key="$(native_install_key)" || die "cannot fingerprint native install"
+    rm -f "$STAMP"
     export VIRTUAL_ENV="$VENV"
 
-    local pip_args=(--extra-index-url https://flashinfer.ai/whl/)
+    local pip_args=()
     [ -n "${TORCH_INDEX_URL:-}" ] && pip_args+=(--extra-index-url "$TORCH_INDEX_URL")
 
     # torch 2.13.0 from PyPI is the cu130 build on linux-x86_64 (torch.version.cuda
     # == '13.0'). Set TORCH_INDEX_URL if your platform resolves differently.
-    log "  torch 2.13.0 (cu130)"
-    uv pip install "${pip_args[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
-
-    # Keep the base engine precompiled; the optional sm_80 library is built
-    # separately below and does not replace upstream extensions.
-    if [ "$BUILD_FROM_SOURCE" = "1" ]; then
-        log "  vLLM (compiling extensions, MAX_JOBS=$MAX_JOBS)"
-        [ -d "$CUDA_HOME" ] || die "BUILD_FROM_SOURCE=1 needs a CUDA toolkit at $CUDA_HOME"
-        env -u VLLM_USE_PRECOMPILED \
-            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}" \
-            CMAKE_BUILD_PARALLEL_LEVEL="$MAX_JOBS" MAX_JOBS="$MAX_JOBS" NVCC_THREADS=2 \
-            VLLM_BUILD_AMPERE_MARLIN=0 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
-            uv pip install "${pip_args[@]}" --no-build-isolation -e "$VLLM_SRC"
+    if ! install_step_done torch "$key"; then
+        rm -f "$INSTALL_STEPS/torch" "$INSTALL_STEPS/fork" "$INSTALL_STEPS/extras" "$INSTALL_STEPS/flashinfer"
+        log "  torch 2.13.0 (cu130)"
+        uv pip install "${pip_args[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
+        write_install_step torch "$key"
     else
-        # The extensions come from upstream's nightly wheel for the fork's
-        # upstream base, found through `git merge-base`. When the base has no
-        # wheel of its own, the release names the wheel to use instead
-        # (RELEASE_WHEEL_COMMIT, above); VLLM_PRECOMPILED_WHEEL_COMMIT
-        # overrides it for any pin.
-        local wheel_commit="${VLLM_PRECOMPILED_WHEEL_COMMIT:-}"
-        if [ -z "$wheel_commit" ] && [ "$(git -C "$VLLM_SRC" rev-parse HEAD)" = \
-             "$(git -C "$VLLM_SRC" rev-parse --verify -q "$RELEASE_VLLM_COMMIT^{commit}" || true)" ]; then
-            wheel_commit="$RELEASE_WHEEL_COMMIT"
-        fi
-        log "  vLLM (upstream precompiled extensions${wheel_commit:+ from wheel ${wheel_commit:0:10}})"
-        env ${wheel_commit:+VLLM_PRECOMPILED_WHEEL_COMMIT="$wheel_commit"} \
-            VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
-            uv pip install "${pip_args[@]}" -e "$VLLM_SRC"
+        log "  torch: completed — skipping"
     fi
 
-    # The runtime extras at the versions the engine pins: FlashInfer and its
-    # cubins, TileLang and the rest of requirements/cuda.txt.
-    log "  runtime extras (the engine's requirements/cuda.txt)"
-    uv pip install "${pip_args[@]}" -r "$VLLM_SRC/requirements/cuda.txt" \
-        "ninja" "huggingface_hub[hf_xet]>=1.0"
+    if ! install_step_done fork "$key"; then
+        rm -f "$INSTALL_STEPS/fork" "$INSTALL_STEPS/extras" "$INSTALL_STEPS/flashinfer"
+        rm -f "$VLLM_SRC/vllm/_ampere_marlin_C.so" "$VLLM_SRC/vllm/_ampere_marlin_C.abi3.so" \
+            "$VLLM_SRC/vllm"/_ampere_marlin_C.cpython-*.so "$VENV/.ampere-marlin-stamp"
+        # Keep the base engine precompiled; the optional sm_80 library is built
+        # separately below and does not replace upstream extensions.
+        if [ "$BUILD_FROM_SOURCE" = "1" ]; then
+            log "  vLLM (compiling extensions, MAX_JOBS=$MAX_JOBS)"
+            [ -d "$CUDA_HOME" ] || die "BUILD_FROM_SOURCE=1 needs a CUDA toolkit at $CUDA_HOME"
+            env -u VLLM_USE_PRECOMPILED \
+                TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0}" \
+                CMAKE_BUILD_PARALLEL_LEVEL="$MAX_JOBS" MAX_JOBS="$MAX_JOBS" NVCC_THREADS=2 \
+                VLLM_BUILD_AMPERE_MARLIN=0 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
+                uv pip install "${pip_args[@]}" --no-build-isolation -e "$VLLM_SRC"
+        else
+            # The extensions come from upstream's nightly wheel for the fork's
+            # upstream base, found through `git merge-base`. When the base has no
+            # wheel of its own, the release names the wheel to use instead
+            # (RELEASE_WHEEL_COMMIT, above); VLLM_PRECOMPILED_WHEEL_COMMIT
+            # overrides it for any pin.
+            local wheel_commit="${VLLM_PRECOMPILED_WHEEL_COMMIT:-}"
+            if [ -z "$wheel_commit" ] && [ "$(git -C "$VLLM_SRC" rev-parse HEAD)" = \
+                 "$(git -C "$VLLM_SRC" rev-parse --verify -q "$RELEASE_VLLM_COMMIT^{commit}" || true)" ]; then
+                wheel_commit="$RELEASE_WHEEL_COMMIT"
+            fi
+            log "  vLLM (upstream precompiled extensions${wheel_commit:+ from wheel ${wheel_commit:0:10}})"
+            env ${wheel_commit:+VLLM_PRECOMPILED_WHEEL_COMMIT="$wheel_commit"} \
+                VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VIRTUAL_ENV="$VENV" CUDA_HOME="$CUDA_HOME" \
+                uv pip install "${pip_args[@]}" -e "$VLLM_SRC"
+        fi
+
+        write_install_step fork "$key"
+    else
+        log "  vLLM editable install: completed — skipping"
+    fi
+
+    if ! install_step_done extras "$key"; then
+        rm -f "$INSTALL_STEPS/extras" "$INSTALL_STEPS/flashinfer"
+        # Preserve relative includes while separating FlashInfer and its index.
+        local runtime_reqs="$VENV/.recipe-runtime-requirements"
+        mkdir -p "$runtime_reqs"
+        cp -a "$VLLM_SRC/requirements/." "$runtime_reqs/"
+        awk '!/^[[:space:]]*flashinfer-(python|cubin)([[:space:]=<>!~;]|$)/ &&
+             !/^[[:space:]]*--extra-index-url[[:space:]]+https:\/\/flashinfer\.ai\/whl\/?([[:space:]]|$)/' \
+            "$VLLM_SRC/requirements/cuda.txt" >"$runtime_reqs/cuda.txt"
+        log "  runtime extras (requirements/cuda.txt, FlashInfer installed separately)"
+        uv pip install "${pip_args[@]}" -r "$runtime_reqs/cuda.txt" \
+            "ninja" "huggingface_hub[hf_xet]>=1.0"
+        write_install_step extras "$key"
+    else
+        log "  runtime extras: completed — skipping"
+    fi
+
+    if ! install_step_done flashinfer "$key"; then
+        rm -f "$INSTALL_STEPS/flashinfer"
+        install_flashinfer
+        write_install_step flashinfer "$key"
+    else
+        log "  FlashInfer: completed — skipping"
+    fi
 
     log "  verifying"
     "$VENV/bin/python" - <<'PY'
@@ -628,7 +731,8 @@ from vllm.v1.worker.gpu import prologue_fuse                            # noqa: 
 from vllm.distributed.device_communicators import host_shm_all_reduce   # noqa: F401
 print("    sm_80 patch modules ok")
 PY
-    { git -C "$VLLM_SRC" rev-parse HEAD; echo "reqs $reqs"; } >"$STAMP"
+    { git -C "$VLLM_SRC" rev-parse HEAD; echo "reqs $reqs"; echo "native $key"; } >"$STAMP.tmp"
+    mv "$STAMP.tmp" "$STAMP"
     install_ampere_marlin
     log "install: done"
 }
