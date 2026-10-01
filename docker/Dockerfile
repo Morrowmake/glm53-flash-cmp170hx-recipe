@@ -74,7 +74,7 @@ RUN VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COM
     VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 \
     uv pip install --no-deps -e /opt/vllm-src \
  && uv pip freeze > /opt/venv/requirements.lock.txt
-COPY runtime_tree.py payload.py cache_seed.py /tmp/
+COPY runtime_tree.py payload.py cache_seed.py rootfs_smoke.py /tmp/
 RUN test -f /opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py \
     || (echo "Set VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT to a source with optional Marlin support" >&2; exit 1)
 RUN cd /opt/vllm-src && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
@@ -90,7 +90,7 @@ RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "import torch, vllm, vllm._C_s
 
 RUN /opt/venv/bin/python /tmp/payload.py /opt /payload /tmp/CONSTRAINTS \
  && mkdir -p /payload/engine/opt/image-tools \
- && cp /tmp/cache_seed.py /payload/engine/opt/image-tools/
+ && cp /tmp/cache_seed.py /tmp/rootfs_smoke.py /payload/engine/opt/image-tools/
 
 FROM ${BASE} AS runtime-1
 COPY --from=build /payload/python/ /

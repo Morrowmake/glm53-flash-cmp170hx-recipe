@@ -247,3 +247,50 @@ def test_review_cannot_allow_credential_candidates(monkeypatch):
     monkeypatch.setenv("IMAGE_REVIEWED_BYTE_MATCHES", json.dumps({digest: [0]}))
     with pytest.raises(ValueError, match="Credential candidate"):
         scan_stream(io.BytesIO(value), [b"ghp_"], "fixture", credential_patterns=TOKEN_PATTERNS)
+
+
+def test_rootfs_driver_discovery_mounts(tmp_path):
+    from rootfs_smoke import DRIVER_DIR, driver_options
+    library = tmp_path / "libcuda.so.999"
+    library.write_bytes(b"fixture")
+    (tmp_path / "libcuda.so.1").symlink_to(library.name)
+    options = driver_options([tmp_path])
+    mount = options.index(DRIVER_DIR + "/libcuda.so.1")
+    assert options[mount - 2:mount] == ["--ro-bind", str(library)]
+    assert options[:4] == ["--tmpfs", "/usr/local/nvidia", "--dir", DRIVER_DIR]
+
+
+def test_rootfs_driver_missing_fails(tmp_path):
+    from rootfs_smoke import driver_options
+    with pytest.raises(ValueError, match="Host libcuda.so.1"):
+        driver_options([tmp_path])
+
+
+def test_built_rootfs_inspection(tmp_path):
+    """Opt-in real-image regression: CUDA remains hidden and /dev is isolated."""
+    import os
+    import subprocess
+    required = ("TEST_IMAGE_ROOTFS", "TEST_IMAGE_CONFIG", "TEST_TARGET_MODEL", "TEST_DRAFT_MODEL")
+    if not all(os.environ.get(name) for name in required):
+        pytest.skip("Set built-rootfs and checkpoint paths for image inspection")
+    result = tmp_path / "inspection"
+    command = [sys.executable, str(ROOT / "rootfs_smoke.py")]
+    for flag, name in zip(("rootfs", "config", "model", "draft"), required):
+        command += ["--" + flag, os.environ[name]]
+    command += ["--result", str(result)]
+    run = subprocess.run(command, env=dict(os.environ, CUDA_VISIBLE_DEVICES="", IMAGE_ROOTFS_CPU_SMOKE="1"),
+                         capture_output=True, text=True, timeout=500)
+    assert run.returncode == 0, run.stdout + run.stderr
+    record = json.loads((result / "summary.json").read_text())
+    assert record["passed"] and "target_registry" in record["checks"]
+    assert "draft_registry" in record["checks"] and "model_config" in record["checks"]
+    assert "engine_config_boundary" in record["checks"]
+
+
+@pytest.mark.parametrize("library_path", ["", "/usr/local/cuda/lib64"])
+def test_rootfs_rejects_cleared_driver_search_path(tmp_path, library_path):
+    from rootfs_smoke import image_environment
+    config = tmp_path / "config.json"
+    config.write_text(json.dumps({"config": {"Env": ["LD_LIBRARY_PATH=" + library_path]}}))
+    with pytest.raises(ValueError, match="OCI LD_LIBRARY_PATH"):
+        image_environment(config)

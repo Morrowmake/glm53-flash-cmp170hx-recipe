@@ -164,7 +164,7 @@ layer() {
     [ ! -e "$OUT/payload" ] || { echo "Choose a new OUT (payload already exists)" >&2; exit 1; }
     python3 "$HERE/payload.py" "$STAGE/opt" "$OUT/payload" "$CONSTRAINTS"
     mkdir -p "$OUT/payload/engine/opt/image-tools"
-    cp "$HERE/cache_seed.py" "$OUT/payload/engine/opt/image-tools/"
+    cp "$HERE/cache_seed.py" "$HERE/rootfs_smoke.py" "$OUT/payload/engine/opt/image-tools/"
     if [ -n "${IMAGE_CACHE_SEED_DIR:-}" ]; then
         python3 "$HERE/cache_seed.py" check "$IMAGE_CACHE_SEED_DIR" "$VLLM_COMMIT" "$STAGE/opt/venv/requirements.lock.txt"
         mkdir -p "$OUT/payload/cache-seed/opt/cache-seed"

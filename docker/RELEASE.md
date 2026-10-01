@@ -126,3 +126,27 @@ A failed or interrupted upload can leave blobs; retain the OCI and rerun the
 same approved digest. An acceptance JSON is a review record, not a substitute
 for the tests. Verify anonymous digest access before changing the recipe image
 pin, then run the public fresh/update checks and token revocation procedure.
+
+
+Before GPU acceptance, extract the built OCI and run the CPU inspection gate:
+
+```bash
+CUDA_VISIBLE_DEVICES="" python3 docker/rootfs_smoke.py \
+  --rootfs /path/to/extracted-rootfs --config /path/to/build/config.json \
+  --model /path/to/target-checkpoint --draft /path/to/draft-checkpoint \
+  --result /path/to/new-cpu-results
+```
+
+This uses the image's `/opt/venv/bin/python`, captures the registry subprocess
+stderr for both checkpoints, imports the serve CLI and validates its model
+configuration. It stops at the unavailable-device boundary without starting an
+engine or server. Bubblewrap creates a private `/dev` with no GPU nodes. Host
+driver libraries are mounted read-only at `/usr/local/nvidia/lib64`, matching
+the OCI `LD_LIBRARY_PATH`; no CUDA initialization is needed for the driver
+search/load checks. `IMAGE_ROOTFS_CPU_SMOKE=0` disables this diagnostic (default
+1), with a banner. Run the image regression in `docker/tests` by setting
+`TEST_IMAGE_ROOTFS`, `TEST_IMAGE_CONFIG`, `TEST_TARGET_MODEL`, `TEST_DRAFT_MODEL`.
+For extracted-rootfs GPU legs, retain the OCI library search path and use
+`rootfs_smoke.py --driver-options` for the same driver mounts. A cleared
+environment with only host-library binds does not reproduce NVIDIA container
+runtime setup and can fail Triton's library discovery before inspection.
