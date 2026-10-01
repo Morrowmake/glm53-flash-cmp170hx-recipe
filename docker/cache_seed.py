@@ -14,7 +14,8 @@ import sys
 import tarfile
 import tempfile
 
-ROOTS = (".triton/cache", ".cache/flashinfer", ".cache/vllm", ".tilelang/cache", "torchinductor")
+ROOTS = (".triton/cache", ".cache/flashinfer", ".cache/vllm", ".tilelang/cache", "torchinductor",
+         ".cache/torch_extensions", ".nv/ComputeCache")
 
 def sha(path):
     h = hashlib.sha256()

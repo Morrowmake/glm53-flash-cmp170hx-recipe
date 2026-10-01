@@ -53,7 +53,8 @@ Use the identity command's exported paths before launching, then stop only
 that owned server before packing. Warm both TP4 and PP4 with the release
 launcher and smoke requests; only compilation caches are included, never
 weights, downloaded credentials or logs. Seeds include Triton, FlashInfer,
-TileLang, TorchInductor and vLLM compilation caches. Record health, smoke,
+TileLang, TorchInductor, torch C++ extensions, CUDA driver and vLLM
+compilation caches. Record health, smoke,
 versions, KV, startup banners and cold/seeded startup durations. Require both
 layouts to pass smoke and seeded startup to improve by at least 20 percent.
 Final publication still requires acceptance of the exact seeded image digest.

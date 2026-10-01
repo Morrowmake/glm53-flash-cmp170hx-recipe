@@ -210,3 +210,8 @@ def test_audit_collects_integrity_failure(tmp_path):
     desc = dict(digest="sha256:"+name, size=11)
     result = checked_layer((root, desc, "sha256:"+name, [], []))
     assert result["passed"] is False and "descriptor mismatch" in result["reason"]
+
+
+@pytest.mark.parametrize("name", [".cache/torch_extensions/kernel/module.so", ".nv/ComputeCache/kernel"])
+def test_cpp_and_driver_caches(name):
+    assert cache.allowed(name)
