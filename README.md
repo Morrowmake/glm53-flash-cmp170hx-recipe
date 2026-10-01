@@ -58,22 +58,27 @@ image, so the engine and its Python environment stay out of your system.
 
 ## Headline numbers
 
-Release 1.6.0, native, DFlash2 (adaptive depth: up to 7 drafts at one request,
-up to 5 at two, 3 under load), 262,144-token context, peer-to-peer off (the
-default), 180 W per card, PCIe x16 links.
+Tokens per second, release 1.6.0, 262,144-token context, 180 W per card, PCIe x16 links.
 
-| | Tensor-parallel 4 (default) | Pipeline-parallel 4 (`LAYOUT=pp4`) |
-|---|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **394.0 / 377.4 / 180.5 tok/s** | **235.3 / 207.9 / 100.2 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **797.9 / 683.2 / 544.7 tok/s** | **623.1 / 591.0 / 465.8 tok/s** |
-| Cold prefill | **2,669 tok/s** | **6,580 tok/s** |
-| KV pool at 262,144 context | 1,072,150 tokens | 1,914,216 tokens |
-| HumanEval pass@1 / GSM8K (1.6.0 decode kernels, depth ≤ 5; [details](docs/results.md#release-160-faster-decode-for-one-or-two-users)) | 160/164 / 97.04% | 162/164 / 97.04% |
+| | Tensor-parallel 4<br>(default) | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional) | Pipeline-parallel 4<br>(`LAYOUT=pp4`) |
+|---|---:|---:|---:|
+| **1 user** · structured | **394** | **437** | **235** |
+| **1 user** · code | **377** | **404** | **208** |
+| **1 user** · prose | **181** | **199** | **100** |
+| **8 users, total** · structured | 798 | 841 | 623 |
+| **8 users, total** · code | 683 | 769 | 591 |
+| **8 users, total** · prose | 545 | 590 | 466 |
+| **Prompt reading** (cold prefill) | 2,669 | 3,061 | 6,580 |
+| **KV pool** (tokens) | 1.07 M | 1.07 M | 1.91 M |
 
-With the optional [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional)
-path, tensor-parallel 4 measured 437.4 tok/s for one user, 840.7 across eight
-and 3,061 tok/s cold prefill. Method, the per-user decode table, the prefill
-ladder up to ~250k tokens and quality detail: [Results](docs/results.md).
+One user is streaming speed per request; eight users is the combined rate of
+eight simultaneous requests. Structured output and code are drafted well, so
+they decode fastest; prose least. DFlash2 drafts up to 7 tokens ahead for one
+user and 3 under load. Quality: HumanEval pass@1 160/164 (tensor-parallel) and
+162/164 (pipeline-parallel), GSM8K 97.04 % in both, measured on the 1.6.0 decode
+kernels with draft depth ≤ 5 ([details](docs/results.md#release-160-faster-decode-for-one-or-two-users)).
+Method, exact figures, the per-user decode table and the prefill ladder up to
+~250k tokens: [Results](docs/results.md).
 
 ## Quick start
 
