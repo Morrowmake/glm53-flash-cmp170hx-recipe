@@ -45,17 +45,10 @@ def version(root):
 
 
 
-def scan_stream(stream, needles, label, depth=0):
+def scan_stream(stream, needles, label, depth=0, credential_patterns=()):
     """Scan bytes and standard nested archives, without extracting to the tree."""
     if depth > 12:
         raise ValueError("Archive nesting limit exceeded")
-    overlap = max(map(len, needles), default=1) - 1
-    previous = b""
-    for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-        data = previous + chunk.lower()
-        if any(n in data for n in needles):
-            raise ValueError("Forbidden identifier in runtime file: " + label)
-        previous = data[-overlap:] if overlap else b""
     stream.seek(0)
     header = stream.read(512)
     stream.seek(0)
@@ -70,7 +63,7 @@ def scan_stream(stream, needles, label, depth=0):
         with compressed, tempfile.TemporaryFile() as expanded:
             shutil.copyfileobj(compressed, expanded, 4 * 1024 * 1024)
             expanded.seek(0)
-            scan_stream(expanded, needles, label + "!compressed", depth + 1)
+            scan_stream(expanded, needles, label + "!compressed", depth + 1, credential_patterns)
     elif header.startswith(b"PK\x03\x04"):
         with zipfile.ZipFile(stream) as archive:
             check_stores(m.filename for m in archive.infolist())
@@ -80,7 +73,7 @@ def scan_stream(stream, needles, label, depth=0):
                     with archive.open(member) as source, tempfile.TemporaryFile() as expanded:
                         shutil.copyfileobj(source, expanded, 4 * 1024 * 1024)
                         expanded.seek(0)
-                        scan_stream(expanded, needles, label + "!" + member.filename, depth + 1)
+                        scan_stream(expanded, needles, label + "!" + member.filename, depth + 1, credential_patterns)
     elif header[257:262] == b"ustar":
         with tarfile.open(fileobj=stream, mode="r:") as archive:
             members = set()
@@ -92,8 +85,16 @@ def scan_stream(stream, needles, label, depth=0):
                     with archive.extractfile(member) as source, tempfile.TemporaryFile() as expanded:
                         shutil.copyfileobj(source, expanded, 4 * 1024 * 1024)
                         expanded.seek(0)
-                        scan_stream(expanded, needles, label + "!" + member.name, depth + 1)
+                        scan_stream(expanded, needles, label + "!" + member.name, depth + 1, credential_patterns)
             check_stores(members)
+    else:
+        overlap = max(max(map(len, needles), default=1) - 1, 256 if credential_patterns else 0)
+        previous = b""
+        for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+            data = previous + chunk.lower()
+            if any(n in data for n in needles) or any(p.search(data) for p in credential_patterns):
+                raise ValueError("Forbidden identifier in runtime file: " + label)
+            previous = data[-overlap:] if overlap else b""
 
 
 def check_stores(names):

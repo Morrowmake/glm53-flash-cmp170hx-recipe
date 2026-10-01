@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Fork branch default is `ampere`; the engine remains pinned by full commit.
+  Delete an explicit `VLLM_BRANCH=ampere-glm53` line to follow the new default.
+- Rootless images split Python, locked 1.6.0 dependencies, native libraries and
+  editable engine source into separate deterministic layers. Parallel compression
+  defaults on (`IMAGE_PARALLEL_COMPRESSION=0` disables it);
+  `IMAGE_LAYERED=0` restores one application layer.
+- Optional device-specific compilation-cache seeds (`VLLM_IMAGE_CACHE_SEED=0`
+  by default pending real-image acceptance; `1` enables them). Seeds reject
+  mismatched commits, GPU architecture, dependencies and CUDA driver.
+- Direct image publication uses a release-only stdin token with temporary auth
+  storage and requires matching GPU acceptance and artifact-audit evidence.
+
 ## 1.6.0 — 2026-10-01
 
 **Update:** `./start.sh update`. Explicit `.env` values and engine/image

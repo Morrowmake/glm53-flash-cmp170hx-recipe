@@ -148,7 +148,7 @@ load_env_defaults "$SCRIPT_DIR/.env"
 VENV="${VENV:-$SCRIPT_DIR/venv}"
 VLLM_SRC="${VLLM_SRC:-$SCRIPT_DIR/vllm-src}"
 VLLM_REPO="${VLLM_REPO:-https://github.com/Morrowmake/vllm-cmp170hx.git}"
-VLLM_BRANCH="${VLLM_BRANCH:-ampere-glm53}"
+VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
 # This release's engine: the fork commit, the upstream nightly wheel whose
 # compiled extensions match that commit's upstream base (e55d076f89 has no
 # wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
@@ -765,6 +765,7 @@ container_env() {
     echo "HF_HOME=/cache/huggingface"
     echo "FLASHINFER_WORKSPACE_BASE=/cache"
     echo "TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor"
+    echo "VLLM_IMAGE_CACHE_SEED=${VLLM_IMAGE_CACHE_SEED:-0}"
     for k in $CONTAINER_KEYS; do
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
     done

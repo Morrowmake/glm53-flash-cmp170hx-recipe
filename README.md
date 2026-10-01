@@ -24,7 +24,7 @@ This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
 cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
 video, and a **DFlash2** speculative drafter. Upstream vLLM's sparse-attention
 path needs a Hopper GPU; the CMP 170HX is Ampere (sm_80). Our
-[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53) adds
+[vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere) adds
 the Ampere kernels that make the model run at all, then spends the rest of its
 patches on making it fast and making it repeatable. It ships as a container
 image, so the engine and its Python environment stay out of your system.
@@ -175,4 +175,4 @@ their sparkDash prompt constants (MIT), used as data with attribution. No code f
 ## Source
 
 The patches are ours; the fork branch is the code —
-[Morrowmake/vllm-cmp170hx @ `ampere-glm53`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere-glm53).
+[Morrowmake/vllm-cmp170hx @ `ampere`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere).

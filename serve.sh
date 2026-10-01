@@ -130,6 +130,18 @@ case "$MODE" in
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
+# Cache seeds are opt-in until the image's cold/warm acceptance passes.
+if [ "${VLLM_IMAGE_CACHE_SEED:-0}" = 1 ] && [ "${DRY:-0}" = 1 ]; then
+    echo "[image-cache] enabled (dry run)"
+elif [ "${VLLM_IMAGE_CACHE_SEED:-0}" = 1 ]; then
+    [ -f /opt/image-tools/cache_seed.py ] || { echo "[image-cache] enabled but image helper missing" >&2; exit 1; }
+    cache_exports="$(/opt/venv/bin/python /opt/image-tools/cache_seed.py seed /opt/cache-seed)"
+    eval "$cache_exports"
+    unset cache_exports
+else
+    echo "[image-cache] disabled"
+fi
+
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="${VENV:-$REPO_ROOT/venv}"

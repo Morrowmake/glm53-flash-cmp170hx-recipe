@@ -78,7 +78,7 @@ a source reachable inside the build.
 The revision label identifies the supplied source. Both builders compile one
 sm_80 library without GPUs and check operator registrations. Image configuration
 leaves `VLLM_GLM5_MARLIN_DECODE_CUDA` and `VLLM_GLM5_MARLIN_PREFILL_CUDA` unset.
-With the mounted `serve.sh`, TP4 decode defaults off, PP4 decode defaults on when
+With the mounted `serve.sh`, TP4 and PP4 decode default on when
 installed, and compiled prefill defaults off. Explicit 0/1 values override each
 switch independently. The bare `vllm` entry point retains engine-code defaults;
 the recipe's layout defaults require its launcher. Missing libraries default
@@ -96,10 +96,13 @@ The build needs no GPU. It clones the fork at the pinned commit and downloads
 torch, the precompiled extensions and the runtime extras, so it takes a while
 and needs network access.
 
-The pinned release artifact uses the rootless application-layer assembly
-approach in [`build.sh`](build.sh): prepare the runtime tree on the host without
-a Docker daemon and append it to the pinned base with
-[crane](https://github.com/google/go-containerregistry). Rebuilding with either
+The pinned release artifact used the rootless application-layer assembly
+approach in [`build.sh`](build.sh). The current builder prepares the runtime
+tree on the host, creates separate deterministic layers and writes an OCI
+layout without a Docker daemon. [crane](https://github.com/google/go-containerregistry)
+fetches the pinned base and publishes the retained OCI without recompression.
+See [release procedure](RELEASE.md) for the dependency lock, compression
+switches, cache-seed gates and publication. Rebuilding with either
 builder produces a separate artifact; it does not reproduce or revalidate the
 frozen digest automatically. Validate the resulting provenance, layers and
 runtime before distributing any rebuilt image.
@@ -160,7 +163,8 @@ The server runs as you (`--user`), not root: Triton, FlashInfer, TileLang,
 torch and vLLM write their compile caches under the cache mount (`HOME=/cache`
 and the cache paths in `container.env`), so `./cache` stays yours. The first
 start compiles kernels there and takes several minutes; later starts reuse
-them. Stop it with `docker stop -t 120 glm53-flash`
+them. Optional device-specific seeds are described in the
+[release procedure](RELEASE.md); `VLLM_IMAGE_CACHE_SEED=0` disables them. Stop it with `docker stop -t 120 glm53-flash`
 and wait until `nvidia-smi` shows the cards empty before starting again. The
 API is the same as always ([Talk to it](../docs/how-to-use.md#talk-to-it)).
 

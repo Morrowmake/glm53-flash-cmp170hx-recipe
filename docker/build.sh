@@ -1,26 +1,13 @@
 #!/usr/bin/env bash
-# Assemble the image the Dockerfile in this directory describes, without a
-# container runtime. This is how the release image was built. The /opt tree
-# (Python, venv, engine source) is built on the host under a staging path,
-# rewritten to /opt, packed as one layer and appended to the pinned CUDA base
-# with crane, in a throwaway registry on 127.0.0.1. The result is saved as an
-# OCI layout in out/, from which `crane push` publishes the same manifest
-# (same digest).
-#
-# Needs: x86_64 Linux, uv, git, curl, python3, GNU tar, crane
-# (github.com/google/go-containerregistry), and a CUDA 13.x toolkit at
-# CUDA_HOME (default /usr/local/cuda-13.3).
-# Nothing here touches a GPU: the import check runs with CUDA_VISIBLE_DEVICES
-# empty.
-#
-#   ./build.sh                  full build
-#   STEP=assemble ./build.sh    re-run only the layer + image assembly
-#
-# VLLM_COMMIT (full 40-character hash) overrides the pin. CLONE_FROM and
-# CLONE_BRANCH take the engine source from another clone of the fork (for
-# example before the release commit is pushed); only that branch's history is
-# copied, and the image's origin still names the public fork.
+# Build an OCI image without a container runtime or GPU. Stable Python,
+# dependency and native-library layers precede the editable engine layer.
+# Needs Linux x86_64, uv, GNU tar, pigz, crane and a CUDA 13.x toolkit.
+# STEP=assemble reuses a finalized, audited STAGE. Choose a new OUT each time.
+# BASE_OCI permits assembly from a retained local base without registry access.
+# IMAGE_LAYERED=0 keeps one runtime layer; IMAGE_PARALLEL_COMPRESSION=0 uses gzip.
+# IMAGE_CACHE_SEED_DIR optionally supplies a GPU-generated, matching cache bundle.
 set -euo pipefail
+umask 022
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRANE="${CRANE:-crane}"
 UV="${UV:-uv}"
@@ -29,18 +16,20 @@ STAGE="${STAGE:-/var/tmp/cmp170hx-image/stage}"
 OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
-VLLM_BRANCH="ampere-glm53"
+VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
 VLLM_COMMIT="${VLLM_COMMIT:-3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340}"
 # Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
 # wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
 VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"
-RELEASE="1.6.0"
+RELEASE="${RELEASE:-1.6.0}"
 # Upstream release tag the pin's base descends from (sets the version string).
 VERSION_TAG="v0.30.1rc0"
 UPSTREAM_REPO="https://github.com/vllm-project/vllm.git"
 PYTHON_VERSION="3.12"
-REG="${REG:-127.0.0.1:5055}"
-NAME="vllm-cmp170hx"
+PYTHON_INSTALL_VERSION="3.12.14"
+CONSTRAINTS="${CONSTRAINTS:-$HERE/CONSTRAINTS}"
+export UV_CONSTRAINT="$CONSTRAINTS" CUDA_VISIBLE_DEVICES=""
+log_features() { printf "[image] layered=%s parallel_compression=%s cache_seed=%s\n" "${IMAGE_LAYERED:-1}" "${IMAGE_PARALLEL_COMPRESSION:-1}" "$([ -n "${IMAGE_CACHE_SEED_DIR:-}" ] && echo included || echo disabled)"; }
 TAG="$RELEASE-${VLLM_COMMIT:0:10}"
 PIP=(--extra-index-url https://flashinfer.ai/whl/)
 export UV_LINK_MODE=copy PYTHONDONTWRITEBYTECODE=1 UV_NO_CONFIG=1
@@ -84,25 +73,27 @@ clone_source() {
 build_tree() {
     rm -rf "$STAGE"; mkdir -p "$STAGE/opt"
     log "python $PYTHON_VERSION"
-    UV_PYTHON_INSTALL_DIR="$STAGE/python-dl" "$UV" python install "$PYTHON_VERSION"
+    UV_PYTHON_INSTALL_DIR="$STAGE/python-dl" "$UV" python install "$PYTHON_INSTALL_VERSION"
     mv "$STAGE"/python-dl/cpython-${PYTHON_VERSION}.*-linux-x86_64-gnu "$STAGE/opt/python"
     rm -rf "$STAGE/python-dl"
     "$UV" venv --relocatable --python "$STAGE/opt/python/bin/python$PYTHON_VERSION" "$STAGE/opt/venv"
     clone_source
 
     export VIRTUAL_ENV="$STAGE/opt/venv"
-    log "torch"
-    "$UV" pip install "${PIP[@]}" "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0"
+    log "locked 1.6.0 dependencies"
+    "$UV" pip install "${PIP[@]}" -r "$CONSTRAINTS"
     log "vllm (upstream precompiled extensions)"
     VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COMMIT="$VLLM_WHEEL_COMMIT" \
         VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 CUDA_HOME="$BUILD_CUDA_HOME" \
-        "$UV" pip install "${PIP[@]}" -e "$STAGE/opt/vllm-src"
-    log "runtime extras (requirements/cuda.txt: flashinfer 0.7.0, humming-kernels 0.1.16, ...)"
-    "$UV" pip install "${PIP[@]}" -r "$STAGE/opt/vllm-src/requirements/cuda.txt" \
-        "torch==2.13.0" "torchvision==0.28.0" "torchaudio==2.11.0" \
-        "flashinfer-python==0.7.0" "flashinfer-cubin==0.7.0" \
-        "tilelang==0.1.12" "apache-tvm-ffi==0.1.11" "ninja" "huggingface_hub[hf_xet]>=1.0"
+        "$UV" pip install --no-deps -e "$STAGE/opt/vllm-src"
     "$UV" pip freeze > "$STAGE/opt/venv/requirements.lock.txt"
+    python3 - "$STAGE/opt" "$CONSTRAINTS" "$HERE" <<'LOCK'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[3])
+from payload import check_lock
+check_lock(Path(sys.argv[1]), Path(sys.argv[2]))
+LOCK
 
     log "optional Marlin (sm_80, both layouts; no GPU)"
     local builder="$STAGE/opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py"
@@ -168,59 +159,29 @@ layer() {
     local expected actual
     expected="$(cat "$STAGE/opt/venv/.ampere-marlin-image-stamp")"
     actual="$(printf '%s\n' "$VLLM_COMMIT"; sha256sum "$STAGE/opt/vllm-src/vllm/_ampere_marlin_C.abi3.so" | cut -d' ' -f1)"
-    [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch; run a full build for this source pin" >&2; exit 1; }
-    python3 "$HERE/runtime_tree.py" check "$STAGE/opt" "$VLLM_COMMIT"         --forbid "$HOME/" --forbid "$STAGE/"
-    log "layer"
-    tar --sort=name --owner=0 --group=0 --numeric-owner \
-        --mtime='2026-09-26 00:00:00Z' --format=posix \
-        --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
-        -C "$STAGE" -cf "$OUT/layer.tar" opt
-    ls -l "$OUT/layer.tar"
+    [ "$actual" = "$expected" ] || { echo "Optional Marlin image stamp mismatch" >&2; exit 1; }
+    python3 "$HERE/runtime_tree.py" check "$STAGE/opt" "$VLLM_COMMIT" --forbid "$HOME/" --forbid "$STAGE/"
+    [ ! -e "$OUT/payload" ] || { echo "Choose a new OUT (payload already exists)" >&2; exit 1; }
+    python3 "$HERE/payload.py" "$STAGE/opt" "$OUT/payload" "$CONSTRAINTS"
+    mkdir -p "$OUT/payload/engine/opt/image-tools"
+    cp "$HERE/cache_seed.py" "$OUT/payload/engine/opt/image-tools/"
+    if [ -n "${IMAGE_CACHE_SEED_DIR:-}" ]; then
+        python3 "$HERE/cache_seed.py" check "$IMAGE_CACHE_SEED_DIR" "$VLLM_COMMIT" "$STAGE/opt/venv/requirements.lock.txt"
+        mkdir -p "$OUT/payload/cache-seed/opt/cache-seed"
+        cp -a "$IMAGE_CACHE_SEED_DIR/." "$OUT/payload/cache-seed/opt/cache-seed/"
+    fi
 }
 
 assemble() {
-    log "assemble in a registry at $REG"
-    mkdir -p "$OUT/registry-data"
-    "$CRANE" registry serve --address "$REG" --disk "$OUT/registry-data" >"$OUT/registry.log" 2>&1 &
-    REG_PID=$!
-    trap 'kill "${REG_PID:-}" 2>/dev/null || true' EXIT
-    for _ in $(seq 50); do curl -fsS "http://$REG/v2/" >/dev/null 2>&1 && break; sleep 0.2; done
-    "$CRANE" copy --platform linux/amd64 "$BASE" "$REG/nvidia-cuda:13.3.1-devel-ubuntu24.04"
-    "$CRANE" append -b "$REG/nvidia-cuda:13.3.1-devel-ubuntu24.04" -f "$OUT/layer.tar" -t "$REG/$NAME:layered"
-    "$CRANE" mutate "$REG/$NAME:layered" -t "$REG/$NAME:$TAG" \
-        --entrypoint /opt/venv/bin/vllm \
-        --exposed-ports 8000/tcp \
-        -e PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
-        -e VIRTUAL_ENV=/opt/venv \
-        -e CUDA_HOME=/usr/local/cuda \
-        -e 'NVIDIA_REQUIRE_CUDA=cuda>=13.0' \
-        -l org.opencontainers.image.title=vllm-cmp170hx \
-        -l "org.opencontainers.image.description=vLLM fork for GLM-5.3-Flash W4A16 on 4x NVIDIA CMP 170HX (sm_80) with optional sm_80 Marlin ($RELEASE); weights not included" \
-        -l org.opencontainers.image.source=https://github.com/Morrowmake/vllm-cmp170hx \
-        -l org.opencontainers.image.revision=$VLLM_COMMIT \
-        -l org.opencontainers.image.url=https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe \
-        -l org.opencontainers.image.version=$TAG \
-        -l org.opencontainers.image.licenses=Apache-2.0 \
-        -l org.opencontainers.image.base.name=docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04 \
-        -l org.opencontainers.image.base.digest=sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
-    local digest; digest="$("$CRANE" digest "$REG/$NAME:$TAG")"
-    rm -rf "$OUT/oci"
-    "$CRANE" pull --format oci "$REG/$NAME@$digest" "$OUT/oci"
-    "$CRANE" manifest "$REG/$NAME@$digest" > "$OUT/manifest.json"
-    "$CRANE" config "$REG/$NAME@$digest" > "$OUT/config.json"
-    # the saved layout must push back to the same digest
-    "$CRANE" push "$OUT/oci" "$REG/$NAME-roundtrip:check" >/dev/null
-    local rt; rt="$("$CRANE" digest "$REG/$NAME-roundtrip:check")"
-    [ "$rt" = "$digest" ] || { echo "round trip digest $rt != $digest" >&2; exit 1; }
-    python3 - "$OUT/manifest.json" <<'PY' | tee "$OUT/size.txt"
-import json, sys
-m = json.load(open(sys.argv[1]))
-total = sum(l["size"] for l in m["layers"]) + m["config"]["size"]
-print(f"compressed size {total} bytes ({total/1e9:.2f} GB), {len(m['layers'])} layers, top layer {m['layers'][-1]['size']/1e9:.2f} GB")
-PY
-    echo "$digest" > "$OUT/digest.txt"
-    log "image ghcr.io/morrowmake/$NAME:$TAG  digest $digest (not pushed)"
+    local base_oci="${BASE_OCI:-$OUT/base-oci}"
+    if [ -z "${BASE_OCI:-}" ]; then
+        "$CRANE" pull --platform linux/amd64 --format oci "$BASE" "$base_oci"
+    fi
+    python3 "$HERE/oci_layers.py" "$base_oci" "$OUT/payload" "$OUT/oci" "$VLLM_COMMIT" "$TAG"
+    log "local OCI complete (not pushed)"
 }
+
+log_features
 
 case "${STEP:-all}" in
     all) build_tree; relocate; finalize_tree; layer; assemble ;;
