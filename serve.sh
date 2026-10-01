@@ -575,6 +575,21 @@ elif [ "$MODE" = "dflash" ]; then
   SPEC=(--speculative-config "{\"method\":\"dflash\",\"model\":\"$DFLASH_MODEL\",\"num_speculative_tokens\":${SPEC_N:-3}}")
 fi
 
+# Empty keeps the model's template default. Explicit CLI defaults win.
+REASONING_ARGS=()
+if [ -z "${DEFAULT_REASONING_EFFORT:-}" ]; then
+  echo "serve.sh: [reasoning-effort] template default"
+elif [[ "${EXTRA_ARGS:-}" == *--default-chat-template-kwargs* ]]; then
+  echo "serve.sh: [reasoning-effort] explicit EXTRA_ARGS defaults"
+else
+  case "$DEFAULT_REASONING_EFFORT" in
+    low|high|max) ;;
+    *) echo "[reasoning-effort] DEFAULT_REASONING_EFFORT must be empty, low, high or max" >&2; exit 2 ;;
+  esac
+  REASONING_ARGS=(--default-chat-template-kwargs "{\"reasoning_effort\":\"$DEFAULT_REASONING_EFFORT\"}")
+  echo "serve.sh: [reasoning-effort] default=$DEFAULT_REASONING_EFFORT (request overrides win)"
+fi
+
 # The key goes to vLLM through the environment rather than --api-key, so it
 # does not show up in the process list.
 if [ -n "${API_KEY:-}" ]; then export VLLM_API_KEY="$API_KEY"; fi
@@ -594,7 +609,7 @@ CMD=("$VENV/bin/vllm" serve "$MODEL"
   --enable-auto-tool-choice --tool-call-parser "${TOOL_PARSER:-glm47}"
   --port "${PORT:-8000}"
   ${MM_ARGS[@]+"${MM_ARGS[@]}"} ${SPEC[@]+"${SPEC[@]}"} ${FAIR_ARGS[@]+"${FAIR_ARGS[@]}"}
-  ${BLOCK_ARGS[@]+"${BLOCK_ARGS[@]}"} ${EXTRA_ARGS:-})
+  ${BLOCK_ARGS[@]+"${BLOCK_ARGS[@]}"} ${REASONING_ARGS[@]+"${REASONING_ARGS[@]}"} ${EXTRA_ARGS:-})
 
 BOOT_CHECK=${BOOT_CHECK:-1}
 case "$BOOT_CHECK" in 0|1) ;; *) echo "[boot-check] FAIL: BOOT_CHECK must be 0 or 1" >&2; exit 2 ;; esac

@@ -107,6 +107,14 @@ streaming and tool-call clients are in [examples/](examples/README.md).
 ## Settings
 
 Copy settings from [`.env.advanced.example`](.env.advanced.example) into `.env`.
+`DEFAULT_REASONING_EFFORT` sets the default chat-template kwarg to `low`, `high`
+or `max` for requests that omit effort; empty disables this override.
+The GLM chat template maps a missing reasoning effort to `max`.
+The pinned engine supports `--default-chat-template-kwargs`; request-level
+`reasoning_effort` or `chat_template_kwargs.reasoning_effort` takes precedence.
+An explicit `--default-chat-template-kwargs` in `EXTRA_ARGS` wins over this
+setting. The two boot requests explicitly use `low` regardless of this default.
+
 Startup runs a boot check after `/health`; `BOOT_CHECK=0` disables it.
 The temperature-0 prompt is `Reply with exactly OK, with no punctuation or other text.`
 The reply's `content`, with surrounding whitespace stripped, must equal `OK`.
