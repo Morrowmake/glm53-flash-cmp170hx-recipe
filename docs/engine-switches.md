@@ -73,7 +73,7 @@ so it also works before the first install.
 |---|---|---|
 | `VLLM_GLM5_PREFILL_OVERLAP_SPLITS` | `2` | splits used by the TP prefill overlap |
 | `VLLM_GLM5_PREFILL_MIN_TOKENS` | `384` | chunk-size gate for the Ampere prefill kernels; 384, not the code default 512, because `FAIR_CHUNK` caps the chunk at 384 while something decodes |
-| `VLLM_GLM5_MARLIN_DECODE_CUDA`, `VLLM_GLM5_MARLIN_PREFILL_CUDA` | decode on if installed, prefill off | optional compiled Marlin; see [Optional compiled Marlin](compiled-marlin.md) |
+| `VLLM_GLM5_MARLIN_DECODE_CUDA` | on if installed | optional compiled Marlin decode; see [Optional compiled Marlin](compiled-marlin.md) |
 | `VLLM_GLM5_MARLIN_DECODE_VARIANT` | `orig` | compiled decode reduction order: `orig` (faster) or `exact` (released order) |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | adaptive draft depth; `0` restores the fixed depth (`SPEC_N`) and the 3460 TP4 token budget |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | `7,5` | deepest verified depth at 1 and 2 requests; `SPEC_N` beyond. The TP4 token budget follows the deepest depth (3456 + 7 = 3463) |

@@ -41,9 +41,8 @@
 #
 # Native optional Marlin: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
 # requires a compatible source pin and CUDA toolkit; normal installs do not compile it.
-# Runtime switches VLLM_GLM5_MARLIN_DECODE_CUDA=1 and
-# VLLM_GLM5_MARLIN_PREFILL_CUDA=1 are independent. Unset: TP4 decode off,
-# PP4 decode on if installed, prefill off. Enabled paths require compatibility.
+# Runtime switch VLLM_GLM5_MARLIN_DECODE_CUDA=1 enables compiled decode.
+# Unset: decode on if installed in both layouts. Enabled paths require compatibility.
 #
 # Config lives in .env, copied from .env.example on first run. A prefix env
 # assignment beats .env for every key:
@@ -509,7 +508,7 @@ install_ampere_marlin() {
     fi
     # Invalidate before compiling: a failed rebuild cannot leave a usable stale library.
     rm -f "$binary" "$stamp"
-    log "  optional Marlin: building one sm_80 library for decode and prefill"
+    log "  optional Marlin: building one sm_80 library for decode"
     ( cd "$VLLM_SRC" && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
         CUDA_HOME="$CUDA_HOME" MAX_JOBS="$MAX_JOBS" PATH="$VENV/bin:$CUDA_HOME/bin:$PATH" \
         "$VENV/bin/python" "$builder" --out "$VLLM_SRC/vllm" \

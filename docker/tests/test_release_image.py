@@ -183,7 +183,7 @@ def test_launcher_dry_no_cuda(tmp_path, enabled):
     import os
     import subprocess
     env = dict(os.environ, CUDA_VISIBLE_DEVICES="", DRY="1", VLLM_IMAGE_CACHE_SEED=enabled,
-               VLLM_GLM5_MARLIN_DECODE_CUDA="0", VLLM_GLM5_MARLIN_PREFILL_CUDA="0",
+               VLLM_GLM5_MARLIN_DECODE_CUDA="0",
                VENV=str(tmp_path/"missing"), MODEL=str(tmp_path/"target"), DFLASH_MODEL=str(tmp_path/"draft"))
     result = subprocess.run(["bash", str(ROOT.parent/"serve.sh")], env=env, text=True, capture_output=True)
     assert result.returncode == 0, result.stderr

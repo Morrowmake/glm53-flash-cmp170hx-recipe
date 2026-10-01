@@ -13,7 +13,7 @@ ROOT = Path(__file__).parents[2]
 def test_default_effort_dry_command(tmp_path, effort):
     env = dict(os.environ, CUDA_VISIBLE_DEVICES='', DRY='1', VENV=str(tmp_path/'missing'),
                MODEL='/target', DFLASH_MODEL='/draft', DEFAULT_REASONING_EFFORT=effort,
-               VLLM_GLM5_MARLIN_DECODE_CUDA='0', VLLM_GLM5_MARLIN_PREFILL_CUDA='0', EXTRA_ARGS='')
+               VLLM_GLM5_MARLIN_DECODE_CUDA='0', EXTRA_ARGS='')
     run = subprocess.run(['bash', str(ROOT/'serve.sh')], env=env, capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
     args = shlex.split(run.stdout.split('serve.sh: DRY=1, command:\n')[1])
@@ -30,7 +30,7 @@ def test_default_effort_dry_command(tmp_path, effort):
 def test_invalid_effort_and_explicit_cli_precedence(tmp_path):
     env = dict(os.environ, CUDA_VISIBLE_DEVICES='', DRY='1', VENV=str(tmp_path/'missing'),
                MODEL='/target', DFLASH_MODEL='/draft', DEFAULT_REASONING_EFFORT='invalid',
-               VLLM_GLM5_MARLIN_DECODE_CUDA='0', VLLM_GLM5_MARLIN_PREFILL_CUDA='0', EXTRA_ARGS='')
+               VLLM_GLM5_MARLIN_DECODE_CUDA='0', EXTRA_ARGS='')
     run = subprocess.run(['bash', str(ROOT/'serve.sh')], env=env, capture_output=True, text=True)
     assert run.returncode == 2 and 'must be empty, low, high or max' in run.stderr
     env.update(DEFAULT_REASONING_EFFORT='low', EXTRA_ARGS='--default-chat-template-kwargs={"reasoning_effort":"high"}')

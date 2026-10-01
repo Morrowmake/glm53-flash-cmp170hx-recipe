@@ -200,9 +200,10 @@ under TP4) in `.env`. Explicit `.env` values are preserved.
 engine and image pins; your `.env`, including explicit `IMAGE`, `VLLM_COMMIT`
 and runtime-switch overrides, is preserved. Remove an old explicit pin only
 if you want to follow this release. The image includes optional Marlin:
-unset PP4 decode enables it, TP4 decode and both prefill defaults remain off.
-Native users must opt in to compilation as described in [Optional compiled Marlin](compiled-marlin.md); without an installed
-library, unset PP4 decode remains off. The allocator default remains
+release 1.5.0 enabled unset PP4 decode and left unset TP4 decode off.
+For current defaults and native compilation, see
+[Optional compiled Marlin](compiled-marlin.md); without an installed library,
+unset decode remains off. The allocator default remains
 `expandable_segments:False`, with explicit allocator overrides preserved.
 
 **Updating from 1.3.x.** Run `./start.sh update`, nothing else. What happens:

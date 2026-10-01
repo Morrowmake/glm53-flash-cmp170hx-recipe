@@ -127,7 +127,7 @@ This is not a 1.4.3 or PP4 comparison, nor proof of batch invariance.
 Measured on 2026-09-30 using the original throughput workloads and the released
 engine and launcher. These are native measurements, not a new container-speed
 comparison. The optional library was installed: compiled decode uses its release
-defaults (off for TP4, on for PP4), compiled prefill is off, and
+defaults (off for TP4, on for PP4), and
 `expandable_segments:False` applies to all three columns. Native installations
 without the optional library do not use the measured PP4 compiled-decode path.
 

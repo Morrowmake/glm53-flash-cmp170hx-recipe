@@ -1,15 +1,13 @@
 # Optional compiled Marlin
 
 The launcher turns compiled decode on in both layouts when the optional
-library is installed, and leaves compiled prefill off in both layouts. The
-effective `TP=4 PP=1` or `PP=4 TP=1` configuration selects the default even when
+library is installed. The effective `TP=4 PP=1` or `PP=4 TP=1` configuration selects the default even when
 those dimensions override `LAYOUT`. One `vllm._ampere_marlin_C` library serves
-both layouts; changing layout never rebuilds it. The independent switches
-override these defaults explicitly:
+both layouts; changing layout never rebuilds it. The decode switch
+overrides the default explicitly:
 
 ```bash
 VLLM_GLM5_MARLIN_DECODE_CUDA=0 ./start.sh restart
-VLLM_GLM5_MARLIN_PREFILL_CUDA=1 ./start.sh restart
 ```
 
 Compiled decode has two reduction orders in the same library, chosen by
@@ -24,19 +22,17 @@ VLLM_GLM5_MARLIN_DECODE_VARIANT=exact ./start.sh restart
 ```
 
 An explicit `0` or `1` in the environment or `.env` remains authoritative across
-updates. Leave the flags commented out to follow the defaults. Unset PP4 decode
+updates. Leave the flag commented out to follow the defaults. Unset decode
 uses CPU-only module discovery, without importing the extension or probing CUDA.
 If the library is absent it defaults off with a banner; if present it defaults on
 and startup must validate compatibility. Explicit `1` with an absent or incompatible
 library, or default-on with an incompatible library, fails before serving, never
-silently disabling the requested feature. Both flags off means no extension load.
-`DRY=1` prints the resolved flags and command but skips compatibility validation.
+silently disabling the requested feature. Decode off means no extension load.
+`DRY=1` prints the resolved settings and command but skips compatibility validation.
 
 The compiled decode path is limited to eligible small batches in TP4 and PP4.
-The compiled prefill path is PP4-only, within the engine's validated shape and
-token bounds; TP4 prefill retains the released implementation. Unsupported
-shapes use the released paths. These are not universal kernel replacements,
-and no whole-server speedup is claimed here.
+Unsupported shapes use the released paths. This is not a universal kernel
+replacement, and no whole-server speedup is claimed here.
 
 The pinned container image includes the optional library. To build it natively,
 use `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
@@ -48,8 +44,8 @@ library. Opting in requires a CUDA toolkit (`CUDA_HOME`) and C++ compiler.
 stamp includes source, requirements, Python/torch ABI, compiler/toolkit versions
 and binary digest; matching builds are reused. Engine reinstalls invalidate the
 optional binary, without demanding its toolkit when build is off. Failed rebuilds
-cannot leave a stale library in service. Enabling a runtime switch without the
-library fails before serving, never silently falling back. Both switches off
+cannot leave a stale library in service. Enabling the runtime switch without the
+library fails before serving, never silently falling back. Decode off
 means no optional-extension load. Existing `.env` and explicit pin overrides are preserved.
 
 The [container build](../docker/README.md#build-it) prebuilds the same library with

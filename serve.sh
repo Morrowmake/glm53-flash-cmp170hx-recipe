@@ -34,11 +34,11 @@
 #   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
 #   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
 #
-# Optional compiled Marlin (decode on if installed, both layouts; prefill off):
-#   VLLM_GLM5_MARLIN_DECODE_CUDA=0|1 / VLLM_GLM5_MARLIN_PREFILL_CUDA=0|1
+# Optional compiled Marlin decode (on if installed, both layouts):
+#   VLLM_GLM5_MARLIN_DECODE_CUDA=0|1
 #   VLLM_GLM5_MARLIN_DECODE_VARIANT=orig (default, faster) | exact (released order)
 #   Native install: VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install
-#   Decode: eligible TP4/PP4 small batches. Prefill: PP4 only; TP4 unchanged.
+#   Decode: eligible TP4/PP4 small batches.
 #   Engine shape/token gates apply; no startup or layout-change compilation.
 # Layout (LAYOUT):
 #   tp4 (default)  tensor-parallel 4 (PP=1, TP=4). Fastest per request; one or
@@ -285,17 +285,17 @@ PY
   fi
 fi
 export VLLM_GLM5_MARLIN_DECODE_CUDA
-export VLLM_GLM5_MARLIN_PREFILL_CUDA=${VLLM_GLM5_MARLIN_PREFILL_CUDA-0}
-for flag in VLLM_GLM5_MARLIN_DECODE_CUDA VLLM_GLM5_MARLIN_PREFILL_CUDA; do
-  case "${!flag}" in 0|1) ;; *) echo "serve.sh: $flag must be 0 or 1" >&2; exit 2 ;; esac
-done
+case "$VLLM_GLM5_MARLIN_DECODE_CUDA" in
+  0|1) ;;
+  *) echo "serve.sh: VLLM_GLM5_MARLIN_DECODE_CUDA must be 0 or 1" >&2; exit 2 ;;
+esac
 # Decode reduction order: orig (default) splits the first MoE projection along K
 # (faster; decoded text can differ from the released order within its accuracy
 # bounds); exact keeps the released order.
 export VLLM_GLM5_MARLIN_DECODE_VARIANT=${VLLM_GLM5_MARLIN_DECODE_VARIANT-orig}
 case "$VLLM_GLM5_MARLIN_DECODE_VARIANT" in orig|exact) ;; *) echo "serve.sh: VLLM_GLM5_MARLIN_DECODE_VARIANT must be orig or exact" >&2; exit 2 ;; esac
-echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA variant=$VLLM_GLM5_MARLIN_DECODE_VARIANT prefill=$VLLM_GLM5_MARLIN_PREFILL_CUDA (prebuilt library required when enabled)"
-if [ "${DRY:-0}" != 1 ] && { [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ] || [ "$VLLM_GLM5_MARLIN_PREFILL_CUDA" = 1 ]; }; then
+echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA variant=$VLLM_GLM5_MARLIN_DECODE_VARIANT (prebuilt library required when enabled)"
+if [ "${DRY:-0}" != 1 ] && [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ]; then
   CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY' || exit 1
 try:
     from vllm.ampere_marlin import require_extension

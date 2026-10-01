@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Compiled Marlin prefill removed (it gave no measured prefill gain); `VLLM_GLM5_MARLIN_PREFILL_CUDA` is ignored.
+
 - Fork branch default is `ampere`; the engine remains pinned by full commit.
   Delete an explicit `VLLM_BRANCH=ampere-glm53` line to follow the new default.
 - Rootless images split Python, locked 1.6.0 dependencies, native libraries and
