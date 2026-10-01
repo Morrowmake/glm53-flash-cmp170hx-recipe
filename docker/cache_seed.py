@@ -27,13 +27,39 @@ def sha(path):
 def key(identity):
     return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
+def pci_device_id(uuid):
+    import pynvml
+    try:
+        pynvml.nvmlInit()
+    except pynvml.NVMLError:
+        return None
+    try:
+        # UUID identifies the CUDA-visible device even when ordinals are remapped.
+        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+        return pynvml.nvmlDeviceGetPciInfo(handle).pciDeviceId
+    except pynvml.NVMLError:
+        return None
+    finally:
+        pynvml.nvmlShutdown()
+
+def is_cmp170hx(torch, index):
+    if torch.cuda.get_device_capability(index) != (8, 0):
+        return False
+    if torch.cuda.get_device_name(index).startswith("NVIDIA CMP 170HX"):
+        return True
+    try:
+        uuid = torch.cuda.get_device_properties(index).uuid
+        # NVML combines the 16-bit device ID and NVIDIA vendor ID.
+        return pci_device_id(uuid) == 0x20C210DE
+    except (ImportError, AttributeError):
+        return False
+
 def runtime_identity(opt=Path("/opt")):
     import torch
     if not torch.cuda.is_available():
         raise ValueError("Cache seed requires CUDA devices")
-    devices = {(torch.cuda.get_device_name(i), torch.cuda.get_device_capability(i))
-               for i in range(torch.cuda.device_count())}
-    if devices != {("NVIDIA CMP 170HX", (8, 0))}:
+    count = torch.cuda.device_count()
+    if not count or not all(is_cmp170hx(torch, i) for i in range(count)):
         raise ValueError("Cache seed is restricted to CMP 170HX sm_80")
     driver = ctypes.c_int()
     cuda = ctypes.CDLL("libcuda.so.1")
