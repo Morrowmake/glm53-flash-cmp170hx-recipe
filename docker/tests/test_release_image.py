@@ -197,7 +197,7 @@ def test_audit_token_shapes_and_nested_archive():
     from runtime_tree import scan_stream
     scan_stream(io.BytesIO(b"ghp_example"), [], "fixture", credential_patterns=TOKEN_PATTERNS)
     for data in (b"ghp_" + b"x"*36, gzip.compress(b"github_pat_" + b"x"*50)):
-        with pytest.raises(ValueError, match="Forbidden identifier"):
+        with pytest.raises(ValueError, match="Credential candidate"):
             scan_stream(io.BytesIO(data), [], "fixture", credential_patterns=TOKEN_PATTERNS)
 
 
@@ -222,3 +222,28 @@ def test_audit_ignores_embedded_symbol_and_hash_fragments():
     from audit_oci import TOKEN_PATTERNS
     from runtime_tree import scan_stream
     scan_stream(io.BytesIO(b"symbol_ghr_" + b"x"*50), [], "fixture", credential_patterns=TOKEN_PATTERNS)
+
+
+def test_review_bound_to_exact_bytes_and_offset(monkeypatch):
+    import io
+    from runtime_tree import scan_stream
+    value = b"prefix example suffix"
+    digest = hashlib.sha256(value).hexdigest()
+    monkeypatch.setenv("IMAGE_REVIEWED_BYTE_MATCHES", json.dumps({digest: [7]}))
+    scan_stream(io.BytesIO(value), [b"example"], "fixture")
+    with pytest.raises(ValueError, match="Forbidden identifier"):
+        scan_stream(io.BytesIO(value + b"changed"), [b"example"], "fixture")
+    monkeypatch.setenv("IMAGE_REVIEWED_BYTE_MATCHES", json.dumps({digest: [8]}))
+    with pytest.raises(ValueError, match="Forbidden identifier"):
+        scan_stream(io.BytesIO(value), [b"example"], "fixture")
+
+
+def test_review_cannot_allow_credential_candidates(monkeypatch):
+    import io
+    from audit_oci import TOKEN_PATTERNS
+    from runtime_tree import scan_stream
+    value = b"ghp_" + b"x"*36
+    digest = hashlib.sha256(value).hexdigest()
+    monkeypatch.setenv("IMAGE_REVIEWED_BYTE_MATCHES", json.dumps({digest: [0]}))
+    with pytest.raises(ValueError, match="Credential candidate"):
+        scan_stream(io.BytesIO(value), [b"ghp_"], "fixture", credential_patterns=TOKEN_PATTERNS)

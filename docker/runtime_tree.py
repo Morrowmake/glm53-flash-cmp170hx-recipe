@@ -3,6 +3,7 @@
 import argparse
 import bz2
 import gzip
+import hashlib
 import lzma
 import tarfile
 import tempfile
@@ -90,10 +91,39 @@ def scan_stream(stream, needles, label, depth=0, credential_patterns=()):
     else:
         overlap = max(max(map(len, needles), default=1) - 1, 256 if credential_patterns else 0)
         previous = b""
+        position = 0
+        reviewed_hash = None
+        reviews = json.loads(os.environ.get("IMAGE_REVIEWED_BYTE_MATCHES", "{}"))
+
+        def reviewed(offset):
+            nonlocal reviewed_hash
+            if not reviews:
+                return False
+            if reviewed_hash is None:
+                current = stream.tell()
+                stream.seek(0)
+                h = hashlib.sha256()
+                for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
+                    h.update(block)
+                reviewed_hash = h.hexdigest()
+                stream.seek(current)
+            return offset in reviews.get(reviewed_hash, [])
+
         for chunk in iter(lambda: stream.read(4 * 1024 * 1024), b""):
             data = previous + chunk.lower()
-            if any(n in data for n in needles) or any(p.search(data) for p in credential_patterns):
-                raise ValueError("Forbidden identifier in runtime file: " + label)
+            for needle in needles:
+                start = 0
+                while True:
+                    match = data.find(needle, start)
+                    if match < 0:
+                        break
+                    if not reviewed(position - len(previous) + match):
+                        raise ValueError("Forbidden identifier in runtime file: " + label)
+                    start = match + 1
+            # Credential candidates always fail, including in reviewed files.
+            if any(p.search(data) for p in credential_patterns):
+                raise ValueError("Credential candidate in runtime file: " + label)
+            position += len(chunk)
             previous = data[-overlap:] if overlap else b""
 
 

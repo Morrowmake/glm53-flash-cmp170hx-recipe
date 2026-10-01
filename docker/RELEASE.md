@@ -91,7 +91,13 @@ artifacts: distribute only trusted, audited release bundles.
    image arguments, labels or attestations. The audit verifies compressed
    digests and uncompressed diff IDs, rejects Git stores, screens registry-token
    shapes without printing values, and reports format coverage gaps. Inspect
-   ELF fatbins/nonstandard compressed objects separately; verify provenance,
+   ELF fatbins/nonstandard compressed objects separately. A reviewed identifier
+   substring in immutable third-party data may be recorded in local
+   `IMAGE_REVIEWED_BYTE_MATCHES` JSON as `{file_sha256: [byte_offsets]}`;
+   default `{}` disables this feature. Only those exact file bytes and offsets
+   are allowed, and the audit records them with a banner. This never allows
+   Git metadata, forbidden archive paths or credential candidates.
+   Verify that provenance,
    OCI revision and actual imports agree. Retained native bytes must match
    the previously reviewed artifacts. Review the seed archive by the same gate.
 3. Run real-image GPU acceptance, fresh install and previous-release update,

@@ -38,6 +38,8 @@ def checked_layer(job):
         return dict(digest=job[1]["digest"], passed=False, reason=str(error))
 
 def audit(root, workers=8):
+    reviews = json.loads(os.environ.get("IMAGE_REVIEWED_BYTE_MATCHES", "{}"))
+    print("[image-audit] reviewed_byte_matches=" + str(sum(len(v) for v in reviews.values())), file=sys.stderr)
     manifest, config = image(root)
     forbidden = [s.lower().encode() for s in json.loads(os.environ.get("IMAGE_FORBIDDEN_STRINGS", "[]"))]
     patterns = TOKEN_PATTERNS + [re.compile(p.encode()) for p in
@@ -51,6 +53,7 @@ def audit(root, workers=8):
     with ProcessPoolExecutor(max_workers=workers) as pool:
         checked = list(pool.map(checked_layer, jobs))
     record = dict(passed=all(r["passed"] for r in checked), layers=len(checked), checked=checked,
+                  reviewed_byte_matches=reviews,
                   formats=["OCI JSON", "gzip", "bzip2", "xz", "tar", "zip"],
                   gaps=["Embedded ELF fatbins and nonstandard compression (including zstd) require separate inspection",
                         "Credential candidates use known registry-token shapes"])
