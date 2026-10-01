@@ -83,7 +83,7 @@ def assemble(base, payload, out, pin, release, layered=True, parallel=True, thre
         jobs = [(merged, "runtime")]
     else:
         jobs = [(payload / name, name) for name in names]
-    with ThreadPoolExecutor(max_workers=len(jobs)) as pool:
+    with ThreadPoolExecutor(max_workers=len(jobs) if parallel else 1) as pool:
         results = list(pool.map(lambda job: pack(*job, work, parallel, threads), jobs))
     report = [dict(name="base-" + str(i), compressed=d["size"], digest=d["digest"])
               for i, d in enumerate(manifest["layers"])]
