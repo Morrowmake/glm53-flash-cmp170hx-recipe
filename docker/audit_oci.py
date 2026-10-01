@@ -14,7 +14,7 @@ from oci_layers import digest_file, image
 from runtime_tree import scan_stream
 
 # Candidates are reported without including their value.
-TOKEN_PATTERNS = [re.compile(rb"github_pat_[a-z0-9_]{40,}"), re.compile(rb"gh[pousr]_[a-z0-9]{30,}")]
+TOKEN_PATTERNS = [re.compile(rb"(?<![a-z0-9_-])github_pat_[a-z0-9_]{40,}"), re.compile(rb"(?<![a-z0-9_-])gh[pousr]_[a-z0-9]{30,}")]
 
 def layer_check(job):
     root, desc, diff, forbidden, patterns = job

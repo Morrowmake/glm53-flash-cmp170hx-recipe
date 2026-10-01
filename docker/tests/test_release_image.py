@@ -215,3 +215,10 @@ def test_audit_collects_integrity_failure(tmp_path):
 @pytest.mark.parametrize("name", [".cache/torch_extensions/kernel/module.so", ".nv/ComputeCache/kernel"])
 def test_cpp_and_driver_caches(name):
     assert cache.allowed(name)
+
+
+def test_audit_ignores_embedded_symbol_and_hash_fragments():
+    import io
+    from audit_oci import TOKEN_PATTERNS
+    from runtime_tree import scan_stream
+    scan_stream(io.BytesIO(b"symbol_ghr_" + b"x"*50), [], "fixture", credential_patterns=TOKEN_PATTERNS)
