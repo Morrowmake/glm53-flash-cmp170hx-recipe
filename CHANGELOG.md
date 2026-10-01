@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.6.0 — 2026-10-01 (unreleased draft)
+## 1.6.0 — 2026-10-01
 
 **Update:** `./start.sh update`. Explicit `.env` values and engine/image
 overrides are preserved.
