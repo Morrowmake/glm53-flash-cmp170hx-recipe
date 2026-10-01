@@ -30,7 +30,7 @@ OUT="${OUT:-$HERE/out}"
 BASE="nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 VLLM_REPO="https://github.com/Morrowmake/vllm-cmp170hx.git"
 VLLM_BRANCH="ampere-glm53"
-VLLM_COMMIT="${VLLM_COMMIT:-05317762a8e0dd266843f3a44b5ec216c4f78f4a}"
+VLLM_COMMIT="${VLLM_COMMIT:-3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340}"
 # Upstream nightly wheel for the extensions: the pin's base e55d076f89 has no
 # wheel; b6761e8ded's C++, CUDA and Rust sources are identical to it.
 VLLM_WHEEL_COMMIT="b6761e8ded57ef85b708f34af8cab1649eae1069"

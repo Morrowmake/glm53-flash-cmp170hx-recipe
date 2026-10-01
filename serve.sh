@@ -28,8 +28,8 @@
 #   SERVED_MODEL_NAME  model id clients send (default glm-5.3-flash; the older
 #                   name SERVED_NAME is still read if this one is unset)
 # Env overrides: LAYOUT, MAX_LEN, MAX_SEQS, MAX_BATCHED (default 3456 + draft
-#   slots, at least 3460 = 3,456-token prefill chunks under TP4; 3461 with the
-#   adaptive depth; 2312 = 2,304-token chunks under PP4),
+#   slots, at least 3460 = 3,456-token prefill chunks under TP4; 3463 with the
+#   adaptive depth (7 slots); 2312 = 2,304-token chunks under PP4),
 #   PREFILL_CAP (upstream long-prefill chunk cap, UNCONDITIONAL; default 0 = off
 #   -- LEAVE IT 0, see below), GPU_UTIL, SPEC_N, REASONING_PARSER, TOOL_PARSER,
 #   MM_CAP, PP, TP, VLLM_PP_LAYER_PARTITION, BLOCK_SIZE, EXTRA_ARGS.
@@ -501,16 +501,26 @@ echo "serve.sh: KV headroom: MAX_LOGITS_MB=${VLLM_SPARSE_INDEXER_MAX_LOGITS_MB:-
 # activation peak the memory profiler reserves for). Decode step unchanged.
 # Contended prefill is unaffected (FAIR_PREFILL caps it at 384 while anything
 # decodes). The TP4 default follows the draft slots (SPEC_N, or the deepest
-# adaptive depth) to keep 3,456-token chunks: 3460 up to 4 slots, 3461 at 5. Under PP4 the default is 2312 (2,304-token chunks),
+# adaptive depth) to keep 3,456-token chunks: 3460 up to 4 slots, 3463 at 7. Under PP4 the default is 2312 (2,304-token chunks),
 # the chunk it was validated with.
 # Kill switch: MAX_BATCHED=2048 restores 1.2.0's chunking.
-# Load-adaptive DFlash depth (both layouts, dflash only): verify deeper drafts
-# while few requests run (VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS, default 5,4 for
-# 1, 2 requests) and SPEC_N under load. The engine then reserves the deepest
-# depth as draft slots. Banner: "load-adaptive DFlash depth active".
-# Kill switch: VLLM_GLM5_DFLASH_ADAPTIVE_K=0.
+# Load-adaptive DFlash depth (both layouts, dflash only): the verified depth
+# follows the number of running requests (VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS:
+# up to 7 at one request, 5 at two, SPEC_N under load) and, with
+# VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT=1, each request's acceptance and the
+# measured per-depth step costs (_COSTS one request, _COSTS_MULTI several; one
+# table per layout). Under TP4 the drafter's width follows the verified depth
+# (VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH). The engine reserves the deepest depth
+# as draft slots. Banners: "load-adaptive DFlash depth active", "acceptance-aware
+# DFlash depth active", "load-following DFlash draft width active" (TP4).
+# Kill switches: VLLM_GLM5_DFLASH_ADAPTIVE_K=0 (all), _ACCEPT=0, _DRAFT_WIDTH=0.
 if [ "$MODE" = dflash ]; then
   export VLLM_GLM5_DFLASH_ADAPTIVE_K=${VLLM_GLM5_DFLASH_ADAPTIVE_K:-1}
+  if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS=7,5; fi
+  if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT=1; fi
+  if [ "${PP:-1}" -gt 1 ]; then :; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH=1; fi; fi
+  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS=1.0000,1.1243,1.1729,1.2457,1.1937; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS=1.0000,1.0676,1.1565,1.2258,1.2803; fi; fi
+  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI=1.0000,1.1805,1.2611,1.2457,1.1937; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI=1.0000,1.0787,1.1928,1.2258,1.2803; fi; fi
 fi
 SPEC_DEPTH=${SPEC_N:-3}
 if [ "$MODE" = dflash ] && [ "${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0}" = 1 ]; then

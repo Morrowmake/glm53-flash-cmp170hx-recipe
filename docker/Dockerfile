@@ -22,11 +22,11 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   docker build -t vllm-cmp170hx:1.6.0-05317762a8 docker/
+#   docker build -t vllm-cmp170hx:1.6.0-3a2bf16dae docker/
 
 ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87
 
-ARG VLLM_COMMIT=05317762a8e0dd266843f3a44b5ec216c4f78f4a
+ARG VLLM_COMMIT=3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340
 
 FROM ${BASE} AS build
 ARG VLLM_REPO=https://github.com/Morrowmake/vllm-cmp170hx.git

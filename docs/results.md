@@ -2,13 +2,16 @@
 
 ## Release 1.6.0: faster decode for one or two users
 
-Two engine changes, both on by default in both layouts:
+Engine changes, all on by default:
 
-- **Load-adaptive draft depth.** The DFlash2 drafter's guesses are verified
-  five at a time when one request is running, four at two, and three (the
-  previous fixed depth) under heavier load. More accepted tokens per step for a
-  single user; unchanged behaviour under load. Kill switch
-  `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` ([engine switches](engine-switches.md)).
+- **Adaptive draft depth.** The DFlash2 drafter's guesses are verified up to
+  seven at a time when one request is running, up to five at two, and three (the
+  previous fixed depth) under heavier load. Within those limits each request's
+  depth follows its own recent acceptance and the measured cost of each depth on
+  this hardware, so text that drafts well (code, structured output) verifies
+  deep and prose stays shallow. Under tensor-parallel 4 the drafter itself
+  shrinks to the verified depth. Kill switches in
+  [engine switches](engine-switches.md).
 - **Compiled Marlin decode on by default, original reduction order.** The
   optional library's decode kernels now run in both layouts, in a faster order
   that sums the first MoE projection in four fixed K slices. Decoded text can
@@ -17,47 +20,48 @@ Two engine changes, both on by default in both layouts:
   ([Optional compiled Marlin](compiled-marlin.md)).
 
 **The trade: KV pool.** Deeper drafts reserve more per-request scratch, so the
-KV pool at 262,144 context is 1,125,277 tokens under TP4 (−4.4 % against
-1.5.x) and 2,064,638 under PP4 (−11.6 %; about 2,000 tokens of that is the
-compiled decode's scratch). Cold prefill is unchanged.
+KV pool at 262,144 context is 1,072,150 tokens under TP4 (−8.9 % against 1.5.x)
+and 1,914,216 under PP4 (−18.0 %). Cold prefill is unchanged.
 
-**Against 1.5.x, same protocol:** one user +27.0 / +22.2 / −0.5 %
-(structured / code / prose) under TP4 and +31.6 / +20.5 / −5.3 % under PP4;
-eight users +1.4 / +2.7 / +2.7 % (TP4) and +0.5 / +2.0 / +6.1 % (PP4).
-Prose gains least: its drafts are accepted less often, so a deeper draft adds
-step time without adding accepted tokens.
+**Against 1.5.x, same protocol:** one user +47.4 / +44.7 / −3.0 % (structured /
+code / prose) under TP4 and +65.9 / +48.7 / −3.2 % under PP4; eight users
++5.1 / +1.3 / +2.6 % (TP4) and +3.3 / +2.4 / +4.7 % (PP4). Prose, whose drafts
+are accepted least often, stays within a few percent of 1.5.x.
 
 **Quality**, fixed-batch HumanEval (164) and GSM8K (1,319), compared per
-answer with the previous release: TP4 **160/164 and 1,280/1,319** (previous
-162 and 1,281; 3 losses and 1 gain on HumanEval, McNemar p 0.63), PP4
-**162/164 and 1,280/1,319** (previous 163 and 1,284; p 1.0 and 0.22). Individual
-answers flip in both directions when decoded text changes; no suite shows a
-significant net loss.
+answer with the previous release, measured on this release's decode kernels with
+adaptive depth up to 5 drafts: TP4 **160/164 and 1,280/1,319** (previous 162 and 1,281; 3
+losses and 1 gain on HumanEval, McNemar p 0.63), PP4 **162/164 and 1,280/1,319**
+(previous 163 and 1,284; p 1.0 and 0.22). Individual answers flip in both
+directions when decoded text changes; no suite shows a significant net loss.
+A further TP4 run with the drafter width on also scored 160/164 and 1,280/1,319.
 
 **Long-context and repeatability checks.** The full tier-2 long-context and
 repeatability checks ran on the same engine build: needle retrieval 30/30 up
 to 262K tokens, copy fidelity no worse than the previous baseline, no
 cross-request leaks, and bit-identical outputs for the same batch run twice in
 eager and CUDA-graph modes, in both layouts. The README numbers and the needle
-and repeatability checks were re-measured on the final candidate.
+and repeatability checks were re-measured on the final candidate: needle
+retrieval at 32K and 262K, and the same request repeated alone gives identical
+output (12 of 12 prompts) in both layouts.
 
 ## Release 1.6.0 throughput
 
 Measured on 2026-10-01 with the released engine and launcher defaults, the
-same workloads and client as the 1.5.0 table below: DFlash2 with load-adaptive
+same workloads and client as the 1.5.0 table below: DFlash2 with adaptive
 depth, 262,144-token context, 180 W per card, PCIe x16 links, one server start
 per column, decode median of five runs.
 
 | | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
 |---|---:|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **339.4 / 318.7 / 185.0 tok/s** | **372.6 / 350.3 / 199.4 tok/s** | **186.6 / 168.5 / 98.0 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **769.7 / 692.1 / 545.7 tok/s** | **821.2 / 749.2 / 591.9 tok/s** | **606.3 / 588.5 / 472.2 tok/s** |
-| Cold prefill | **2,671 tok/s** | **3,056 tok/s** | **6,586 tok/s** |
-| One-token response time, 6,217 / 23,255-token prompt | 2.38 / 8.68 s | 2.06 / 7.49 s | 1.46 / 3.64 s |
-| KV pool at 262,144 context | 1,125,277 tokens (4.29 full-length requests) | 1,126,248 tokens (4.30) | 2,064,638 tokens (7.88) |
+| Streaming decode, 1 user, structured / code / prose | **394.0 / 377.4 / 180.5 tok/s** | **437.4 / 404.2 / 198.6 tok/s** | **235.3 / 207.9 / 100.2 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **797.9 / 683.2 / 544.7 tok/s** | **840.7 / 769.4 / 589.5 tok/s** | **623.1 / 591.0 / 465.8 tok/s** |
+| Cold prefill | **2,669 tok/s** | **3,061 tok/s** | **6,580 tok/s** |
+| One-token response time, 6,217 / 23,255-token prompt | 2.38 / 8.67 s | 2.04 / 7.49 s | 1.46 / 3.63 s |
+| KV pool at 262,144 context | 1,072,150 tokens (4.09 full-length requests) | 1,073,093 tokens (4.09) | 1,914,216 tokens (7.30) |
 
-Of the 855 measured decode requests, one (TP4 peer-to-peer off, structured,
-four users) stopped at 340 tokens; all others ran to the 400-token cap.
+Of the 855 measured decode requests, one (TP4 peer-to-peer on, structured,
+eight users) stopped at 262 tokens; all others ran to the 400-token cap.
 
 ## Optional Marlin and image packaging (1.5.0)
 
@@ -179,8 +183,8 @@ Prefill and KV figures compare the native 1.6.0 peer-to-peer-off columns above.
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | 2,671 tok/s | 6,586 tok/s (2.47×) |
-| KV pool | 1,125,277 tokens | 2,064,638 tokens (1.83×) |
+| Prefill | 2,669 tok/s | 6,580 tok/s (2.47×) |
+| KV pool | 1,072,150 tokens | 1,914,216 tokens (1.79×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
 
@@ -246,18 +250,18 @@ Each request carries a unique nonce to prevent prefix-cache reuse.
 
 | Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
 |---|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | **339.4** | — | 0.063 s |
-|  | ×2 | **239.0** | **436.3** | 0.111 s |
-|  | ×4 | **156.8** | **565.0** | 0.256 s |
-|  | ×8 | **106.1** | **769.7** | 0.315 s |
-| Code (clamp_00…clamp_49) | ×1 | **318.7** | — | 0.158 s |
-|  | ×2 | **192.7** | **339.5** | 0.250 s |
-|  | ×4 | **141.4** | **495.9** | 0.393 s |
-|  | ×8 | **101.1** | **692.1** | 0.618 s |
-| Prose (hash map) | ×1 | **185.0** | — | 0.067 s |
-|  | ×2 | **153.4** | **276.8** | 0.161 s |
-|  | ×4 | **112.4** | **416.0** | 0.255 s |
-|  | ×8 | **74.2** | **545.7** | 0.316 s |
+| Structured (count 1→200) | ×1 | **394.0** | — | 0.066 s |
+|  | ×2 | **260.3** | **469.2** | 0.110 s |
+|  | ×4 | **163.9** | **595.2** | 0.250 s |
+|  | ×8 | **109.8** | **797.9** | 0.306 s |
+| Code (clamp_00…clamp_49) | ×1 | **377.4** | — | 0.156 s |
+|  | ×2 | **215.2** | **360.5** | 0.247 s |
+|  | ×4 | **148.5** | **513.7** | 0.389 s |
+|  | ×8 | **99.1** | **683.2** | 0.617 s |
+| Prose (hash map) | ×1 | **180.5** | — | 0.068 s |
+|  | ×2 | **149.4** | **276.0** | 0.160 s |
+|  | ×4 | **115.3** | **418.4** | 0.254 s |
+|  | ×8 | **75.2** | **544.7** | 0.312 s |
 
 Prose decodes slower than structured or code text because the drafter's guesses
 are accepted less often.
@@ -266,13 +270,13 @@ are accepted less often.
 (peer-to-peer off), original real-text corpus and unique uncached windows,
 `max_tokens=1`, median of two, `prompt tokens / streamed TTFT` measured client
 side. All twelve requests recorded zero prefix-cache hits. (Tensor-parallel 4
-runs at 2,671 tok/s on the separate 24K–38K prompts of the results table.)
+runs at 2,669 tok/s on the separate 24K–38K prompts of the results table.)
 
 | Prompt | TTFT | tok/s |
 |---:|---:|---:|
-| ~8k | 1.90 s | **4,197** |
-| ~16k | 2.77 s | **5,762** |
-| ~32k | 4.83 s | **6,604** |
-| ~64k | 9.06 s | **7,068** |
-| ~128k | 17.79 s | **7,172** |
-| ~250k | 35.41 s | **7,067** |
+| ~8k | 1.89 s | **4,215** |
+| ~16k | 2.76 s | **5,789** |
+| ~32k | 4.80 s | **6,645** |
+| ~64k | 9.03 s | **7,097** |
+| ~128k | 17.78 s | **7,176** |
+| ~250k | 35.45 s | **7,061** |

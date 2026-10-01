@@ -75,7 +75,11 @@ so it also works before the first install.
 | `VLLM_GLM5_PREFILL_MIN_TOKENS` | `384` | chunk-size gate for the Ampere prefill kernels; 384, not the code default 512, because `FAIR_CHUNK` caps the chunk at 384 while something decodes |
 | `VLLM_GLM5_MARLIN_DECODE_CUDA`, `VLLM_GLM5_MARLIN_PREFILL_CUDA` | decode on if installed, prefill off | optional compiled Marlin; see [Optional compiled Marlin](compiled-marlin.md) |
 | `VLLM_GLM5_MARLIN_DECODE_VARIANT` | `orig` | compiled decode reduction order: `orig` (faster) or `exact` (released order) |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | load-adaptive draft depth (`VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS`, default `5,4`: depth at 1 and 2 requests; `SPEC_N` beyond); `0` restores the fixed depth and the 3460 TP4 token budget |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | adaptive draft depth; `0` restores the fixed depth (`SPEC_N`) and the 3460 TP4 token budget |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | `7,5` | deepest verified depth at 1 and 2 requests; `SPEC_N` beyond. The TP4 token budget follows the deepest depth (3456 + 7 = 3463) |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | `1` | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step cost of each depth from 3 to 7, alone and with several requests; set by the launcher from measurements on this hardware |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4 | the drafter computes only the verified depth (TP4); `0` always drafts the deepest block |
 | `VLLM_CUSTOM_ALLREDUCE_ALGO` | `2stage` | which CustomAllreduce kernel; the built-in crossover is NVLink-tuned. Inert unless [peer-to-peer](how-to-use.md#pcie-peer-to-peer-optional) is on |
 | `GLM5_NCCL_P2P_SYS` | `1` | with peer-to-peer on under TP4, NCCL goes card to card as well (`NCCL_P2P_LEVEL=SYS`); `0` turns that part off |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:False` | allocator compatibility default, independent of layout and peer-to-peer; explicit values are preserved |

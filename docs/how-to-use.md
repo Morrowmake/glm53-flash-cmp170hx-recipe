@@ -188,8 +188,9 @@ freeze it.
 **Updating from 1.5.x.** Run `./start.sh update`. Release 1.6.0 moves the
 engine and image pins. Two defaults change: compiled Marlin decode is now on
 in both layouts when the optional library is installed (the image includes it),
-in the faster `orig` reduction order, and the drafter's depth follows the load.
-The KV pool shrinks by 4.4 % (TP4) and 11.6 % (PP4); see
+in the faster `orig` reduction order, and the drafter's depth follows the load
+and each request's acceptance (up to 7 drafts at one request).
+The KV pool shrinks by 8.9 % (TP4) and 18.0 % (PP4); see
 [Results](results.md#release-160-faster-decode-for-one-or-two-users). To keep
 the 1.5.x behaviour, set `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` and
 `VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` (or `VLLM_GLM5_MARLIN_DECODE_CUDA=0`

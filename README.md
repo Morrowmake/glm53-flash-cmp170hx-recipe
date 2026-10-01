@@ -5,7 +5,7 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/05317762a8e0dd266843f3a44b5ec216c4f78f4a"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%2005317762a8-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%203a2bf16dae-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="release" src="https://img.shields.io/badge/release-1.6.0-2ea44f?style=flat">
   &nbsp;
@@ -13,9 +13,9 @@
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts. Native 1.6.0 results: tensor-parallel at 339.4 tok/s for one
-user and 769.7 tok/s across eight, or pipeline-parallel with
-6,586 tok/s cold prefill and a 2,064,638-token KV pool. The weights
+cards in two layouts. Native 1.6.0 results: tensor-parallel at 394.0 tok/s for one
+user and 797.9 tok/s across eight, or pipeline-parallel with
+6,580 tok/s cold prefill and a 1,914,216-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
 outputs were identical across the repeated checks in [Results](docs/results.md).**
@@ -58,21 +58,21 @@ image, so the engine and its Python environment stay out of your system.
 
 ## Headline numbers
 
-Release 1.6.0, native, DFlash2 (load-adaptive depth: 5 drafts at one request,
-4 at two, 3 under load), 262,144-token context, peer-to-peer off (the default),
-180 W per card, PCIe x16 links.
+Release 1.6.0, native, DFlash2 (adaptive depth: up to 7 drafts at one request,
+up to 5 at two, 3 under load), 262,144-token context, peer-to-peer off (the
+default), 180 W per card, PCIe x16 links.
 
 | | Tensor-parallel 4 (default) | Pipeline-parallel 4 (`LAYOUT=pp4`) |
 |---|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **339.4 / 318.7 / 185.0 tok/s** | **186.6 / 168.5 / 98.0 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **769.7 / 692.1 / 545.7 tok/s** | **606.3 / 588.5 / 472.2 tok/s** |
-| Cold prefill | **2,671 tok/s** | **6,586 tok/s** |
-| KV pool at 262,144 context | 1,125,277 tokens | 2,064,638 tokens |
+| Streaming decode, 1 user, structured / code / prose | **394.0 / 377.4 / 180.5 tok/s** | **235.3 / 207.9 / 100.2 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **797.9 / 683.2 / 544.7 tok/s** | **623.1 / 591.0 / 465.8 tok/s** |
+| Cold prefill | **2,669 tok/s** | **6,580 tok/s** |
+| KV pool at 262,144 context | 1,072,150 tokens | 1,914,216 tokens |
 | HumanEval pass@1 / GSM8K | 160/164 / 97.04% | 162/164 / 97.04% |
 
 With the optional [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional)
-path, tensor-parallel 4 measured 372.6 tok/s for one user, 821.2 across eight
-and 3,056 tok/s cold prefill. Method, the per-user decode table, the prefill
+path, tensor-parallel 4 measured 437.4 tok/s for one user, 840.7 across eight
+and 3,061 tok/s cold prefill. Method, the per-user decode table, the prefill
 ladder up to ~250k tokens and quality detail: [Results](docs/results.md).
 
 ## Quick start
@@ -103,7 +103,7 @@ streaming and tool-call clients are in [examples/](examples/README.md).
 Tensor-parallel 4 (`tp4`, the default) gives one or two interactive users the
 fastest answer per request and needs x16 links. Pipeline-parallel 4 (`pp4`)
 suits many parallel users, long prompts and x4 links, with 2.47× the prefill
-and 1.83× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
+and 1.79× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
 in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 
 ## Documentation
@@ -133,7 +133,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/05317762a8e0dd266843f3a44b5ec216c4f78f4a/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340/LICENSE).
 
 The downloaded models have separate licences:
 
