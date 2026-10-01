@@ -54,7 +54,7 @@ image, so the engine and its Python environment stay out of your system.
   (not needed for the [native install](docs/how-to-use.md#native-install-for-developers))
 - `git`, `curl`, `flock`, `setsid`, and `jq` for the smoke test
 - about 180 GiB (193 GB) of disk for the two checkpoints, plus the engine image
-  (about 10.6 GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
+  (about 10.3 GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
 
 ## Headline numbers
 
@@ -68,7 +68,7 @@ default), 180 W per card, PCIe x16 links.
 | Decode, 8 users, aggregate, structured / code / prose | **797.9 / 683.2 / 544.7 tok/s** | **623.1 / 591.0 / 465.8 tok/s** |
 | Cold prefill | **2,669 tok/s** | **6,580 tok/s** |
 | KV pool at 262,144 context | 1,072,150 tokens | 1,914,216 tokens |
-| HumanEval pass@1 / GSM8K | 160/164 / 97.04% | 162/164 / 97.04% |
+| HumanEval pass@1 / GSM8K (1.6.0 decode kernels, depth ≤ 5; [details](docs/results.md#release-160-faster-decode-for-one-or-two-users)) | 160/164 / 97.04% | 162/164 / 97.04% |
 
 With the optional [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional)
 path, tensor-parallel 4 measured 437.4 tok/s for one user, 840.7 across eight

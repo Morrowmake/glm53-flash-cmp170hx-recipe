@@ -8,7 +8,7 @@
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. Not needed for the [native install](#native-install-for-developers) |
 | Tools | `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), `jq` for the smoke test |
-| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image (about 10.6 GB compressed) and the kernel compile caches |
+| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image (about 10.3 GB compressed) and the kernel compile caches |
 
 ## Step by step
 
@@ -16,7 +16,7 @@
 done, so running it twice is safe. The same steps one at a time:
 
 ```bash
-./install.sh       # 1. pull the engine image, pinned by digest (about 10.6 GB compressed)
+./install.sh       # 1. pull the engine image, pinned by digest (about 10.3 GB compressed)
 ./download.sh      # 2. fetch the model (~178 GiB) and the drafter (~2.2 GiB) into ./models
 ./start.sh         # 3. start the container, wait for /health, print the KV pool size
 ./start.sh smoke   # 4. one chat request and one tool call against the running server
