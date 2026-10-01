@@ -9,6 +9,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
+from layer_count import check as check_layer_count
+
 OCI = "application/vnd.oci.image."
 
 def encoded(value):
@@ -62,6 +64,12 @@ def assemble(base, payload, out, pin, release, layered=True, parallel=True, thre
     manifest, config = image(base)
     if config["os"] != "linux" or config["architecture"] != "amd64":
         raise ValueError("Base must be linux/amd64")
+    names = ["python", "dependencies", "native", "engine"]
+    if (payload / "cache-seed").exists():
+        names.append("cache-seed")
+    if len(manifest["layers"]) != len(config["rootfs"]["diff_ids"]):
+        raise ValueError("Base layer/config count mismatch")
+    check_layer_count(len(manifest["layers"]) + (len(names) if layered else 1))
     if out.exists():
         raise ValueError("Output OCI path already exists")
     (out / "blobs/sha256").mkdir(parents=True)
@@ -72,9 +80,6 @@ def assemble(base, payload, out, pin, release, layered=True, parallel=True, thre
         if digest_file(source) != desc["digest"]:
             raise ValueError("Base layer integrity mismatch")
         shutil.copyfile(source, out / "blobs/sha256" / source.name)
-    names = ["python", "dependencies", "native", "engine"]
-    if (payload / "cache-seed").exists():
-        names.append("cache-seed")
     if not layered:
         merged = work / "runtime"
         merged.mkdir()

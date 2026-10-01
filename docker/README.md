@@ -89,8 +89,14 @@ existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin
 Build the release source with Docker:
 
 ```bash
-docker build -t vllm-cmp170hx:1.6.0-3a2bf16dae docker/
+bash docker/build-docker.sh vllm-cmp170hx:1.6.0-3a2bf16dae
 ```
+
+Both build paths print the total filesystem layer count, including the base,
+and fail above 123. OCI assembly checks before compression; the Docker wrapper
+checks the final image's `RootFS.Layers` after building. Use the wrapper for
+Docker builds; a bare `docker build` bypasses this check. The troubleshooting
+kill switch is `IMAGE_LAYER_COUNT_CHECK=0` (default 1).
 
 The build needs no GPU. It clones the fork at the pinned commit and downloads
 torch, the precompiled extensions and the runtime extras, so it takes a while
