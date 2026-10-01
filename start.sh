@@ -198,6 +198,9 @@ CONTAINER_NAME="${CONTAINER_NAME:-glm53-flash}"
 SHM_SIZE="${SHM_SIZE:-16g}"
 CACHE_DIR="${CACHE_DIR:-$SCRIPT_DIR/cache}"
 READY_TIMEOUT="${READY_TIMEOUT:-1800}"
+BOOT_CHECK="${BOOT_CHECK:-1}"
+case "$BOOT_CHECK" in 0|1) ;; *) die "BOOT_CHECK must be 0 or 1" ;; esac
+LAUNCHED=0
 STOP_TIMEOUT="${STOP_TIMEOUT:-120}"
 MIN_GPUS="${MIN_GPUS:-4}"
 MIN_GPU_MIB="${MIN_GPU_MIB:-61440}"      # 60 GiB; the cards we run report 65,536 MiB
@@ -221,7 +224,7 @@ case "$HOST" in
 esac
 
 export VENV VLLM_SRC MODEL DFLASH_MODEL CUDA_HOME HOST PORT SERVED_MODEL_NAME
-export SERVE_LOG READY_TIMEOUT
+export SERVE_LOG READY_TIMEOUT BOOT_CHECK
 export MODEL_ID="${MODEL_ID:-$SERVED_MODEL_NAME}"
 
 banner() {
@@ -355,6 +358,7 @@ preflight() {
     log "preflight (runtime: $RUNTIME, layout: $LAYOUT)"
     need_cmd git  "install it: apt-get install -y git"
     need_cmd curl "install it: apt-get install -y curl"
+    [ "$BOOT_CHECK" = 0 ] || need_cmd python3 "install Python 3 for the boot check"
     if [ "$RUNTIME" = container ]; then
         preflight_docker
     else
@@ -754,6 +758,8 @@ container_env() {
     echo "CUDA_HOME=/usr/local/cuda"
     echo "HOST=0.0.0.0"
     echo "PORT=8000"
+    echo "BOOT_CHECK=$BOOT_CHECK"
+    echo "RECIPE_BOOT_CHECK_OWNER=start"
     # The server runs as you, not root: every cache it writes (Triton,
     # FlashInfer, TileLang, torch, vLLM, Hugging Face) goes under the mounted
     # cache directory, owned by you. USER and LOGNAME give Python a user name
@@ -782,6 +788,7 @@ container_args() {
         -p "$(publish_addr):8000"
         --env-file "$envfile"
         -v "$SCRIPT_DIR/serve.sh:/recipe/serve.sh:ro"
+        -v "$SCRIPT_DIR/boot_check.py:/recipe/boot_check.py:ro"
         -v "$MODEL:/models/$(basename "$MODEL"):ro")
     if [ "$SPEC_MODE" = dflash ]; then
         CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")
@@ -838,6 +845,7 @@ container_launch() {
     id="$("${CRUN[@]}")" || { rm -f "$envfile"; die "docker run failed"; }
     rm -f "$envfile"
     echo "$id" >"$CIDFILE"
+    LAUNCHED=1
     log "  container: ${id:0:12} ($CONTAINER_NAME)"
     # Copy the container's output into $SERVE_LOG, as a native start writes it.
     # The follower ends when the container does. 9>&-: see launch().
@@ -908,9 +916,10 @@ launch() {
     # 9>&- : the server must not inherit the lifecycle lock (fd 9). serve.sh
     # execs vllm, so an inherited fd would hold the lock for the server's whole
     # life and block every later stop, restart and update.
-    setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" 9>&- >>"$SERVE_LOG" 2>&1 < /dev/null &
+    RECIPE_BOOT_CHECK_OWNER=start setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" 9>&- >>"$SERVE_LOG" 2>&1 < /dev/null &
     local pid=$!
     echo "$pid" >"$PIDFILE"
+    LAUNCHED=1
     log "  pid: $pid"
 }
 
@@ -927,6 +936,17 @@ wait_ready() {
     while [ "$elapsed" -lt "$READY_TIMEOUT" ]; do
         if health_ok; then
             log "healthy after ${elapsed}s"
+            if [ "$LAUNCHED" = 1 ]; then
+                if [ "$BOOT_CHECK" = 0 ]; then
+                    log "[boot-check] disabled (BOOT_CHECK=0)"
+                elif ! python3 "$SCRIPT_DIR/boot_check.py" --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME"; then
+                    warn "[boot-check] FAIL: stopping this checkout's failed launch"
+                    do_stop
+                    return 1
+                fi
+            else
+                log "[boot-check] existing server: no new requests"
+            fi
             local kv; kv="$(kv_line || true)"
             [ -n "$kv" ] && log "  $kv"
             log "  model: $(served_id)"

@@ -596,12 +596,27 @@ CMD=("$VENV/bin/vllm" serve "$MODEL"
   ${MM_ARGS[@]+"${MM_ARGS[@]}"} ${SPEC[@]+"${SPEC[@]}"} ${FAIR_ARGS[@]+"${FAIR_ARGS[@]}"}
   ${BLOCK_ARGS[@]+"${BLOCK_ARGS[@]}"} ${EXTRA_ARGS:-})
 
+BOOT_CHECK=${BOOT_CHECK:-1}
+case "$BOOT_CHECK" in 0|1) ;; *) echo "[boot-check] FAIL: BOOT_CHECK must be 0 or 1" >&2; exit 2 ;; esac
 if [ "${DRY:-0}" = "1" ]; then
+  echo "[boot-check] BOOT_CHECK=$BOOT_CHECK (dry run)"
   echo "serve.sh: DRY=1, layout $LAYOUT (PP=$PP TP=$TP), environment the server would get:"
   env | LC_ALL=C sort | grep -E '^(VLLM_GLM5_|VLLM_SPARSE_|VLLM_ALLOW_PCIE_|VLLM_CUSTOM_ALLREDUCE_|VLLM_PP_|VLLM_KV_|VLLM_MOE_|PYTORCH_CUDA_ALLOC_CONF=|NCCL_)' | sed 's/^/  /' || true
   if [ -n "${VLLM_API_KEY:-}" ]; then echo "  VLLM_API_KEY=(set, not shown)"; else echo "  (no API key: /v1 is open to anyone who can reach ${HOST:-127.0.0.1}:${PORT:-8000})"; fi
   echo "serve.sh: DRY=1, command:"
   printf '%q ' "${CMD[@]}"; printf '\n'
   exit 0
+fi
+if [ "$BOOT_CHECK" = 0 ]; then
+  echo "[boot-check] disabled (BOOT_CHECK=0)"
+elif [ "${RECIPE_BOOT_CHECK_OWNER:-}" = start ]; then
+  echo "[boot-check] delegated to start.sh after health"
+else
+  CLIENT_HOST=${HOST:-127.0.0.1}
+  case "$CLIENT_HOST" in 0.0.0.0|::|'[::]'|'') CLIENT_HOST=127.0.0.1 ;; esac
+  exec "$VENV/bin/python" "$REPO_ROOT/boot_check.py" \
+    --base "http://$CLIENT_HOST:${PORT:-8000}" \
+    --model "${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}" \
+    --ready-timeout "${READY_TIMEOUT:-1800}" --serve "${CMD[@]}"
 fi
 exec "${CMD[@]}"

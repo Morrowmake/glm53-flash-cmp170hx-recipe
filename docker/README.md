@@ -134,6 +134,7 @@ docker run -d --name glm53-flash --user "$(id -u):$(id -g)" --workdir /cache \
   -p 127.0.0.1:8000:8000 \
   --env-file docker/container.env \
   -v "$PWD/serve.sh:/recipe/serve.sh:ro" \
+  -v "$PWD/boot_check.py:/recipe/boot_check.py:ro" \
   -v "$MODELS/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro" \
   -v "$MODELS/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro" \
   -v "$CACHE:/cache" \

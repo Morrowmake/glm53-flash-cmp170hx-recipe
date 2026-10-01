@@ -52,7 +52,7 @@ image, so the engine and its Python environment stay out of your system.
 - Linux with NVIDIA driver **580 or newer**
 - Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
   (not needed for the [native install](docs/how-to-use.md#native-install-for-developers))
-- `git`, `curl`, `flock`, `setsid`, and `jq` for the smoke test
+- `git`, `curl`, `flock`, `setsid`, Python 3 for the boot check, and `jq` for the smoke test
 - about 180 GiB (193 GB) of disk for the two checkpoints, plus the engine image
   (about 10.3 GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
 
@@ -103,6 +103,25 @@ API key unless you [change that](docs/how-to-use.md#serving-other-machines).
 Prefer Docker Compose? [`docker-compose.yml`](docker-compose.yml) starts the
 same container ([Docker Compose](docs/how-to-use.md#docker-compose)). Python,
 streaming and tool-call clients are in [examples/](examples/README.md).
+
+## Settings
+
+Copy settings from [`.env.advanced.example`](.env.advanced.example) into `.env`.
+Startup runs a boot check after `/health`; `BOOT_CHECK=0` disables it.
+The temperature-0 prompt is `Reply with exactly OK, with no punctuation or other text.`
+The reply's `content`, with surrounding whitespace stripped, must equal `OK`.
+A second temperature-0 request streams 768 tokens of arithmetic-function code
+with `reasoning_effort=low`, `min_tokens=768` and `ignore_eos=true`.
+Model-scoped Prometheus `/metrics` deltas must show at least 64 draft steps,
+64 proposed draft tokens and more than zero accepted tokens. Startup fails
+and stops its own launch on an incorrect reply, incomplete stream, missing
+counters or insufficient drafting. Completion counters settle the first
+request before the second snapshot; counter resets fail. Metrics may take
+up to 60 seconds to settle. These are the only two boot generation requests;
+starting an already-running checkout sends none. Keep user requests out of
+startup so the model-wide counters describe the check. Direct `serve.sh` and
+Compose launches use the same check. `smoke.sh` retains its two independent
+chat/tool requests; it does not repeat the boot check.
 
 ## Choosing a layout
 
