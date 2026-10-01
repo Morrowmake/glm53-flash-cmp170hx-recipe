@@ -6,7 +6,7 @@
 overrides are preserved.
 
 Engine: `3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340` (on upstream `e55d076f89`, as 1.5.x).
-Image: pending (built from this engine before release).
+Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0` (tag `1.6.0-3a2bf16dae`).
 The base-extension wheel remains upstream `b6761e8ded57ef85b708f34af8cab1649eae1069`.
 
 - Adaptive DFlash2 depth, on by default in both layouts

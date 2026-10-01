@@ -18,7 +18,7 @@
 
 services:
   glm53-flash:
-    image: ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663}
+    image: ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0}
     container_name: glm53-flash
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /cache

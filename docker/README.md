@@ -27,14 +27,13 @@ image, how to build it, and how to run it by hand without `./start.sh`.
   settings are baked in.
 - **No weights.** The two checkpoints are mounted from the host.
 
-Release image, pinned to the exact artifact accepted in private-container checks:
+Release image, built from the pinned engine; release acceptance installs and updates from this exact published digest:
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
+ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0
 ```
 
-Its OCI version is `1.6.0-3a2bf16dae`. Private fresh/update checks are not proof
-of public registry availability or public-distribution fresh/update acceptance.
+Its OCI version is `1.6.0-3a2bf16dae`.
 
 **Measured in 1.4.0:** On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670). (Release 1.3.x's image ran within
 0.4 % of the native install on decode at 1 / 4 / 8 users and on cold prefill.)
@@ -122,7 +121,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:6320381b3d0f80ee8a0a36b92013228cc1a7b01ec202030749fab2aa1ad25663
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"
