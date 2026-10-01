@@ -74,9 +74,10 @@ Tokens per second, release 1.6.0, 262,144-token context, 180 W per card, PCIe x1
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
 they decode fastest; prose least. DFlash2 drafts up to 7 tokens ahead for one
-user and 3 under load. Quality: HumanEval pass@1 160/164 (tensor-parallel) and
-162/164 (pipeline-parallel), GSM8K 97.04 % in both, measured on the 1.6.0 decode
-kernels with draft depth ≤ 5 ([details](docs/results.md#release-160-faster-decode-for-one-or-two-users)).
+user and 3 under load. Quality, measured on the 1.6.0 release build (tensor-parallel 4):
+HumanEval pass@1 162/164, GSM8K 1,285/1,319 (97.42 %); pipeline-parallel 4,
+measured on the 1.6.0 decode kernels with draft depth ≤ 5: 162/164 and 97.04 %
+([details](docs/results.md#release-160-faster-decode-for-one-or-two-users)).
 Method, exact figures, the per-user decode table and the prefill ladder up to
 ~250k tokens: [Results](docs/results.md).
 

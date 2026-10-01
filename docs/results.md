@@ -29,12 +29,14 @@ code / prose) under TP4 and +65.9 / +48.7 / −3.2 % under PP4; eight users
 are accepted least often, stays within a few percent of 1.5.x.
 
 **Quality**, fixed-batch HumanEval (164) and GSM8K (1,319), compared per
-answer with the previous release, measured on this release's decode kernels with
-adaptive depth up to 5 drafts: TP4 **160/164 and 1,280/1,319** (previous 162 and 1,281; 3
-losses and 1 gain on HumanEval, McNemar p 0.63), PP4 **162/164 and 1,280/1,319**
-(previous 163 and 1,284; p 1.0 and 0.22). Individual answers flip in both
-directions when decoded text changes; no suite shows a significant net loss.
-A further TP4 run with the drafter width on also scored 160/164 and 1,280/1,319.
+answer with the previous release. **TP4, measured on the 1.6.0 release build**
+(adaptive depth up to 7, drafter width on): **162/164 and 1,285/1,319 (97.42 %)**
+(previous 162 and 1,281; HumanEval 2 losses and 2 gains, McNemar p 1.0; GSM8K
+6 gains and 2 losses, p 0.29). **PP4, measured on the 1.6.0 decode kernels with
+adaptive depth up to 5** (no PP4 run on the final build): **162/164 and
+1,280/1,319** (previous 163 and 1,284; p 1.0 and 0.22). Earlier TP4 runs on the
+way to this release scored 160/164 and 1,280/1,319. Individual answers flip in
+both directions when decoded text changes; no suite shows a significant net loss.
 
 **Long-context and repeatability checks.** The full tier-2 long-context and
 repeatability checks ran on the same engine build: needle retrieval 30/30 up

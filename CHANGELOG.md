@@ -29,9 +29,11 @@ The base-extension wheel remains upstream `b6761e8ded57ef85b708f34af8cab1649eae1
   prefill unchanged (2,669 / 3,061 / 6,580 tok/s).
 - KV pool at 262,144 context: TP4 1,072,150 tokens (−8.9 %), PP4 1,914,216
   (−18.0 %).
-- Quality, fixed batch, per answer against the previous release, on this
-  release's decode kernels with adaptive depth up to 5: TP4 HumanEval 160/164, GSM8K
-  1,280/1,319; PP4 162/164, 1,280/1,319; no significant net loss.
+- Quality, fixed batch, per answer against the previous release: TP4 on the
+  1.6.0 release build HumanEval 162/164, GSM8K 1,285/1,319; PP4 on the 1.6.0
+  decode kernels with adaptive depth up to 5: 162/164, 1,280/1,319; no
+  significant net loss. (2026-10-01, documentation: TP4 scores updated from the
+  depth-5 candidate's 160/164 and 1,280/1,319 to the release build's.)
 - DFlash2 is the only supported speculative mode; `SPEC_MODE=mtp|none` remain
   in the launcher, unsupported and untested. Known limits notes the drafter's
   non-commercial licence.
