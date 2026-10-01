@@ -106,30 +106,8 @@ streaming and tool-call clients are in [examples/](examples/README.md).
 
 ## Settings
 
-Copy settings from [`.env.advanced.example`](.env.advanced.example) into `.env`.
-`DEFAULT_REASONING_EFFORT` sets the default chat-template kwarg to `low`, `high`
-or `max` for requests that omit effort; empty disables this override.
-The GLM chat template maps a missing reasoning effort to `max`.
-The pinned engine supports `--default-chat-template-kwargs`; request-level
-`reasoning_effort` or `chat_template_kwargs.reasoning_effort` takes precedence.
-An explicit `--default-chat-template-kwargs` in `EXTRA_ARGS` wins over this
-setting. The two boot requests explicitly use `low` regardless of this default.
-
-Startup runs a boot check after `/health`; `BOOT_CHECK=0` disables it.
-The temperature-0 prompt is `Reply with exactly OK, with no punctuation or other text.`
-The reply's `content`, with surrounding whitespace stripped, must equal `OK`.
-A second temperature-0 request streams 768 tokens of arithmetic-function code
-with `reasoning_effort=low`, `min_tokens=768` and `ignore_eos=true`.
-Model-scoped Prometheus `/metrics` deltas must show at least 64 draft steps,
-64 proposed draft tokens and more than zero accepted tokens. Startup fails
-and stops its own launch on an incorrect reply, incomplete stream, missing
-counters or insufficient drafting. Completion counters settle the first
-request before the second snapshot; counter resets fail. Metrics may take
-up to 60 seconds to settle. These are the only two boot generation requests;
-starting an already-running checkout sends none. Keep user requests out of
-startup so the model-wide counters describe the check. Direct `serve.sh` and
-Compose launches use the same check. `smoke.sh` retains its two independent
-chat/tool requests; it does not repeat the boot check.
+Settings live in `.env`; see [Settings](docs/how-to-use.md#settings)
+for boot checks and default reasoning effort.
 
 ## Choosing a layout
 
