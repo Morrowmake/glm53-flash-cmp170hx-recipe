@@ -372,7 +372,7 @@ export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
 # These are not remeasurements with the independent False allocator default.
 # Switch 0 uses the host-staged path rather than dropping to NCCL:
 # VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
-export VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=${VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE:-0}
+# VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE is resolved by the startup check below.
 # 2stage, not the built-in crossover: that crossover takes one-shot below
 # 512 KiB, which is tuned for NVLink and wrong on Gen2 x16. Forcing 1stage
 # everywhere measured worse than either (16.83 ms at 1 user, 33.00 at 4). Unset it to get
@@ -387,18 +387,8 @@ export PYTORCH_CUDA_ALLOC_CONF=${PYTORCH_CUDA_ALLOC_CONF-expandable_segments:Fal
 # Report configuration, not inferred allocator precedence when both aliases exist.
 printf 'serve.sh: allocator: PYTORCH_CUDA_ALLOC_CONF=%q PYTORCH_ALLOC_CONF=%q\n' \
   "$PYTORCH_CUDA_ALLOC_CONF" "${PYTORCH_ALLOC_CONF-<unset>}"
-# NCCL over peer-to-peer (TP4 with the switch above at 1). NCCL treats these
-# cards, each on its own root port, as not peer-capable and runs its ring
-# through host memory; NCCL_P2P_LEVEL=SYS lets it use peer-to-peer instead,
-# which carries the large prefill collectives: +13.7% cold prefill with
-# identical outputs. On by default whenever the switch above is 1;
-# GLM5_NCCL_P2P_SYS=0 turns it off, and an explicit NCCL_P2P_LEVEL always wins.
-# Nothing changes with the switch above at 0 (the default) or under PP4.
-NCCL_P2P_SYS_DEFAULT=1
-if [ "$TP" -gt 1 ] && [ "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" = "1" ] \
-   && [ "${GLM5_NCCL_P2P_SYS:-$NCCL_P2P_SYS_DEFAULT}" = "1" ]; then
-  export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-SYS}
-fi
+# Content-verified peer access for TP and PP, shared by both runtimes.
+source "$REPO_ROOT/p2p_check.sh"
 
 # Shared-expert overlap: enqueue the routed experts first, then submit the MoE
 # shared experts to the aux stream, so the two actually run at the same time.

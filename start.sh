@@ -850,7 +850,7 @@ publish_addr() {
 # The environment the container's serve.sh gets: the in-container paths, then
 # every setting of yours that serve.sh reads. serve.sh (mounted from this
 # checkout) turns them into the same flags as a native start.
-CONTAINER_KEYS="LAYOUT PP TP MAX_LEN MAX_SEQS MAX_BATCHED PREFILL_CAP GPU_UTIL SPEC_N
+CONTAINER_KEYS="P2P P2P_CHECK_CACHE LAYOUT PP TP MAX_LEN MAX_SEQS MAX_BATCHED PREFILL_CAP GPU_UTIL SPEC_N
 REASONING_PARSER TOOL_PARSER DEFAULT_REASONING_EFFORT MM_CAP MM_IMAGES MM_FRAMES MM_MAX_PIXELS FAIR_PREFILL
 FAIR_CHUNK FAIR_PARTIAL BLOCK_SIZE EXTRA_ARGS SERVED_MODEL_NAME API_KEY"
 container_env() {
@@ -892,6 +892,9 @@ container_args() {
         --env-file "$envfile"
         -v "$SCRIPT_DIR/serve.sh:/recipe/serve.sh:ro"
         -v "$SCRIPT_DIR/boot_check.py:/recipe/boot_check.py:ro"
+        -v "$SCRIPT_DIR/p2p_check.py:/recipe/p2p_check.py:ro"
+        -v "$SCRIPT_DIR/p2p_check.sh:/recipe/p2p_check.sh:ro"
+        -v "$SCRIPT_DIR/p2p_probe.cu:/recipe/p2p_probe.cu:ro"
         -v "$MODEL:/models/$(basename "$MODEL"):ro")
     if [ "$SPEC_MODE" = dflash ]; then
         CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")

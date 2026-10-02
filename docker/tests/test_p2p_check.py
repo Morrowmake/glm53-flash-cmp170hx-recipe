@@ -1,0 +1,272 @@
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import time
+
+import pytest
+
+ROOT = Path(__file__).parents[2]
+sys.path.insert(0, str(ROOT))
+import p2p_check as p2p
+
+
+class Probe:
+    def __init__(self, advertised=True, count=4):
+        self.info = dict(driver=13030, kernel_driver="driver-build", uuids=[f"GPU-{i}" for i in range(count)],
+                         advertised=advertised)
+        self.calls = 0
+        self.checked = dict(passed=True, pairs=count*(count-1), sizes=9, max_bytes=33554432)
+        self.error = None
+
+    def identity(self, deadline):
+        return self.info
+
+    def check(self, deadline):
+        self.calls += 1
+        if self.error:
+            raise self.error
+        return self.checked
+
+
+def decide(tmp_path, probe, **kwargs):
+    values = dict(mode="auto", tp=4, pp=1, cache=tmp_path, backend=probe, boot="boot-a")
+    values.update(kwargs)
+    return p2p.decide(**values)
+
+
+def test_success_and_boot_cache(tmp_path):
+    probe = Probe()
+    first = decide(tmp_path, probe)
+    second = decide(tmp_path, probe)
+    assert first["enabled"] and not first["cached"]
+    assert second["enabled"] and second["cached"] and probe.calls == 1
+
+
+@pytest.mark.parametrize("field", ["driver", "kernel_driver", "uuids", "boot"])
+def test_cache_identity_invalidation(tmp_path, field):
+    probe = Probe()
+    decide(tmp_path, probe)
+    kwargs = {}
+    if field == "boot":
+        kwargs["boot"] = "boot-b"
+    elif field == "driver":
+        probe.info[field] += 1
+    elif field == "uuids":
+        probe.info[field] = list(reversed(probe.info[field]))
+    else:
+        probe.info[field] += "-new"
+    assert not decide(tmp_path, probe, **kwargs)["cached"] and probe.calls == 2
+
+
+@pytest.mark.parametrize("tp,pp", [(4, 1), (1, 4)])
+@pytest.mark.parametrize("error", [RuntimeError("owner mismatch"), TimeoutError("check timed out")])
+def test_corruption_and_hang_fail_closed_cached(tmp_path, tp, pp, error):
+    probe = Probe()
+    probe.error = error
+    first = decide(tmp_path, probe, tp=tp, pp=pp)
+    assert not first["enabled"] and "advertised but data check failed" in first["reason"]
+    assert decide(tmp_path, probe, tp=tp, pp=pp)["cached"] and probe.calls == 1
+
+
+@pytest.mark.parametrize("advertised,count", [(False, 4), (False, 1)])
+def test_unadvertised_does_not_copy(tmp_path, advertised, count):
+    probe = Probe(advertised, count)
+    actual = decide(tmp_path, probe)
+    assert not actual["enabled"] and "not advertised" in actual["reason"] and probe.calls == 0
+
+
+@pytest.mark.parametrize("mode,tp,pp,enabled", [("off", 4, 1, False), ("force", 4, 1, True),
+                                               ("auto", 1, 1, False), ("force", 1, 1, False)])
+def test_overrides_and_single_gpu_skip(tmp_path, mode, tp, pp, enabled):
+    class Never:
+        def identity(self, deadline):
+            pytest.fail("CUDA must not be initialized")
+    assert decide(tmp_path, Never(), mode=mode, tp=tp, pp=pp)["enabled"] is enabled
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize("change", [dict(passed=False), dict(pairs=6), dict(sizes=8), dict(max_bytes=1024)])
+def test_partial_check_rejected(tmp_path, change):
+    probe = Probe()
+    probe.checked.update(change)
+    actual = decide(tmp_path, probe)
+    assert not actual["enabled"] and "incomplete" in actual["reason"]
+
+
+def test_corrupt_cache_rechecks(tmp_path):
+    probe = Probe()
+    decide(tmp_path, probe)
+    next(tmp_path.glob("*.json")).write_text('{bad json')
+    assert decide(tmp_path, probe)["enabled"] and probe.calls == 2
+
+
+def test_unavailable_probe_and_unwritable_cache(tmp_path):
+    probe = Probe()
+    probe.identity = lambda deadline: (_ for _ in ()).throw(OSError("compiler unavailable"))
+    assert "check unavailable" in decide(tmp_path, probe)["reason"]
+    blocked = tmp_path / "file"
+    blocked.write_text("file")
+    assert not decide(blocked, Probe())["enabled"]
+
+
+def test_subprocess_deadline(tmp_path):
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="timed out"):
+        p2p.bounded([sys.executable, "-c", "import time; time.sleep(30)"], started + 0.1)
+    assert time.monotonic() - started < 2
+
+
+def test_lock_deadline(tmp_path):
+    import fcntl
+    with (tmp_path / "lock").open("a") as first, (tmp_path / "lock").open("a") as second:
+        fcntl.flock(first, fcntl.LOCK_EX)
+        with pytest.raises(TimeoutError):
+            p2p.acquire(second, time.monotonic() + 0.05)
+
+
+@pytest.fixture(scope="module")
+def cpu_probe(tmp_path_factory):
+    root = tmp_path_factory.mktemp("cpu-p2p")
+    text = (ROOT / "p2p_probe.cu").read_text()
+    start = text.index("__global__ void peer_copy")
+    end = text.index("static void exact", start)
+    text = text[:start] + text[end:]
+    text = text.replace("peer_copy<<<256, 256>>>", "mock_peer_copy")
+    (root / "cuda_runtime.h").write_text((Path(__file__).with_name("cuda_mock.h")).read_text())
+    source = root / "probe.cpp"
+    source.write_text(text)
+    binary = root / "probe"
+    subprocess.run(["g++", "-O2", "-std=c++17", "-I", str(root), str(source), "-o", str(binary)],
+                   check=True, capture_output=True, text=True, timeout=60)
+    return binary
+
+
+def run_cpu(binary, *args, **env):
+    return subprocess.run([str(binary), *args], text=True, capture_output=True, timeout=120,
+                          env=dict(os.environ, CUDA_VISIBLE_DEVICES="", **env))
+
+
+def test_cpu_mock_all_pairs_content_and_ipc(cpu_probe):
+    run = run_cpu(cpu_probe, "--check")
+    assert run.returncode == 0, run.stderr
+    assert json.loads(run.stdout) == dict(passed=True, pairs=12, sizes=9, max_bytes=33554432)
+
+
+@pytest.mark.parametrize("method,message", [("memcpy", "cudaMemcpyPeer"), ("write", "SM peer write"),
+                                            ("read", "SM peer read"), ("ipc", "IPC write")])
+def test_cpu_mock_corruption_each_transport(cpu_probe, method, message):
+    run = run_cpu(cpu_probe, "--check", MOCK_CORRUPT=method)
+    assert run.returncode == 1 and message + " mismatch" in run.stderr
+
+
+@pytest.mark.parametrize("env,count,advertised", [({}, 4, True), ({"MOCK_NO_PEER": "1"}, 4, False),
+                                                ({"MOCK_COUNT": "1"}, 1, False)])
+def test_cpu_mock_advertisement(cpu_probe, env, count, advertised):
+    run = run_cpu(cpu_probe, "--identity", **env)
+    assert run.returncode == 0, run.stderr
+    info = json.loads(run.stdout)
+    assert len(info["uuids"]) == count and info["advertised"] is advertised
+
+
+@pytest.mark.parametrize("mode,enabled", [("off", False), ("auto", False), ("force", True)])
+@pytest.mark.parametrize("tp,pp", [(4, 1), (1, 4)])
+def test_shell_modes_and_nccl_safety(mode, enabled, tp, pp):
+    script = f'''VENV=/missing; REPO_ROOT={ROOT}; TP={tp}; PP={pp}; DRY=1
+source "$REPO_ROOT/p2p_check.sh"
+printf 'RESULT:%s,%s,%s' "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" "${{NCCL_P2P_LEVEL-unset}}" "${{NCCL_P2P_DISABLE-unset}}"
+'''
+    run = subprocess.run(["bash", "-c", script], text=True, capture_output=True,
+                         env=dict(os.environ, CUDA_VISIBLE_DEVICES="", P2P=mode,
+                                  NCCL_P2P_LEVEL="SYS", NCCL_P2P_DISABLE="1"))
+    assert run.returncode == 0, run.stderr
+    assert ("RESULT:1,SYS,unset" if enabled else "RESULT:0,unset,1") in run.stdout
+
+
+def test_container_forwarding_and_mounts(tmp_path):
+    (tmp_path / ".env.example").write_text("")
+    source = (ROOT / "start.sh").read_text().rsplit('main "$@"', 1)[0]
+    source += '\ncontainer_env\ncontainer_args /env\nprintf "%s\\n" "${CRUN[@]}"\n'
+    script = tmp_path / "start.sh"
+    script.write_text(source)
+    run = subprocess.run(["bash", str(script)], text=True, capture_output=True,
+                         env=dict(os.environ, CUDA_VISIBLE_DEVICES="", P2P="off"))
+    assert run.returncode == 0, run.stderr
+    assert "P2P=off" in run.stdout.splitlines()
+    for name in ("p2p_check.py", "p2p_check.sh", "p2p_probe.cu"):
+        assert f"/recipe/{name}:ro" in run.stdout
+
+
+def test_cache_pass_requires_complete_verification(tmp_path):
+    probe = Probe()
+    decide(tmp_path, probe)
+    path = next(tmp_path.glob("*.json"))
+    saved = json.loads(path.read_text())
+    saved.pop("verification")
+    path.write_text(json.dumps(saved))
+    assert not decide(tmp_path, probe)["cached"] and probe.calls == 2
+
+
+@pytest.mark.parametrize("enabled", ["0", "1"])
+@pytest.mark.parametrize("tp,pp", [(4, 1), (1, 4)])
+def test_real_serve_checks_before_server_and_sets_environment(tmp_path, enabled, tp, pp):
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    log = tmp_path / "calls"
+    python = venv / "bin/python"
+    python.write_text('''#!/bin/bash
+case "$1" in
+  */p2p_check.py) echo "check:$*" >> "$CALL_LOG"; echo "$CHECK_RESULT" ;;
+  *) echo unexpected-interpreter-call >&2; exit 1 ;;
+esac
+''')
+    server = venv / "bin/vllm"
+    server.write_text('''#!/bin/bash
+echo server >> "$CALL_LOG"
+printf 'RESULT:%s,%s,%s' "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" "${NCCL_P2P_LEVEL-unset}" "${NCCL_P2P_DISABLE-unset}"
+''')
+    python.chmod(0o755)
+    server.chmod(0o755)
+    run = subprocess.run(["bash", str(ROOT / "serve.sh")], text=True, capture_output=True,
+                         env=dict(os.environ, CUDA_VISIBLE_DEVICES="", DRY="0", VENV=str(venv),
+                                  MODEL="/target", DFLASH_MODEL="/draft", TP=str(tp), PP=str(pp),
+                                  VLLM_GLM5_MARLIN_DECODE_CUDA="0", VLLM_IMAGE_CACHE_SEED="0", BOOT_CHECK="0",
+                                  P2P="auto", NCCL_P2P_LEVEL="SYS", NCCL_P2P_DISABLE="1",
+                                  VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE="1", CALL_LOG=str(log), CHECK_RESULT=enabled))
+    assert run.returncode == 0, run.stderr
+    lines = log.read_text().splitlines()
+    assert len(lines) == 2 and lines[0].startswith("check:") and lines[1] == "server"
+    assert f"--mode auto --tp {tp} --pp {pp}" in lines[0]
+    assert ("RESULT:1,SYS,unset" if enabled == "1" else "RESULT:0,unset,1") in run.stdout
+
+
+@pytest.mark.parametrize("level,sys_setting,custom,expected", [
+    ("PHB", "1", "0", "RESULT:0,PHB,unset"),
+    ("", "0", "1", "RESULT:1,unset,unset"),
+])
+def test_pass_keeps_explicit_transport_settings(level, sys_setting, custom, expected):
+    script = f'''VENV=/missing; REPO_ROOT={ROOT}; TP=4; PP=1; DRY=1
+source "$REPO_ROOT/p2p_check.sh"
+printf 'RESULT:%s,%s,%s' "$VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" "${{NCCL_P2P_LEVEL-unset}}" "${{NCCL_P2P_DISABLE-unset}}"
+'''
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES="", P2P="force", GLM5_NCCL_P2P_SYS=sys_setting,
+               VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=custom)
+    if level:
+        env["NCCL_P2P_LEVEL"] = level
+    else:
+        env.pop("NCCL_P2P_LEVEL", None)
+    run = subprocess.run(["bash", "-c", script], text=True, capture_output=True, env=env)
+    assert run.returncode == 0 and expected in run.stdout
+
+
+def test_invalid_mode_rejected_before_cuda():
+    run = subprocess.run([sys.executable, str(ROOT / "p2p_check.py"), "--tp", "4", "--pp", "1", "--mode", "invalid"],
+                         text=True, capture_output=True, env=dict(os.environ, CUDA_VISIBLE_DEVICES=""))
+    assert run.returncode == 2 and "invalid choice" in run.stderr
+
+
+def test_compose_mounts_shared_gate():
+    compose = (ROOT / "docker-compose.yml").read_text()
+    for name in ("p2p_check.py", "p2p_check.sh", "p2p_probe.cu"):
+        assert f"./{name}:/recipe/{name}:ro" in compose

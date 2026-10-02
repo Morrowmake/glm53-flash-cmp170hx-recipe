@@ -35,6 +35,9 @@ services:
     volumes:
       - ./serve.sh:/recipe/serve.sh:ro
       - ./boot_check.py:/recipe/boot_check.py:ro
+      - ./p2p_check.py:/recipe/p2p_check.py:ro
+      - ./p2p_check.sh:/recipe/p2p_check.sh:ro
+      - ./p2p_probe.cu:/recipe/p2p_probe.cu:ro
       - ${MODELS_DIR:-./models}/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro
       - ${MODELS_DIR:-./models}/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro
       - ./cache:/cache
