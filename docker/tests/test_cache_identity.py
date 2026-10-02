@@ -139,3 +139,13 @@ def test_driver_error_still_rejected(runtime):
     driver.status = 1
     with pytest.raises(ValueError, match="Cannot identify CUDA driver"):
         identify([("NVIDIA CMP 170HX 64GB", (8, 0))])
+
+
+@pytest.mark.parametrize("form", ["bare", "prefixed", "object"])
+def test_nvml_uuid_string_form(nvml, form):
+    import uuid
+    identifier = uuid.UUID("12345678-1234-5678-9abc-123456789abc")
+    value = {"bare": str(identifier), "prefixed": "GPU-" + str(identifier), "object": identifier}[form]
+    _, calls = nvml
+    assert cache.pci_device_id(value) == 0x20C210DE
+    assert calls == ["init", "GPU-" + str(identifier), ("pci", "GPU-" + str(identifier)), "shutdown"]

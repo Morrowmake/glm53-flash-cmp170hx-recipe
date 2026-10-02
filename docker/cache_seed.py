@@ -35,7 +35,10 @@ def pci_device_id(uuid):
         return None
     try:
         # UUID identifies the CUDA-visible device even when ordinals are remapped.
-        handle = pynvml.nvmlDeviceGetHandleByUUID(uuid)
+        value = str(uuid)
+        if not value.startswith("GPU-"):
+            value = "GPU-" + value
+        handle = pynvml.nvmlDeviceGetHandleByUUID(value)
         return pynvml.nvmlDeviceGetPciInfo(handle).pciDeviceId
     except pynvml.NVMLError:
         return None
