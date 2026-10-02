@@ -19,14 +19,8 @@ Engine changes, all on by default:
   `VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` keeps the previous order
   ([Optional compiled Marlin](compiled-marlin.md)).
 
-**The trade: KV pool.** Deeper drafts reserve more per-request scratch, so the
-KV pool at 262,144 context is 1,072,150 tokens under TP4 (−8.9 % against 1.5.x)
-and 1,914,216 under PP4 (−18.0 %). Cold prefill is unchanged.
-
-**Against 1.5.x, same protocol:** one user +47.4 / +44.7 / −3.0 % (structured /
-code / prose) under TP4 and +65.9 / +48.7 / −3.2 % under PP4; eight users
-+5.1 / +1.3 / +2.6 % (TP4) and +3.3 / +2.4 / +4.7 % (PP4). Prose, whose drafts
-are accepted least often, stays within a few percent of 1.5.x.
+**The trade: KV pool.** Deeper drafts reserve more per-request scratch.
+The measured TP4 P2P-on pool at 262,144 context is 1,073,093 tokens.
 
 **Quality**, fixed-batch HumanEval (164) and GSM8K (1,319), compared per
 answer with the previous release. **TP4, measured on the 1.6.0 release build**
@@ -54,13 +48,13 @@ same workloads and client as the 1.5.0 table below: DFlash2 with adaptive
 depth, 262,144-token context, 180 W per card, PCIe x16 links, one server start
 per column, decode median of five runs.
 
-| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
-|---|---:|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **394.0 / 377.4 / 180.5 tok/s** | **437.4 / 404.2 / 198.6 tok/s** | **235.3 / 207.9 / 100.2 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **797.9 / 683.2 / 544.7 tok/s** | **840.7 / 769.4 / 589.5 tok/s** | **623.1 / 591.0 / 465.8 tok/s** |
-| Cold prefill | **2,669 tok/s** | **3,061 tok/s** | **6,580 tok/s** |
-| One-token response time, 6,217 / 23,255-token prompt | 2.38 / 8.67 s | 2.04 / 7.49 s | 1.46 / 3.63 s |
-| KV pool at 262,144 context | 1,072,150 tokens (4.09 full-length requests) | 1,073,093 tokens (4.09) | 1,914,216 tokens (7.30) |
+| | TP4, peer-to-peer on |
+|---|---:|
+| Streaming decode, 1 user, structured / code / prose | **437.4 / 404.2 / 198.6 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **840.7 / 769.4 / 589.5 tok/s** |
+| Cold prefill | **3,061 tok/s** |
+| One-token response time, 6,217 / 23,255-token prompt | 2.04 / 7.49 s |
+| KV pool at 262,144 context | 1,073,093 tokens (4.09) |
 
 Of the 855 measured decode requests, one (TP4 peer-to-peer on, structured,
 eight users) stopped at 262 tokens; all others ran to the 400-token cap.
@@ -75,17 +69,9 @@ See [Optional compiled Marlin](compiled-marlin.md) for defaults and limits.
 
 ## Allocator compatibility default (1.4.3)
 
-With DFlash2 k=3 and a 262,144-token context, the new
-`expandable_segments:False` default measured **1,176,646 KV tokens under
-TP4/peer-to-peer off** and **2,334,498 under PP4**: respectively +20,011 tokens
-(+20 physical blocks) and +14,170 (+4) against True on the same engine.
-These are not peer-to-peer gains. Explicit allocator overrides remain intact.
-
-Four alternating True/False starts per layout passed startup checks, short/long
-decode-drift and KL-divergence comparisons, and single-request repeatability,
-with no new GPU Xid errors. TP4 paired decode-step cost was +0.38–0.83% at
-1/4/6/8 users; PP4 paired means at 1/4/8 differed by at most 0.21%. PP4 at six
-users was scheduling-confounded; no speed conclusion is drawn there.
+The default is `expandable_segments:False`; explicit allocator overrides
+remain intact. Alternating starts passed startup, drift and repeatability
+checks with no new GPU Xid errors.
 Fixed-batch repeatability also passed under TP4 and PP4 in both eager and
 CUDA-graph modes. Native update checks passed with `.env` preserved and no
 engine reinstall. Validation for this change is DFlash-only; conflicting
@@ -93,13 +79,6 @@ allocator aliases were not GPU-validated.
 It does not establish a root-cause fix for driver or virtualisation failures.
 
 ## Quality (1.4.3)
-
-Full native fixed-batch results with DFlash2 k=3, repeated twice in each configuration:
-
-| Layout | HumanEval, pass@1 (164 tasks) | GSM8K (1,319 problems) |
-|---|---:|---:|
-| TP4, peer-to-peer off | **162/164 — 98.78%** | **1,281/1,319 — 97.12%** |
-| PP4, peer-to-peer off | **163/164 — 99.39%** | **1,284/1,319 — 97.35%** |
 
 The 1.4.0 baseline and 1.4.3 configuration matched exactly on generated token
 IDs, answers and scores in both full repeats of each same-layout comparison.
@@ -128,23 +107,19 @@ Measured on 2026-09-30 using the original throughput workloads and the released
 engine and launcher. These are native measurements, not a new container-speed
 comparison. The optional library was installed: compiled decode uses its release
 defaults (off for TP4, on for PP4), and
-`expandable_segments:False` applies to all three columns. Native installations
+`expandable_segments:False` applies to these measurements. Native installations
 without the optional library do not use the measured PP4 compiled-decode path.
 
-DFlash2 at k=3, 262,144-token context, the defaults of release 1.5.0. Three
-columns: tensor-parallel 4 with the cards talking through the host (the
-default), tensor-parallel 4 with the optional
-[PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer-optional) path, and pipeline-parallel 4
-(`LAYOUT=pp4`, peer-to-peer off: the setup of a stock driver on x4 cards,
-which is what this layout is for).
+DFlash2 at k=3, 262,144-token context, release 1.5.0 with
+[PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer).
 
-| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off (`LAYOUT=pp4`) |
-|---|---:|---:|---:|
-| Streaming decode, 1 user, structured / code / prose | **267.3 / 260.9 / 186.0 tok/s** | **282.0 / 274.0 / 198.5 tok/s** | **141.8 / 139.8 / 103.5 tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **758.9 / 674.1 / 531.1 tok/s** | **816.8 / 741.1 / 563.7 tok/s** | **603.0 / 577.2 / 445.1 tok/s** |
-| Cold prefill | **2,657 tok/s** | **3,053 tok/s** | **6,575 tok/s** |
-| One-token response time, 6,217 / 23,255-token prompt | 2.39 / 8.73 s | 2.05 / 7.52 s | 1.46 / 3.64 s |
-| KV pool at 262,144 context | 1,176,646 tokens (4.49 full-length requests) | 1,177,646 tokens (4.49) | 2,334,498 tokens (8.91) |
+| | TP4, peer-to-peer on |
+|---|---:|
+| Streaming decode, 1 user, structured / code / prose | **282.0 / 274.0 / 198.5 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **816.8 / 741.1 / 563.7 tok/s** |
+| Cold prefill | **3,053 tok/s** |
+| One-token response time, 6,217 / 23,255-token prompt | 2.05 / 7.52 s |
+| KV pool at 262,144 context | 1,177,646 tokens (4.49) |
 
 All at 180 W per card (a power limit we set on our cards; the scripts never
 change power, clock or fan settings), PCIe x16 links, one server start per
@@ -171,7 +146,7 @@ flight (see [Honest KV figures](#measured-while-building-this-release)).
 For historical reference, PP4 with peer-to-peer on was measured in 1.4.0 at
 141.0 / 139.4 / 105.1 tok/s for one user, 532.7 / 493.9 / 377.8 across eight,
 6,606 tok/s cold prefill. That fourth configuration was not remeasured here.
-Older release comparisons below retain their original scope.
+These historical figures retain their original release scope.
 
 Historical perplexity on the fixed 60-document set was **3.2781 under TP4**
 and **3.2735 under PP4** (1.4.0); it was not remeasured for the allocator change.
@@ -179,14 +154,14 @@ Current HumanEval and GSM8K results are in [Quality (1.4.3)](#quality-143).
 
 ## Choosing a layout
 
-Prefill and KV figures compare the native 1.6.0 peer-to-peer-off columns above.
+PP4 passes only activations between stages; TP4 exchanges data after each
+layer. Current throughput figures above use TP4 with working P2P.
+PP4 performance will be listed after P2P-on measurements are available.
 
 | | Tensor-parallel 4 (`tp4`, default) | Pipeline-parallel 4 (`pp4`) |
 |---|---|---|
 | Each card holds | a quarter of every layer | a quarter of the layers |
 | Best for | one or two interactive users: the fastest answer per request | many parallel users or clients, long prompts, large shared contexts |
-| Prefill | 2,669 tok/s | 6,580 tok/s (2.47×) |
-| KV pool | 1,072,150 tokens | 1,914,216 tokens (1.79×) |
 | Traffic between cards | ~9.4 MB per layer during prefill, ~100 small collectives per decode step | activations only, once per stage |
 | Links | PCIe x16 | built for x4; measured on x16 |
 
@@ -199,25 +174,12 @@ These are historical 1.4.0/1.4.1 measurements on the same four cards, not
 remeasurements of the new allocator default. They are not the release table
 above; each line says what it was measured against.
 
-- **Pipeline-parallel prefill +19.5%.** New prefill kernels for 64 heads and
-  whole experts — the linear-attention (KDA) prefill, the sparse-attention
-  prefill and the MoE prefill — took PP4 cold prefill from 5,520 to 6,586–6,613
-  tok/s, and time to first token on a 23,255-token prompt from 4.27 to 3.64 s,
-  with decode unchanged. Each kernel is at least as accurate as the code it
-  replaces against a 64-bit reference on real inputs.
-- **A faster pipeline.** Decodes spread over every in-flight micro-batch and a
-  leaner hand-off between stages: +7.3% aggregate decode at four users and
-  +2.0% cold prefill under PP4, outputs identical apart from the drafter's
-  folded input projection, which is checked against a 64-bit reference.
 - **Tensor-parallel prefill kernels.** The linear-attention prefill runs 1.42×
   faster per prompt per card and the MoE prefill 1.24×, as accurate as before
   against a 64-bit reference.
-- **Against release 1.3.0**, tensor-parallel 4: cold prefill 2,484 → 2,670
-  tok/s (+7.5%) with peer-to-peer off and 2,490 → 3,062 (+23%) with it on,
-  where NCCL now also runs card to card (worth +13.7% on its own, outputs
-  identical).
-  Eight-user aggregate 745.4 → 763.1 tok/s structured (+2.4%) off and
-  808.1 → 848.3 (+5.0%) on; one user unchanged (264.6 → 264.4 structured).
+- **Against release 1.3.0**, tensor-parallel 4 with peer-to-peer: cold prefill
+  2,490 → 3,062 tok/s (+23%), with NCCL also running card to card.
+  Eight-user structured aggregate 808.1 → 848.3 tok/s (+5.0%).
 - **Honest KV figures.** With prefill chunks in flight, a request can hold more
   linear-attention state than the engine used to reserve for it, so the KV pool
   it reported was larger than the server could actually fill: under TP4,
@@ -231,54 +193,5 @@ above; each line says what it was measured against.
   order from ours. They now use pinned configurations, exactly as accurate as
   the tuned ones against a 64-bit reference (1.000×) and within 0.03% of their
   speed on one card.
-- **Container at native speed.** Release 1.3.x's image ran within 0.4% of the
-  native install on decode at 1 / 4 / 8 users and on cold prefill.
-  On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670).
 - **A newer upstream.** The fork now sits on upstream vLLM's 0.30.1 development
   line (FlashInfer 0.7.0).
-
-## Decode and prefill in detail
-
-Release 1.6.0, native tensor-parallel 4 with peer-to-peer off and the
-configuration described above: temperature 0, median of five, original
-structured/code/prose prompts and cache-busting nonces.
-
-**Decode**, 400 max tokens. `Stream` is per request,
-`(completion_tokens − 1) / (end − first token)`; concurrent aggregate is
-`sum(completion_tokens) / batch wall`, including prefill and client overhead.
-At one user the original client's aggregate field duplicates its streaming
-rate, so it is omitted here rather than presented as end-to-end throughput.
-Each request carries a unique nonce to prevent prefix-cache reuse.
-
-| Prompt type | Users | Stream tok/s | Aggregate tok/s | TTFT (cold) |
-|---|---:|---:|---:|---:|
-| Structured (count 1→200) | ×1 | **394.0** | — | 0.066 s |
-|  | ×2 | **260.3** | **469.2** | 0.110 s |
-|  | ×4 | **163.9** | **595.2** | 0.250 s |
-|  | ×8 | **109.8** | **797.9** | 0.306 s |
-| Code (clamp_00…clamp_49) | ×1 | **377.4** | — | 0.156 s |
-|  | ×2 | **215.2** | **360.5** | 0.247 s |
-|  | ×4 | **148.5** | **513.7** | 0.389 s |
-|  | ×8 | **99.1** | **683.2** | 0.617 s |
-| Prose (hash map) | ×1 | **180.5** | — | 0.068 s |
-|  | ×2 | **149.4** | **276.0** | 0.160 s |
-|  | ×4 | **115.3** | **418.4** | 0.254 s |
-|  | ×8 | **75.2** | **544.7** | 0.312 s |
-
-Prose decodes slower than structured or code text because the drafter's guesses
-are accepted less often.
-
-**Cold prefill by prompt length**, native release 1.6.0 pipeline-parallel 4
-(peer-to-peer off), original real-text corpus and unique uncached windows,
-`max_tokens=1`, median of two, `prompt tokens / streamed TTFT` measured client
-side. All twelve requests recorded zero prefix-cache hits. (Tensor-parallel 4
-runs at 2,669 tok/s on the separate 24K–38K prompts of the results table.)
-
-| Prompt | TTFT | tok/s |
-|---:|---:|---:|
-| ~8k | 1.89 s | **4,215** |
-| ~16k | 2.76 s | **5,789** |
-| ~32k | 4.80 s | **6,645** |
-| ~64k | 9.03 s | **7,097** |
-| ~128k | 17.78 s | **7,176** |
-| ~250k | 35.45 s | **7,061** |

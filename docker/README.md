@@ -35,9 +35,6 @@ ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cce
 
 Its OCI version is `1.6.0-3a2bf16dae`.
 
-**Measured in 1.4.0:** On the same four cards at 180 W with peer-to-peer off, the image runs at the native install's speed: 15.60 / 29.16 / 43.99 ms per decode step at 1 / 4 / 8 users (native 15.87 / 29.51 / 44.45) and 2,672 tokens/s cold prefill (native 2,670). (Release 1.3.x's image ran within
-0.4 % of the native install on decode at 1 / 4 / 8 users and on cold prefill.)
-
 ## Build it
 
 **Optional Marlin:** both builders use the release engine pin, which includes
@@ -140,6 +137,9 @@ docker run -d --name glm53-flash --user "$(id -u):$(id -g)" --workdir /cache \
   --env-file docker/container.env \
   -v "$PWD/serve.sh:/recipe/serve.sh:ro" \
   -v "$PWD/boot_check.py:/recipe/boot_check.py:ro" \
+  -v "$PWD/p2p_check.py:/recipe/p2p_check.py:ro" \
+  -v "$PWD/p2p_check.sh:/recipe/p2p_check.sh:ro" \
+  -v "$PWD/p2p_probe.cu:/recipe/p2p_probe.cu:ro" \
   -v "$MODELS/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro" \
   -v "$MODELS/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro" \
   -v "$CACHE:/cache" \
@@ -174,11 +174,10 @@ them. Optional device-specific seeds are described in the
 and wait until `nvidia-smi` shows the cards empty before starting again. The
 API is the same as always ([Talk to it](../docs/how-to-use.md#talk-to-it)).
 
-**PCIe peer-to-peer is off** (`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0`). If peer
-access already works on your cards
-([PCIe peer-to-peer](../docs/how-to-use.md#pcie-peer-to-peer-optional)), set it to `1` in
-`container.env`; `serve.sh` picks the matching allocator. The container changes
-no driver setting.
+**PCIe peer-to-peer is automatic** (`P2P=auto`): the same startup
+[content check](../docs/how-to-use.md#pcie-peer-to-peer) covers TP and PP.
+Set `P2P=off` in `container.env` to disable all peer transports, or `P2P=force`
+to bypass verification. The allocator default stays `expandable_segments:False`.
 
 The [engine switches](../docs/engine-switches.md) work the
 same way: set the variable in `container.env` or add `-e NAME=0`.

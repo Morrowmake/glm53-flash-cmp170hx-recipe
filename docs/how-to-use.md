@@ -39,30 +39,9 @@ them. While that build runs, the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 
-**Historical smoke test output** from the published release (tensor-parallel 4,
-peer-to-peer off, earlier True allocator default; current KV differs):
+The smoke test checks the chat reply, tool call and KV cache; it prints
+`smoke: ok` when those checks pass.
 
-```
-==> waiting for http://127.0.0.1:8000/health (up to 900s)
-    healthy
-    served models: glm-5.3-flash
-
-==> chat request
-    reply: The user is asking about PCIe peer-to-peer (P2P) and its relevance to tensor parallelism. Let me think about what I know here.  **Tensor parallelism basics:** T ...
-    usage: prompt=28 completion=200 wall=1.27s  ->  156.9 tok/s
-
-==> tool-call request
-    tool_call: get_weather({"city": "Reykjavik", "unit": "celsius"})
-    usage: prompt=199 completion=66 wall=0.45s  ->  147.8 tok/s
-
-==> KV cache
-    GPU KV cache size: 1,156,635 tokens, Maximum concurrency for 262,144 tokens per request: 4.41x
-
-smoke: ok
-```
-
-The rates in the smoke test include the time to first token of a short
-request, so they read lower than the decode table.
 
 ## Choose the layout
 
@@ -132,7 +111,8 @@ In `.env.example`:
 | `SERVED_MODEL_NAME` | `glm-5.3-flash` | the model id clients send |
 | `MODELS_DIR` | `models/` in this repo | where the checkpoints go; give an absolute path |
 | `RUNTIME` | `container` | `native` runs the engine from a venv instead ([Native install](#native-install-for-developers)); a checkout that already has a native install keeps it |
-| `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | `0` | the [peer-to-peer](#pcie-peer-to-peer-optional) switch (TP4) |
+| `P2P` | `auto` | [content-verified peer access](#pcie-peer-to-peer) for TP and PP; `off` disables, `force` bypasses the check |
+| `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE` | `1` after a pass, otherwise `0` | custom all-reduce (TP); an explicit `0` is preserved after a pass |
 
 Commonly used from `.env.advanced.example`:
 
@@ -246,9 +226,9 @@ unset decode remains off. The allocator default remains
    later ones while FlashInfer compiles two kernel modules; the log may show
    `No available shared memory broadcast block found in 60 seconds` lines
    meanwhile, which are harmless.
-5. The layout stays tensor-parallel 4 and peer-to-peer stays as you had it.
-   With the new False allocator default, TP4/peer-to-peer off measured
-   1,176,646 KV tokens. Explicit allocator overrides are preserved.
+5. The layout stays tensor-parallel 4. Peer access follows `P2P=auto` unless
+   overridden, with a content check before use. Explicit allocator overrides
+   are preserved.
 
 **Moving a native install to the container.** Install Docker and the NVIDIA
 Container Toolkit ([What you need](#what-you-need)), then set
@@ -276,81 +256,72 @@ after the branch has moved on. Engine pins from 1.1.0 on can be installed;
 
 ## Advanced
 
-Not needed for a normal install: peer-to-peer, the engine's kill switches,
+Advanced settings: peer-to-peer policy, the engine's kill switches,
 link width, running the container yourself and the native developer install.
 
-### PCIe peer-to-peer (optional)
+### PCIe peer-to-peer
 
-**What it is.** Under tensor-parallel 4 the four cards exchange data after
-every layer. By default that goes through host memory, because a stock CMP
-170HX refuses GPU peer access: `nvidia-smi topo -p2p r` answers `GNS` on every
-pair. Where peer access *is* available, the all-reduce can run card to card in
-device memory instead, which is faster.
+`P2P=auto` is the default for both container and native starts. Before the
+server starts with TP > 1 or PP > 1, the recipe checks every ordered pair of
+visible GPUs. It requires peer access to be advertised, then copies random
+bytes with `cudaMemcpyPeer`, writes and reads through peer access with an SM
+kernel, and verifies a separate-process CUDA IPC write on the allocation's
+owner. Every byte is compared on its owner. The read test uses fresh data
+written by the owner, so matching writes and reads at a wrong address cannot
+pass together.
 
-**The default is off.** With `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0` the recipe
-needs no driver change of any kind and uses the host-staged path described
-above. If you do nothing, this is what you run. Under pipeline-parallel 4 the
-switch does nothing: the hand-off between stages uses peer-to-peer by itself
-where the driver offers it.
+Nine sizes cover 128 KiB and 512 KiB, including one byte below and above each,
+plus 1 MiB, 8 MiB and 32 MiB. Each pair also gets a 32 MiB IPC write. Compilation,
+identity lookup, lock waits and the content check share a 120-second budget;
+a timed-out probe and its IPC children are killed together, with at most one
+additional second allowed for cleanup. The startup banner reports the outcome,
+reason, elapsed time and whether the result came from this boot's cache.
 
-**Who should turn it on.** Only people who already have peer-to-peer working on
-their cards. It has to be advertised by the driver. We use a build of the
-[cmpunlocker](https://github.com/asm64-hooligan/cmpunlocker) project, set up
-with that project's own installer (its `install.sh --p2p`, not this
-repository's `install.sh`, which has no such option). How to install it is
-covered by that project's documentation, not here; none of it is ours.
+A result is cached by driver version/build, visible GPU UUIDs, boot ID and probe
+version. Restarts reuse it; a new boot, driver, GPU set or probe invalidates it.
+The cache lives at `$HOME/.cache/recipe-p2p` (inside the persistent `/cache`
+mount for containers); `P2P_CHECK_CACHE` selects another persistent directory.
+A failed content check is cached too. After correcting a configuration within
+the same boot, remove the check cache before retrying.
 
-It is **topology-dependent**. We verified it on our machine: four cards on
-EPYC root ports, all pairs.
-[bayley/cmpunlocker](https://github.com/bayley/cmpunlocker) reports the mailbox
-path dead behind PLX switches on a Xeon, so a different board may simply not
-have it.
+**Topology is not a data-integrity test.** `nvidia-smi topo -p2p r` reporting
+`OK` and `cudaDeviceCanAccessPeer` returning true are not enough. A driver can
+advertise peer access while writes land in the wrong memory; NCCL may then
+hang. The startup content check decides whether this recipe uses P2P.
 
-**Historical gains.** With the earlier allocator defaults, the first two columns
-of the published 1.4.1 [results table](https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/blob/v1.4.1/README.md#results): step time −3.7% at one user, −4.3% at four,
-−7.6% at six and −9.1% at eight; single-user decode +4.3% to +7.5%; eight-user
-aggregate +6.2% to +11.3%; cold prefill +14.7% (2,670 → 3,062 tok/s); and
-21,011 more KV tokens. That comparison changed both P2P and allocator mode;
-the KV delta is not a P2P gain with the new independent False default.
+A pass enables `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1` by default, keeps the
+`2stage` custom all-reduce selection, clears `NCCL_P2P_DISABLE`, and sets
+`NCCL_P2P_LEVEL=SYS` for TP or PP through `GLM5_NCCL_P2P_SYS=1`.
+An explicit custom-all-reduce `0` is preserved after a pass. An explicit
+`NCCL_P2P_LEVEL` wins; `GLM5_NCCL_P2P_SYS=0` suppresses the automatic SYS setting.
 
-**Turn it on.**
+If any pair does not advertise access, any byte differs, or the check cannot
+complete, the engine starts with P2P disabled:
+`VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0`, `NCCL_P2P_LEVEL` unset and
+`NCCL_P2P_DISABLE=1`. This includes PP4 stage transfers. The `[p2p]` banner
+says `not advertised`, `advertised but data check failed`, or `check unavailable`
+and gives the reason. TP can use the host-staged all-reduce instead.
 
-```bash
-nvidia-smi topo -p2p r              # every pair must say OK, not GNS
-# then set VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 in .env, or for one run:
-VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1 ./start.sh restart
-```
+**Working P2P on CMP 170HX requires a P2P-capable driver build.**
+The driver build and its documentation will be linked here after publication
+is approved. **TODO: add the approved P2P-capable driver build link.**
 
-`serve.sh` selects the `2stage` all-reduce kernel (upstream's default
-crossover is tuned for NVLink). With peer-to-peer on under TP4, it also sets
-NCCL's peer-to-peer level (`NCCL_P2P_LEVEL=SYS`), so the large prefill
-collectives go card to card: historically +13.7% cold prefill with identical
-outputs, measured before this allocator-default change.
-`GLM5_NCCL_P2P_SYS=0` turns that part off.
-
-The allocator compatibility default is `expandable_segments:False`, independent
-of layout and peer-to-peer. Explicit `PYTORCH_CUDA_ALLOC_CONF` values, including
-empty or composed settings, are preserved; the startup allocator banner reports
-both allocator variable names, not inferred precedence. `PYTORCH_ALLOC_CONF`
-is inherited for native launches but is not forwarded into the container;
-conflicting aliases are not covered by the legacy-variable default. This is a
-compatibility default, not a fix for an underlying driver or virtualisation bug.
-
-**Check it works.**
+Choose the policy in `.env` or for a single start:
 
 ```bash
-grep "all-reduce backends" logs/serve.log | grep "tp:0" | tail -1
+P2P=auto ./start.sh restart   # default: enable only after verification
+P2P=off ./start.sh restart    # disable all peer transports, including PP
+P2P=force ./start.sh restart  # bypass verification; may hang or corrupt data
 ```
 
-`logs/serve.log` keeps every start, so read the last line. With peer-to-peer
-on, the list starts with `CUSTOM`: `['CUSTOM', 'PYNCCL']`.
-With it off, or if the driver does not actually grant peer access, it reads
-`['HOSTSHM', 'PYNCCL']` — the engine falls back to the host-staged path on its
-own rather than failing. Then run `./start.sh smoke`.
+Use `force` only when deliberately bypassing the check. A dry run initializes
+no CUDA devices and leaves auto P2P off until a real start can verify it.
+The allocator default stays `expandable_segments:False`, which supports legacy
+CUDA IPC allocations. Explicit allocator values are preserved.
 
-**Turn it off.** Set `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0` in `.env` (or
-delete the line) and `./start.sh restart`. That restores the host-staged path;
-it does not change the allocator configuration.
+Read the last `[p2p]` line in `logs/serve.log`. For TP, a serving custom
+all-reduce appears as `['CUSTOM', 'PYNCCL']`; the host-staged path appears as
+`['HOSTSHM', 'PYNCCL']`. Then run `./start.sh smoke`.
 
 ### Kill switches
 

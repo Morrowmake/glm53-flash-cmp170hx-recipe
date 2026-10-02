@@ -43,7 +43,7 @@ sparse-attention decode schedule is on in the engine itself.
   it landed.
 - **PCIe peer-to-peer all-reduce, optional.** Where the driver does allow peer
   access, the all-reduce runs in device memory instead — see
-  [PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer-optional).
+  [PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer).
 - **Prefill overlap.** During tensor-parallel prefill each layer's all-reduces
   run on a side stream while the MoE computes.
 - **Fair prefill.** A long prompt no longer starves users who are mid-answer:
@@ -85,7 +85,7 @@ sparse-attention decode schedule is on in the engine itself.
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; measured at 262,144 context in native 1.6.0: TP4/peer-to-peer off 1,072,150 tokens, TP4/peer-to-peer on 1,073,093, PP4 1,914,216 |
+| KV cache | full precision, **not quantised**; measured at 262,144 context in native 1.6.0: TP4/peer-to-peer on 1,073,093 tokens |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |

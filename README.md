@@ -13,9 +13,9 @@
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts. Native 1.6.0 results: tensor-parallel at 394.0 tok/s for one
-user and 797.9 tok/s across eight, or pipeline-parallel with
-6,580 tok/s cold prefill and a 1,914,216-token KV pool. The weights
+cards in two layouts. Native 1.6.0 tensor-parallel results with peer-to-peer:
+437.4 tok/s for one user and 840.7 tok/s across eight,
+3,061 tok/s cold prefill and a 1,073,093-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
 outputs were identical across the repeated checks in [Results](docs/results.md).**
@@ -28,6 +28,7 @@ path needs a Hopper GPU; the CMP 170HX is Ampere (sm_80). Our
 the Ampere kernels that make the model run at all, then spends the rest of its
 patches on making it fast and making it repeatable. It ships as a container
 image, so the engine and its Python environment stay out of your system.
+P2P is enabled automatically after a startup [content check](docs/how-to-use.md#pcie-peer-to-peer) passes; otherwise the server runs with P2P disabled.
 
 > **Which setups this release is for.** Two layouts, one switch
 > (`LAYOUT=tp4` or `LAYOUT=pp4`):
@@ -38,9 +39,8 @@ image, so the engine and its Python environment stay out of your system.
 >   slower.
 > - **Pipeline-parallel 4** passes only activations between the cards, so it
 >   needs far less link bandwidth; it is the layout **for cards limited to x4
->   links**, and for many parallel users and long prompts. Its numbers on this
->   page were **measured on our x16 cards**; we have not yet measured it on x4
->   links.
+>   links**, and for many parallel users and long prompts. Performance on x4
+>   links has not yet been measured.
 >
 > `./start.sh` checks your link width and suggests `LAYOUT=pp4` if a card is
 > narrower than x16.
@@ -60,16 +60,16 @@ image, so the engine and its Python environment stay out of your system.
 
 Tokens per second, release 1.6.0, 262,144-token context, 180 W per card, PCIe x16 links.
 
-| | Tensor-parallel 4<br>(default) | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer-optional) | Pipeline-parallel 4<br>(`LAYOUT=pp4`) |
-|---|---:|---:|---:|
-| **1 user** · structured | **394** | **437** | **235** |
-| **1 user** · code | **377** | **404** | **208** |
-| **1 user** · prose | **181** | **199** | **100** |
-| **8 users, total** · structured | 798 | 841 | 623 |
-| **8 users, total** · code | 683 | 769 | 591 |
-| **8 users, total** · prose | 545 | 590 | 466 |
-| **Prompt reading** (cold prefill) | 2,669 | 3,061 | 6,580 |
-| **KV pool** (tokens) | 1.07 M | 1.07 M | 1.91 M |
+| | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) |
+|---|---:|
+| **1 user** · structured | **437** |
+| **1 user** · code | **404** |
+| **1 user** · prose | **199** |
+| **8 users, total** · structured | 841 |
+| **8 users, total** · code | 769 |
+| **8 users, total** · prose | 590 |
+| **Prompt reading** (cold prefill) | 3,061 |
+| **KV pool** (tokens) | 1.07 M |
 
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
@@ -78,8 +78,7 @@ user and 3 under load. Quality, measured on the 1.6.0 release build (tensor-para
 HumanEval pass@1 162/164, GSM8K 1,285/1,319 (97.42 %); pipeline-parallel 4,
 measured on the 1.6.0 decode kernels with draft depth ≤ 5: 162/164 and 97.04 %
 ([details](docs/results.md#release-160-faster-decode-for-one-or-two-users)).
-Method, exact figures, the per-user decode table and the prefill ladder up to
-~250k tokens: [Results](docs/results.md).
+Method and exact figures: [Results](docs/results.md).
 
 ## Quick start
 

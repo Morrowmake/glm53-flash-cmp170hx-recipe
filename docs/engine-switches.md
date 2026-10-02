@@ -80,7 +80,7 @@ so it also works before the first install.
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | `1` | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step cost of each depth from 3 to 7, alone and with several requests; set by the launcher from measurements on this hardware |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4 | the drafter computes only the verified depth (TP4); `0` always drafts the deepest block |
-| `VLLM_CUSTOM_ALLREDUCE_ALGO` | `2stage` | which CustomAllreduce kernel; the built-in crossover is NVLink-tuned. Inert unless [peer-to-peer](how-to-use.md#pcie-peer-to-peer-optional) is on |
-| `GLM5_NCCL_P2P_SYS` | `1` | with peer-to-peer on under TP4, NCCL goes card to card as well (`NCCL_P2P_LEVEL=SYS`); `0` turns that part off |
+| `VLLM_CUSTOM_ALLREDUCE_ALGO` | `2stage` | which CustomAllreduce kernel; the built-in crossover is NVLink-tuned. Inert unless [peer-to-peer](how-to-use.md#pcie-peer-to-peer) is on |
+| `GLM5_NCCL_P2P_SYS` | `1` | after the content check passes, sets `NCCL_P2P_LEVEL=SYS` for TP or PP; `0` suppresses this automatic setting |
 | `PYTORCH_CUDA_ALLOC_CONF` | `expandable_segments:False` | allocator compatibility default, independent of layout and peer-to-peer; explicit values are preserved |
 | `VLLM_GLM5_REPLICATED_EMBED` | `0` | replicated input-embedding table under TP: saves 2 all-reduces per step for +0.74 GiB per rank (-6% KV tokens); off, because the KV is worth more here |
