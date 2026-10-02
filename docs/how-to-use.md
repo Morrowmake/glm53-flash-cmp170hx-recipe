@@ -303,7 +303,8 @@ says `not advertised`, `advertised but data check failed`, or `check unavailable
 and gives the reason. TP can use the host-staged all-reduce instead.
 
 **Working P2P on CMP 170HX requires a P2P-capable driver build.**
-The driver build and its documentation will be linked here after publication
+The driver build is based on mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker)
+and its maintainer's P2P work. Its documentation will be linked here after publication
 is approved. **TODO: add the approved P2P-capable driver build link.**
 
 Choose the policy in `.env` or for a single start:

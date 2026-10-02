@@ -180,3 +180,10 @@ their sparkDash prompt constants (MIT), used as data with attribution. No code f
 
 The patches are ours; the fork branch is the code —
 [Morrowmake/vllm-cmp170hx @ `ampere`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere).
+
+## Acknowledgements
+
+- Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work form the basis of the P2P driver build. <!-- link: Morrowmake/cmpunlocker after publication -->
+- Upstream [vLLM](https://github.com/vllm-project/vllm) provides the RecoverSSM state-recovery approach and fixes we build on.
+- [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"`, the startup boot check and cached prompt-boundary reuse.
+- TensorFold provided the idea of confidence-gated draft skipping.

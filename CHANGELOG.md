@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Acknowledgements section added
 - Compiled Marlin prefill removed (it gave no measured prefill gain); `VLLM_GLM5_MARLIN_PREFILL_CUDA` is ignored.
 
 - Fork branch default is `ampere`; the engine remains pinned by full commit.
