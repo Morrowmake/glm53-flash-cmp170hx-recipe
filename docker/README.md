@@ -25,6 +25,12 @@ image, how to build it, and how to run it by hand without `./start.sh`.
   [`serve.sh`](../serve.sh) mounted and used as the entry point instead, so the
   layout and every setting are chosen at run time. No launch arguments or
   settings are baked in.
+- **Peer check:** a prebuilt sm_80 content probe, selected only when its source
+  hash matches the mounted recipe. `P2P_PREBUILT=0` uses runtime compilation.
+  The startup banner reports build, identity and check time, with transport,
+  ordered-pair and size breakdowns on an uncached check. Content verification
+  remains cached by driver, ordered GPU UUIDs, source hash and host boot.
+- **Seed mount:** `/opt/cache-seed` exists even when no seed is included.
 - **No weights.** The two checkpoints are mounted from the host.
 
 Release image, built from the pinned engine; release acceptance installs and updates from this exact published digest:
@@ -46,6 +52,11 @@ source, supply its full commit and branch explicitly:
 VLLM_COMMIT=<full-engine-commit> CLONE_FROM=/path/to/source CLONE_BRANCH=<source-branch> \
   STAGE=/path/to/new-owned-staging-directory ./docker/build.sh
 ```
+
+Both builders precompile the peer probe without using a GPU. To omit it, set
+`IMAGE_P2P_PREBUILD=0` for the rootless builder or pass
+`--build-arg IMAGE_P2P_PREBUILD=0` to `docker/build-docker.sh`. The Docker wrapper
+uses the repository root as its build context, restricted by `.dockerignore`.
 
 The builder replaces `STAGE`: choose a new dedicated path. It produces a local
 OCI image in `docker/out/`, without publishing it. Set `OUT=/path/to/new-output`

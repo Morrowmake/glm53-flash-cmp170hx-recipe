@@ -69,7 +69,7 @@ if sys.argv[1:3] == ['image', 'inspect']:
                          capture_output=True, text=True)
     assert (run.returncode == 0) == success, run.stdout + run.stderr
     assert f'count={count} limit=123 check={enabled}' in run.stdout
-    assert calls.read_text().splitlines() == [f'build -t fixture-image --build-arg IMAGE_LAYERED=0 {ROOT}',
+    assert calls.read_text().splitlines() == [f'build -f {ROOT}/Dockerfile -t fixture-image --build-arg IMAGE_LAYERED=0 {ROOT}/..',
                                              'image inspect fixture-image']
 
 

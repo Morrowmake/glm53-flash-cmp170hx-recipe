@@ -13,6 +13,7 @@ import tempfile
 import time
 
 SOURCE = Path(__file__).with_name("p2p_probe.cu")
+PREBUILT = Path("/opt/image-tools/p2p")
 TIMEOUT = 120.0
 SIZES = (128*1024-1, 128*1024, 128*1024+1, 512*1024-1,
          512*1024, 512*1024+1, 1024*1024, 8*1024*1024, 32*1024*1024)
@@ -67,26 +68,41 @@ class CudaProbe:
     def __init__(self, cache):
         self.cache = cache
         self.binary = None
+        self.timings = {}
+        self.binary_source = "cache"
 
     def identity(self, deadline):
         digest = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
         binary = self.cache / ("probe-" + digest)
+        prebuilt = PREBUILT / ("probe-" + digest)
+        started = time.monotonic()
+        if os.environ.get("P2P_PREBUILT", "1") == "1" and prebuilt.is_file():
+            binary = prebuilt
+            self.binary_source = "image"
         with (self.cache / ("build-" + digest + ".lock")).open("a") as lock:
             acquire(lock, deadline)
             if not binary.exists():
+                self.binary_source = "compiled"
                 nvcc = Path(os.environ.get("CUDA_HOME", "/usr/local/cuda")) / "bin/nvcc"
                 with tempfile.TemporaryDirectory(dir=self.cache) as temp:
                     output = Path(temp) / "probe"
                     bounded([str(nvcc), "-O2", "-std=c++17", "-arch=sm_80",
                              "-o", str(output), str(SOURCE)], deadline)
                     os.replace(output, binary)
+        self.timings["build_s"] = round(time.monotonic() - started, 6)
         self.binary = binary
+        started = time.monotonic()
         value = json.loads(bounded([str(binary), "--identity"], deadline))
         value["kernel_driver"] = Path("/proc/driver/nvidia/version").read_text().strip()
+        self.timings["identity_s"] = round(time.monotonic() - started, 6)
         return value
 
     def check(self, deadline):
-        return json.loads(bounded([str(self.binary), "--check"], deadline))
+        started = time.monotonic()
+        try:
+            return json.loads(bounded([str(self.binary), "--check"], deadline))
+        finally:
+            self.timings["check_s"] = round(time.monotonic() - started, 6)
 
 
 def cache_key(identity, boot):
@@ -105,7 +121,9 @@ def decide(mode, tp, pp, cache, backend=None, boot=None, timeout=TIMEOUT):
     started = time.monotonic()
     def result(enabled, reason, cached=False):
         return dict(enabled=enabled, reason=reason, cached=cached,
-                    duration_s=round(time.monotonic()-started, 6))
+                    duration_s=round(time.monotonic()-started, 6),
+                    timings_s=dict(getattr(backend, "timings", {})),
+                    binary_source=getattr(backend, "binary_source", "external"))
     if mode not in ("off", "auto", "force"):
         raise ValueError("P2P must be off, auto or force")
     if tp < 1 or pp < 1:
@@ -153,6 +171,7 @@ def decide(mode, tp, pp, cache, backend=None, boot=None, timeout=TIMEOUT):
                     if not verified(checked, len(identity["uuids"])):
                         raise ValueError("incomplete content verification")
                     outcome = result(True, "content check passed")
+                    outcome["verification"] = checked
                 except (OSError, RuntimeError, ValueError, TimeoutError) as error:
                     outcome = result(False, "advertised but data check failed: " + str(error))
             atomic_json(path, dict(outcome, key=key, verification=checked))
@@ -176,7 +195,15 @@ def main():
         parser.error(str(error))
     state = "enabled" if value["enabled"] else "disabled"
     cache = "; cached this boot" if value["cached"] else ""
-    print(f"[p2p] P2P {state}: {value['reason']}{cache}; {value['duration_s']:.3f}s", file=sys.stderr)
+    timings = "; ".join(f"{key}={seconds:.3f}s" for key, seconds in value["timings_s"].items())
+    detail = f"; probe={value['binary_source']}; {timings}" if timings else ""
+    verification = value.get("verification", {})
+    if verification:
+        detail += f"; pairs={verification['pairs']} sizes={verification['sizes']} max_bytes={verification['max_bytes']}"
+        detail += "; transports_s=" + json.dumps(verification.get("timings_s", {}), sort_keys=True)
+        detail += "; pairs_s=" + json.dumps(verification.get("pairs_s", []))
+        detail += "; sizes_s=" + json.dumps(verification.get("sizes_s", []))
+    print(f"[p2p] P2P {state}: {value['reason']}{cache}; {value['duration_s']:.3f}s{detail}", file=sys.stderr)
     print("1" if value["enabled"] else "0")
 
 

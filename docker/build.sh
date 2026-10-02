@@ -164,7 +164,13 @@ layer() {
     [ ! -e "$OUT/payload" ] || { echo "Choose a new OUT (payload already exists)" >&2; exit 1; }
     python3 "$HERE/payload.py" "$STAGE/opt" "$OUT/payload" "$CONSTRAINTS"
     mkdir -p "$OUT/payload/engine/opt/image-tools"
-    cp "$HERE/cache_seed.py" "$HERE/rootfs_smoke.py" "$OUT/payload/engine/opt/image-tools/"
+    cp "$HERE/cache_seed.py" "$HERE/rootfs_smoke.py" "$HERE/bwrap_targets.py" "$OUT/payload/engine/opt/image-tools/"
+    mkdir -p "$OUT/payload/engine/opt/cache-seed" "$OUT/payload/engine/recipe" \
+        "$OUT/payload/engine/cache" "$OUT/payload/engine/dev/shm" \
+        "$OUT/payload/engine/proc" "$OUT/payload/engine/tmp" "$OUT/payload/engine/models/GLM-5.3-Flash-W4A16-MTP" \
+        "$OUT/payload/engine/models/GLM-5.3-Flash-DFlash2"
+    python3 "$HERE/p2p_build.py" "$HERE/../p2p_probe.cu" \
+        "$OUT/payload/engine/opt/image-tools/p2p" --nvcc "$BUILD_CUDA_HOME/bin/nvcc"
     if [ -n "${IMAGE_CACHE_SEED_DIR:-}" ]; then
         python3 "$HERE/cache_seed.py" check "$IMAGE_CACHE_SEED_DIR" "$VLLM_COMMIT" "$STAGE/opt/venv/requirements.lock.txt"
         mkdir -p "$OUT/payload/cache-seed/opt/cache-seed"

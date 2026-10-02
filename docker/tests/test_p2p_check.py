@@ -152,7 +152,11 @@ def run_cpu(binary, *args, **env):
 def test_cpu_mock_all_pairs_content_and_ipc(cpu_probe):
     run = run_cpu(cpu_probe, "--check")
     assert run.returncode == 0, run.stderr
-    assert json.loads(run.stdout) == dict(passed=True, pairs=12, sizes=9, max_bytes=33554432)
+    value = json.loads(run.stdout)
+    assert p2p.verified(value, 4)
+    assert len(value["pairs_s"]) == 12 and len(value["sizes_s"]) == 9
+    assert set(value["timings_s"]) == {"setup", "randomize", "memcpy", "write", "read", "ipc", "cleanup"}
+    assert all(t >= 0 for t in value["timings_s"].values())
 
 
 @pytest.mark.parametrize("method,message", [("memcpy", "cudaMemcpyPeer"), ("write", "SM peer write"),
@@ -318,3 +322,36 @@ def test_probe_remote_clears_finish_before_peer_writers():
 def test_probe_ipc_writer_exits_successfully_before_comparison():
     text = probe_source().split("static void ipc_write(", 1)[1].split("static void identity", 1)[0]
     assert text.index("waitpid(pid") < text.index("!WIFEXITED(status)") < text.index("compare(owner")
+
+
+@pytest.mark.parametrize('enabled,matched,origin', [('1', True, 'image'), ('0', True, 'compiled'),
+                                                   ('1', False, 'compiled')])
+def test_prebuilt_source_hash_and_kill_switch(tmp_path, monkeypatch, enabled, matched, origin):
+    import hashlib
+    source = tmp_path/'probe.cu'
+    source.write_text('fixture')
+    image = tmp_path/'image'
+    image.mkdir()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    (image/('probe-'+(digest if matched else 'other'))).write_bytes(b'fixture')
+    cache = tmp_path/'cache'
+    cache.mkdir()
+    monkeypatch.setattr(p2p, 'SOURCE', source)
+    monkeypatch.setattr(p2p, 'PREBUILT', image)
+    monkeypatch.setenv('P2P_PREBUILT', enabled)
+    calls = []
+    def bounded(argv, deadline):
+        calls.append(argv)
+        if argv[-1] == '--identity':
+            return json.dumps(dict(driver=1, uuids=['GPU-0', 'GPU-1'], advertised=True))
+        Path(argv[argv.index('-o')+1]).write_bytes(b'compiled')
+        return ''
+    monkeypatch.setattr(p2p, 'bounded', bounded)
+    read = Path.read_text
+    monkeypatch.setattr(Path, 'read_text', lambda path, *a, **k: 'driver' if str(path) ==
+                        '/proc/driver/nvidia/version' else read(path, *a, **k))
+    probe = p2p.CudaProbe(cache)
+    probe.identity(time.monotonic()+30)
+    assert probe.binary_source == origin
+    assert len(calls) == (1 if origin == 'image' else 2)
+    assert set(probe.timings) == {'build_s', 'identity_s'}

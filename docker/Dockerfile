@@ -36,7 +36,7 @@ FROM ${BASE} AS build
 ARG PYTHON_VERSION=3.12
 ARG PYTHON_INSTALL_VERSION=3.12.14
 ARG UV_VERSION=0.12.11
-COPY CONSTRAINTS /tmp/CONSTRAINTS
+COPY docker/CONSTRAINTS /tmp/CONSTRAINTS
 ENV UV_CONSTRAINT=/tmp/CONSTRAINTS
 ENV UV_LINK_MODE=copy \
     UV_PYTHON_INSTALL_DIR=/opt/python-dl \
@@ -74,7 +74,7 @@ RUN VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COM
     VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 \
     uv pip install --no-deps -e /opt/vllm-src \
  && uv pip freeze > /opt/venv/requirements.lock.txt
-COPY runtime_tree.py payload.py cache_seed.py rootfs_smoke.py /tmp/
+COPY docker/runtime_tree.py docker/payload.py docker/cache_seed.py docker/rootfs_smoke.py docker/bwrap_targets.py docker/p2p_build.py p2p_probe.cu /tmp/
 RUN test -f /opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py \
     || (echo "Set VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT to a source with optional Marlin support" >&2; exit 1)
 RUN cd /opt/vllm-src && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
@@ -88,9 +88,15 @@ RUN CUDA_VISIBLE_DEVICES= /opt/venv/bin/python -c "import torch, vllm, vllm._C_s
  && /opt/venv/bin/python /tmp/runtime_tree.py finalize /opt "${VLLM_COMMIT}" \
  && /opt/venv/bin/python /tmp/runtime_tree.py check /opt "${VLLM_COMMIT}"
 
+ARG IMAGE_P2P_PREBUILD=1
+RUN IMAGE_P2P_PREBUILD=${IMAGE_P2P_PREBUILD} /opt/venv/bin/python /tmp/p2p_build.py \
+    /tmp/p2p_probe.cu /tmp/image-p2p
 RUN /opt/venv/bin/python /tmp/payload.py /opt /payload /tmp/CONSTRAINTS \
  && mkdir -p /payload/engine/opt/image-tools \
- && cp /tmp/cache_seed.py /tmp/rootfs_smoke.py /payload/engine/opt/image-tools/
+ && cp -a /tmp/image-p2p /payload/engine/opt/image-tools/p2p \
+ && cp /tmp/cache_seed.py /tmp/rootfs_smoke.py /tmp/bwrap_targets.py /payload/engine/opt/image-tools/ \
+ && mkdir -p /payload/engine/opt/cache-seed /payload/engine/recipe /payload/engine/cache \
+    /payload/engine/models/GLM-5.3-Flash-W4A16-MTP /payload/engine/models/GLM-5.3-Flash-DFlash2
 
 FROM ${BASE} AS runtime-1
 COPY --from=build /payload/python/ /
@@ -118,5 +124,7 @@ LABEL org.opencontainers.image.title="vllm-cmp170hx" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
+RUN mkdir -p /opt/cache-seed /recipe /cache /dev/shm /proc /tmp /models/GLM-5.3-Flash-W4A16-MTP \
+    /models/GLM-5.3-Flash-DFlash2
 EXPOSE 8000
 ENTRYPOINT ["/opt/venv/bin/vllm"]

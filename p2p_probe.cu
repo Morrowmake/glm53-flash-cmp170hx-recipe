@@ -5,6 +5,7 @@
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -37,6 +38,7 @@ static void compare(int owner, unsigned char* ptr,
     ck(cudaDeviceSynchronize());
     std::vector<unsigned char> actual(expected.size());
     ck(cudaMemcpy(actual.data(), ptr, actual.size(), cudaMemcpyDeviceToHost));
+    if (std::memcmp(actual.data(), expected.data(), actual.size()) == 0) return;
     for (size_t i = 0; i < actual.size(); ++i) {
         if (actual[i] != expected[i]) throw std::runtime_error(
             std::string(method) + " mismatch on owner " + std::to_string(owner) +
@@ -119,6 +121,9 @@ static void identity() {
         }
     std::printf("],\"advertised\":%s}\n", advertised ? "true" : "false");
 }
+static double elapsed(std::chrono::steady_clock::time_point start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
 static void check() {
     const size_t sizes[] = {128*1024-1, 128*1024, 128*1024+1,
         512*1024-1, 512*1024, 512*1024+1, 1024*1024, 8*1024*1024, 32*1024*1024};
@@ -126,8 +131,13 @@ static void check() {
     if (count < 2) throw std::runtime_error("not advertised: fewer than two GPUs");
     std::random_device entropy; std::mt19937 rng(entropy());
     int pairs = 0;
+    double setup_s = 0, random_s = 0, memcpy_s = 0, write_s = 0, read_s = 0, ipc_s = 0, cleanup_s = 0;
+    double sizes_s[9] = {};
+    std::vector<double> pairs_s;
     for (int actor = 0; actor < count; ++actor)
         for (int owner = 0; owner < count; ++owner) if (actor != owner) {
+            auto pair_start = std::chrono::steady_clock::now();
+            auto phase = pair_start;
             int available; ck(cudaDeviceCanAccessPeer(&available, actor, owner));
             if (!available) throw std::runtime_error("not advertised");
             ck(cudaSetDevice(actor));
@@ -136,8 +146,13 @@ static void check() {
             unsigned char *local, *readback, *remote;
             ck(cudaMalloc(&local, sizes[8])); ck(cudaMalloc(&readback, sizes[8]));
             ck(cudaSetDevice(owner)); ck(cudaMalloc(&remote, sizes[8]));
+            setup_s += elapsed(phase);
+            int size_index = 0;
             for (size_t n : sizes) {
+                auto size_start = std::chrono::steady_clock::now();
+                phase = size_start;
                 std::vector<unsigned char> data(n); randomize(data, rng);
+                random_s += elapsed(phase); phase = std::chrono::steady_clock::now();
                 ck(cudaSetDevice(actor));
                 ck(cudaMemcpy(local, data.data(), n, cudaMemcpyHostToDevice));
                 ck(cudaDeviceSynchronize());
@@ -145,29 +160,47 @@ static void check() {
                 ck(cudaDeviceSynchronize());
                 ck(cudaMemcpyPeer(remote, owner, local, actor, n));
                 ck(cudaDeviceSynchronize()); compare(owner, remote, data, "cudaMemcpyPeer");
+                memcpy_s += elapsed(phase); phase = std::chrono::steady_clock::now();
                 randomize(data, rng);
+                random_s += elapsed(phase); phase = std::chrono::steady_clock::now();
                 ck(cudaSetDevice(actor)); ck(cudaMemcpy(local, data.data(), n, cudaMemcpyHostToDevice));
                 ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(owner)); ck(cudaMemset(remote, 0, n)); ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(actor)); peer_copy<<<256, 256>>>(remote, local, n);
                 ck(cudaGetLastError()); ck(cudaDeviceSynchronize());
                 compare(owner, remote, data, "SM peer write");
+                write_s += elapsed(phase); phase = std::chrono::steady_clock::now();
                 // Independent owner data prevents a wrong-address write/read from agreeing.
                 randomize(data, rng);
+                random_s += elapsed(phase); phase = std::chrono::steady_clock::now();
                 ck(cudaSetDevice(owner)); ck(cudaMemcpy(remote, data.data(), n, cudaMemcpyHostToDevice));
                 ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(actor)); ck(cudaMemset(readback, 0, n));
                 peer_copy<<<256, 256>>>(readback, remote, n);
                 ck(cudaGetLastError()); ck(cudaDeviceSynchronize());
                 compare(actor, readback, data, "SM peer read");
+                read_s += elapsed(phase);
+                sizes_s[size_index++] += elapsed(size_start);
             }
+            phase = std::chrono::steady_clock::now();
             std::vector<unsigned char> ipc_data(sizes[8]); randomize(ipc_data, rng);
+            random_s += elapsed(phase); phase = std::chrono::steady_clock::now();
             ipc_write(actor, owner, remote, ipc_data);
+            ipc_s += elapsed(phase); phase = std::chrono::steady_clock::now();
             ck(cudaSetDevice(owner)); ck(cudaFree(remote));
             ck(cudaSetDevice(actor)); ck(cudaFree(local)); ck(cudaFree(readback));
+            cleanup_s += elapsed(phase);
+            pairs_s.push_back(elapsed(pair_start));
             ++pairs;
         }
-    std::printf("{\"passed\":true,\"pairs\":%d,\"sizes\":9,\"max_bytes\":33554432}\n", pairs);
+    std::printf("{\"passed\":true,\"pairs\":%d,\"sizes\":9,\"max_bytes\":33554432,"
+        "\"timings_s\":{\"setup\":%.6f,\"randomize\":%.6f,\"memcpy\":%.6f,\"write\":%.6f,"
+        "\"read\":%.6f,\"ipc\":%.6f,\"cleanup\":%.6f},\"pairs_s\":[",
+        pairs, setup_s, random_s, memcpy_s, write_s, read_s, ipc_s, cleanup_s);
+    for (size_t i = 0; i < pairs_s.size(); ++i) std::printf("%s%.6f", i ? "," : "", pairs_s[i]);
+    std::printf("],\"sizes_s\":[");
+    for (size_t i = 0; i < 9; ++i) std::printf("%s%.6f", i ? "," : "", sizes_s[i]);
+    std::printf("]}\n");
 }
 int main(int argc, char** argv) {
     try {
