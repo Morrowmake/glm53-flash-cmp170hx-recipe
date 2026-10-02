@@ -22,7 +22,7 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   bash docker/build-docker.sh vllm-cmp170hx:1.6.0-3a2bf16dae
+#   bash docker/build-docker.sh vllm-cmp170hx:1.7.0-{{PIN}}
 # The wrapper validates the final layer count; Dockerfile instructions cannot
 # inspect the inherited base image manifest.
 
@@ -30,7 +30,7 @@ ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce
 
 ARG IMAGE_LAYERED=1
 
-ARG VLLM_COMMIT=3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340
+ARG VLLM_COMMIT={{PIN}}
 
 FROM ${BASE} AS build
 ARG PYTHON_VERSION=3.12
@@ -110,7 +110,7 @@ COPY --from=build /payload/engine/opt/image-tools/ /opt/image-tools/
 
 FROM runtime-${IMAGE_LAYERED}
 ARG VLLM_COMMIT
-ARG RELEASE=1.6.0
+ARG RELEASE=1.7.0
 ENV PATH=/opt/venv/bin:/usr/local/nvidia/bin:/usr/local/cuda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     VIRTUAL_ENV=/opt/venv \
     CUDA_HOME=/usr/local/cuda \

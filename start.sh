@@ -152,9 +152,9 @@ VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
 # compiled extensions match that commit's upstream base (e55d076f89 has no
 # wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
 # it), and the container image built from them, pinned by digest.
-RELEASE_VLLM_COMMIT=3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340
+RELEASE_VLLM_COMMIT={{PIN}}
 RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
@@ -895,6 +895,7 @@ container_args() {
         -v "$SCRIPT_DIR/p2p_check.py:/recipe/p2p_check.py:ro"
         -v "$SCRIPT_DIR/p2p_check.sh:/recipe/p2p_check.sh:ro"
         -v "$SCRIPT_DIR/p2p_probe.cu:/recipe/p2p_probe.cu:ro"
+        -v "$SCRIPT_DIR/draft-skip-coefficients.json:/recipe/draft-skip-coefficients.json:ro"
         -v "$MODEL:/models/$(basename "$MODEL"):ro")
     if [ "$SPEC_MODE" = dflash ]; then
         CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")

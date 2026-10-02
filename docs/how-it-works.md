@@ -17,8 +17,7 @@ sparse-attention decode schedule is on in the engine itself.
   cards for the fastest single answer. Pipeline-parallel 4 gives each card a
   quarter of the layers: decoding requests are spread over every in-flight
   micro-batch so no card idles, the hand-off between stages is packed into one
-  transfer without a metadata round trip, and each card has the room for about
-  twice the KV.
+  transfer without a metadata round trip, and each card has the room for {{NUM:pp4_vs_tp4_kv_ratio}}× the KV.
 - **Prefill kernels for each layout.** The linear-attention (KDA) prefill, the
   sparse-attention prefill and the MoE prefill each have Ampere kernels for the
   shapes their layout actually runs — 16 heads and quarter-width experts under
@@ -39,19 +38,18 @@ sparse-attention decode schedule is on in the engine itself.
 - **Host-staged all-reduce.** Stock CMP 170HX cards refuse GPU peer access, so
   every tensor-parallel collective would take NCCL's slow multi-hop path
   through the host. The fork does each small all-reduce in one round trip
-  through shared host memory: −7.7% step time at one user and −15% at four when
-  it landed.
-- **PCIe peer-to-peer all-reduce, optional.** Where the driver does allow peer
+  through shared host memory when the P2P check does not pass.
+- **PCIe peer-to-peer all-reduce, verified by default.** Where the driver does allow peer
   access, the all-reduce runs in device memory instead — see
   [PCIe peer-to-peer](how-to-use.md#pcie-peer-to-peer).
 - **Prefill overlap.** During tensor-parallel prefill each layer's all-reduces
   run on a side stream while the MoE computes.
 - **Fair prefill.** A long prompt no longer starves users who are mid-answer:
-  while anyone is decoding, prefill is taken in small slices. Decode speed
-  during someone else's long prompt went from 7% to 18% of normal.
+  while anyone is decoding, prefill is taken in small slices. This lets decode continue during another request's prefill.
 - **Same request, same output — on every install.** A request on its own
-  returns the same tokens and the same log-probabilities every time, across
-  restarts and now across fresh installs. MoE block alignment runs in a fixed
+  is checked for repeatability under matching cache and batch conditions.
+  Cached and fresh runs of the same prompt can differ at near-ties at TP4
+  because prefix hits change the prefill chunk layout, as with batching. MoE block alignment runs in a fixed
   order, CUDA-graph padding rows stay out of the MoE, the indexer's top-k is
   consistent on ties and returned in a fixed order, and the linear-attention
   prefill kernels use pinned configurations instead of timing themselves in
@@ -66,6 +64,15 @@ sparse-attention decode schedule is on in the engine itself.
   flight really hold, so the reported pool is one the server can fill. Right-
   sized workspaces and the drafter's selector tables split across the cards
   return memory to the pool without changing a single output bit.
+- **RecoverSSM at TP4.** Recover KDA state instead of storing every draft
+  position, increasing the available KV pool; PP4 keeps its existing path.
+- **Release 1.7.0 kernels.** KDA step tiles, tuned thin GEMM and mHC decode,
+  compiled Marlin decode and prefill, and flags-in-data all-reduce (default
+  `{{DEFAULT:all_reduce_flags}}`) cover eligible shapes.
+- **Drafting and caching.** Confidence-gated skipping at TP4 defaults to
+  `{{DEFAULT:draft_skip}}`, cached prompt-boundary reuse to
+  `{{DEFAULT:cached_boundary}}`, and PP4 drafter width to
+  `{{DEFAULT:pp4_drafter_width}}`.
 - **A real correctness fix in the key pool** (since 1.3.0): a rejected draft can
   no longer overwrite the tail of the sparse-attention key pool.
 - **64-bit KV row offsets** in the sparse-attention kernels, closing a silent
@@ -81,11 +88,11 @@ sparse-attention decode schedule is on in the engine itself.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), adaptive depth: up to 7 draft tokens per step at one request, up to 5 at two, 3 under load, following each request's acceptance |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`3a2bf16dae`](https://github.com/Morrowmake/vllm-cmp170hx/commit/3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340), on upstream vLLM `e55d076f89` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`{{PIN}}`](https://github.com/Morrowmake/vllm-cmp170hx/commit/{{PIN}}), on upstream vLLM `e55d076f89` |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; measured at 262,144 context in native 1.6.0: TP4/peer-to-peer on 1,073,093 tokens |
+| KV cache | full precision, **not quantised**; at 262,144 context: TP4 {{NUM:tp4_kv_tokens}} tokens, PP4 {{NUM:pp4_kv_tokens}} tokens, with verified peer-to-peer |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |

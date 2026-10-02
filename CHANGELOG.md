@@ -1,21 +1,56 @@
 # Changelog
 
-## Unreleased
+## 1.7.0
 
-- Acknowledgements section added
-- Compiled Marlin prefill removed (it gave no measured prefill gain); `VLLM_GLM5_MARLIN_PREFILL_CUDA` is ignored.
+Engine: `{{PIN}}`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
 
-- Fork branch default is `ampere`; the engine remains pinned by full commit.
-  Delete an explicit `VLLM_BRANCH=ampere-glm53` line to follow the new default.
-- Rootless images split Python, locked 1.6.0 dependencies, native libraries and
-  editable engine source into separate deterministic layers. Parallel compression
-  defaults on (`IMAGE_PARALLEL_COMPRESSION=0` disables it);
-  `IMAGE_LAYERED=0` restores one application layer.
-- Optional device-specific compilation-cache seeds (`VLLM_IMAGE_CACHE_SEED=0`
-  by default pending real-image acceptance; `1` enables them). Seeds reject
-  mismatched commits, GPU architecture, dependencies and CUDA driver.
-- Direct image publication uses a release-only stdin token with temporary auth
-  storage and requires matching GPU acceptance and artifact-audit evidence.
+- Results use 74 SMs per card via mainline cmpunlocker, with the maintainer's
+  P2P work and our minimal patch. See [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer).
+- P2P is on by default after the content-verified peer-copy check passes.
+  An unavailable or failed check disables peer transports. P2P-off numbers
+  are no longer published.
+- RecoverSSM increases the TP4 KV pool to {{NUM:tp4_kv_tokens}} tokens
+  ({{NUM:tp4_recover_kv_gain_pct}}% more than without state recovery).
+  PP4 keeps its existing state-storage path.
+- Faster kernels: a KDA step tile sized to the verified tokens, tuned thin
+  GEMM and mHC decode, compiled Marlin decode and prefill for eligible TP4
+  and PP4 shapes, and a flags-in-data all-reduce at TP4.
+  All-reduce flags default: `{{DEFAULT:all_reduce_flags}}`.
+- Confidence-gated draft skipping at TP4 avoids low-confidence draft work; default:
+  `{{DEFAULT:draft_skip}}`. Cached prompt-boundary reuse retains more of a
+  cached prompt; default: `{{DEFAULT:cached_boundary}}`. PP4 drafter width
+  follows the verified depth with default `{{DEFAULT:pp4_drafter_width}}`.
+  Adaptive depth includes depth 2 for low-acceptance text.
+- Startup checks the temperature-0 OK reply and nonzero draft acceptance
+  after health is ready (`BOOT_CHECK=1`, `0` disables it).
+  `DEFAULT_REASONING_EFFORT` defaults to empty, preserving template behaviour;
+  explicit request effort takes precedence.
+- The image separates dependencies, native libraries and engine source into
+  layers, with parallel compression. Warm-cache seeds are checked against
+  the engine, device, driver and dependency identity; a mismatch uses a fresh
+  cache. Cold/seeded TP4 startup: {{NUM:tp4_boot_cold_s}} /
+  {{NUM:tp4_boot_seeded_s}} s; PP4: {{NUM:pp4_boot_cold_s}} /
+  {{NUM:pp4_boot_seeded_s}} s.
+- Fixes related to issue #4's resumed-prefill crash path: correct KDA chunk
+  indices when empty sequences precede non-empty ones, validate cached chunk
+  metadata, and bound state-index gathers. The reported Xid 31 surfaced in
+  fused KDA chunked prefill; its exact trigger is not yet confirmed.
+- Cached and fresh runs of the same prompt can differ at near-ties at TP4
+  because prefix hits change the prefill chunk layout, as with batching.
+- Native install restores the pinned FlashInfer packages after the editable
+  engine install and bounds retries, so a failed install cannot write a stamp.
+  Tool calls are masked when `tool_choice="none"`.
+
+**Updating:** `./start.sh update` preserves `.env`. The fork branch default is
+`ampere`; remove an explicit `VLLM_BRANCH=ampere-glm53` to follow it. Remove old
+explicit `VLLM_COMMIT` or `IMAGE` values to follow the new pins. Remove explicit
+`P2P=off` or custom-all-reduce `0` only if you want verified P2P. Review overrides
+for `VLLM_CUSTOM_ALLREDUCE_FLAGS`, `VLLM_GLM5_DFLASH_SKIP`,
+`VLLM_GLM5_DFLASH_BOUNDARY_CACHE` and `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH`
+against the defaults above; remove old values to follow them. Compiled decode
+remains enabled when installed. The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is
+ignored; eligible compiled prefill uses the layout-specific switches in
+[Compiled Marlin](docs/compiled-marlin.md).
 
 ## 1.6.0 — 2026-10-01
 
@@ -234,14 +269,14 @@ harmless.
 
 180 W per card, PCIe x16 links, one server start per column.
 
-| | TP4, peer-to-peer off (default) | TP4, peer-to-peer on (optional) | PP4, peer-to-peer off |
-|---|---:|---:|---:|
-| Decode step at 1 / 4 / 6 / 8 users, ms | 15.87 / 29.51 / 38.91 / 44.45 | 15.29 / 28.23 / 35.94 / 40.39 | 29.35 at 1 user |
-| Decode, 1 user, structured / code / prose | 264.4 / 258.5 / 189.9 tok/s | 275.8 / 274.0 / 204.2 tok/s | 142.2 / 138.6 / 100.7 tok/s |
-| Decode, 8 users, aggregate | 763.1 / 684.7 / 512.0 tok/s | 848.3 / 726.9 / 570.0 tok/s | 556.3 / 503.5 / 376.8 tok/s |
-| Cold prefill | 2,670 tok/s | 3,062 tok/s | 6,264 tok/s |
-| TTFT, 6,217 / 23,255 tokens | 2.37 / 8.67 s | 2.05 / 7.49 s | 1.49 / 3.79 s |
-| KV pool at 262,144 | 1,156,635 tokens, 4.41x | 1,177,646 tokens, 4.49x | 2,320,328 tokens, 8.85x |
+| | TP4, peer-to-peer on (optional) |
+|---|---:|
+| Decode step at 1 / 4 / 6 / 8 users, ms | 15.29 / 28.23 / 35.94 / 40.39 |
+| Decode, 1 user, structured / code / prose | 275.8 / 274.0 / 204.2 tok/s |
+| Decode, 8 users, aggregate | 848.3 / 726.9 / 570.0 tok/s |
+| Cold prefill | 3,062 tok/s |
+| TTFT, 6,217 / 23,255 tokens | 2.05 / 7.49 s |
+| KV pool at 262,144 | 1,177,646 tokens, 4.49x |
 
 PP4 with peer-to-peer on: 141.0 / 139.4 / 105.1 tok/s for one user, 532.7 /
 493.9 / 377.8 across eight, cold prefill 6,606 tok/s, the same KV pool.
@@ -372,14 +407,14 @@ extensions for that base.
 
 180 W per card, one server start per column.
 
-| | Peer-to-peer off (default) | Peer-to-peer on (optional) |
-|---|---:|---:|
-| Decode step at 1 / 4 / 6 / 8 users, ms | 15.841 / 30.092 / 38.778 / 44.705 | 15.250 / 28.015 / 35.549 / 41.921 |
-| Decode, 1 user, structured / code / prose | 264.6 / 260.4 / 188.4 tok/s | 274.8 / 273.0 / 197.9 tok/s |
-| Decode, 8 users, aggregate | 745.4 / 664.5 / 519.8 tok/s | 808.1 / 720.5 / 556.3 tok/s |
-| Cold prefill | 2,484 tok/s | 2,490 tok/s |
-| TTFT, 6,217 / 23,255 tokens | 2.50 / 8.97 s | 2.49 / 8.94 s |
-| KV pool at 262,144 | 1,174,567 tokens, 4.48x | 1,187,776 tokens, 4.53x |
+| | Peer-to-peer on (optional) |
+|---|---:|
+| Decode step at 1 / 4 / 6 / 8 users, ms | 15.250 / 28.015 / 35.549 / 41.921 |
+| Decode, 1 user, structured / code / prose | 274.8 / 273.0 / 197.9 tok/s |
+| Decode, 8 users, aggregate | 808.1 / 720.5 / 556.3 tok/s |
+| Cold prefill | 2,490 tok/s |
+| TTFT, 6,217 / 23,255 tokens | 2.49 / 8.94 s |
+| KV pool at 262,144 | 1,187,776 tokens, 4.53x |
 
 Quality, peer-to-peer off: perplexity 3.2858 on the fixed 60-document set
 (bit-identical with peer-to-peer on); GSM8K 0.975 on all 1,319 problems, none
@@ -508,7 +543,7 @@ fetch it.
 
 **Pipeline-parallel 4** (`PP=4`), for systems without the x16 capacitor
 modification, whose cards run on narrower PCIe links, and for many parallel
-agents and long prompts. It is in active development and comes in a later
+users and long prompts. It is in active development and comes in a later
 release with its own validation and numbers.
 
 

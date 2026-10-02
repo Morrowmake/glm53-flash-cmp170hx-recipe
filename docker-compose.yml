@@ -18,7 +18,7 @@
 
 services:
   glm53-flash:
-    image: ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:cc26c8abb63953a37c6c1861cadc9188e99c1cceab403600b5822740f3a82ae0}
+    image: ${IMAGE:-ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}}
     container_name: glm53-flash
     user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     working_dir: /cache
@@ -38,6 +38,7 @@ services:
       - ./p2p_check.py:/recipe/p2p_check.py:ro
       - ./p2p_check.sh:/recipe/p2p_check.sh:ro
       - ./p2p_probe.cu:/recipe/p2p_probe.cu:ro
+      - ./draft-skip-coefficients.json:/recipe/draft-skip-coefficients.json:ro
       - ${MODELS_DIR:-./models}/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro
       - ${MODELS_DIR:-./models}/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro
       - ./cache:/cache

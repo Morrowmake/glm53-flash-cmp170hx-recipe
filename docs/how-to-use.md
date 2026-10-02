@@ -8,7 +8,7 @@
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. Not needed for the [native install](#native-install-for-developers) |
 | Tools | `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), `jq` for the smoke test |
-| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image (about 10.3 GB compressed) and the kernel compile caches |
+| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image ({{NUM:image_compressed_gb}} GB compressed) and the kernel compile caches |
 
 ## Step by step
 
@@ -16,7 +16,7 @@
 done, so running it twice is safe. The same steps one at a time:
 
 ```bash
-./install.sh       # 1. pull the engine image, pinned by digest (about 10.3 GB compressed)
+./install.sh       # 1. pull the engine image, pinned by digest ({{NUM:image_compressed_gb}} GB compressed)
 ./download.sh      # 2. fetch the model (~178 GiB) and the drafter (~2.2 GiB) into ./models
 ./start.sh         # 3. start the container, wait for /health, print the KV pool size
 ./start.sh smoke   # 4. one chat request and one tool call against the running server
@@ -28,13 +28,13 @@ entry point, as your user rather than root, with the checkpoints mounted
 read-only and the kernel compile caches in `./cache` (owned by you). It
 publishes the API on `127.0.0.1:8000` only. Its output goes to
 `logs/serve.log`, as a native start's does, and `./start.sh stop` stops only the
-container this checkout started. The first boot builds the compile caches and
-takes about 4–5 minutes longer than later ones (below); later boots take about
-3 minutes under TP4 and 2 under PP4 (weight loading and CUDA-graph capture).
+container this checkout started. The cold TP4 / PP4 boot takes {{NUM:tp4_boot_cold_s}} /
+{{NUM:pp4_boot_cold_s}} s; matching warm-cache seeds reduce that to
+{{NUM:tp4_boot_seeded_s}} / {{NUM:pp4_boot_seeded_s}} s.
 
 **The first boot after an install or an update is slower.** FlashInfer 0.7.0
-compiles two of its kernel modules (top-k, about 160 s, and sampling, about
-60 s) into the empty cache, which adds about 4–5 minutes. Later boots reuse
+compiles its kernel modules into an empty cache unless a matching seed is
+available. The cold/seeded measurements above include this work. Later boots reuse
 them. While that build runs, the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
@@ -124,8 +124,8 @@ Commonly used from `.env.advanced.example`:
 | `SPEC_N` | `3` | draft depth under load for the DFlash2 drafter (the only supported mode) |
 | `MAX_BATCHED` | `3460` (TP4), `2312` (PP4) | sets the prefill chunk: 3,456 / 2,304 tokens; `2048` gives 1,152 |
 | `FAIR_PREFILL` / `FAIR_CHUNK` | `1` / `384` | fair prefill and its slice size while others decode |
-| `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it cost 15% prefill here and turns the prefill features off |
-| `MM_CAP` | `0` | `1` bounds image and video inputs, which returns roughly 150k KV tokens |
+| `PREFILL_CAP` | `0` | upstream's unconditional chunk cap. **Leave it 0**: it turns the prefill features off |
+| `MM_CAP` | `0` | `1` bounds image and video inputs, which reduces the multimodal memory reservation |
 | `IMAGE` | this release's image, by digest | the engine image (container) |
 | `CONTAINER_NAME` | `glm53-flash` | the container's name |
 | `READY_TIMEOUT` | `1800` | seconds `./start.sh` waits for `/health` |
@@ -193,16 +193,20 @@ pulls the matching image whenever it changes. Set `IMAGE` in `.env` (see
 [`.env.advanced.example`](../.env.advanced.example)) to
 freeze it.
 
-**Updating from 1.5.x.** Run `./start.sh update`. Release 1.6.0 moves the
-engine and image pins. Two defaults change: compiled Marlin decode is now on
-in both layouts when the optional library is installed (the image includes it),
-in the faster `orig` reduction order, and the drafter's depth follows the load
-and each request's acceptance (up to 7 drafts at one request).
-The KV pool shrinks by 8.9 % (TP4) and 18.0 % (PP4); see
-[Results](results.md#release-160-faster-decode-for-one-or-two-users). To keep
-the 1.5.x behaviour, set `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` and
-`VLLM_GLM5_MARLIN_DECODE_VARIANT=exact` (or `VLLM_GLM5_MARLIN_DECODE_CUDA=0`
-under TP4) in `.env`. Explicit `.env` values are preserved.
+**Updating from 1.6.x or 1.5.x.** Run `./start.sh update`. Release 1.7.0
+moves the engine and image pins. Explicit `.env` values remain in force;
+remove explicit `IMAGE` / `VLLM_COMMIT` values to follow the new pins.
+P2P defaults to `auto`, enabled only after the content check. RecoverSSM is
+on at TP4. Compiled decode stays on when installed; eligible TP4 and PP4
+prefill kernels use the new layout-specific switches.
+All-reduce flags default to `{{DEFAULT:all_reduce_flags}}`, TP4 draft skip to
+`{{DEFAULT:draft_skip}}`, cached-boundary reuse to
+`{{DEFAULT:cached_boundary}}`, and PP4 drafter width to
+`{{DEFAULT:pp4_drafter_width}}`. Remove explicit old feature overrides to
+follow these defaults; see [Engine switches](engine-switches.md).
+`BOOT_CHECK=1` and empty `DEFAULT_REASONING_EFFORT` are the new defaults.
+`VLLM_BRANCH=ampere` selects the fork branch, while the full commit remains
+pinned. Remove an explicit old branch line to follow it.
 
 **Updating from 1.4.x.** Run `./start.sh update`. Release 1.5.0 moves the
 engine and image pins; your `.env`, including explicit `IMAGE`, `VLLM_COMMIT`
@@ -220,10 +224,8 @@ unset decode remains off. The allocator default remains
 2. Your checkout already has a native install, so it **stays native** (the
    container is the default only for fresh checkouts).
 3. The engine pin moved to a new upstream base, so `start.sh` **rebuilds the
-   venv** from scratch for the new engine and its own dependency pins (a few
-   minutes; the checkpoints are not touched).
-4. It boots the server. **The first boot is about 4–5 minutes slower** than
-   later ones while FlashInfer compiles two kernel modules; the log may show
+   venv** from scratch for the new engine and its own dependency pins (the checkpoints are not touched).
+4. It boots the server. **The first boot can be slower** while FlashInfer fills an empty compile cache; the log may show
    `No available shared memory broadcast block found in 60 seconds` lines
    meanwhile, which are harmless.
 5. The layout stays tensor-parallel 4. Peer access follows `P2P=auto` unless
@@ -289,8 +291,8 @@ the same boot, remove the check cache before retrying.
 advertise peer access while writes land in the wrong memory; NCCL may then
 hang. The startup content check decides whether this recipe uses P2P.
 
-A pass enables `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1` by default, keeps the
-`2stage` custom all-reduce selection, clears `NCCL_P2P_DISABLE`, and sets
+A pass enables `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1` by default, uses the
+release custom all-reduce selection (`{{DEFAULT:all_reduce_flags}}` for flags-in-data), clears `NCCL_P2P_DISABLE`, and sets
 `NCCL_P2P_LEVEL=SYS` for TP or PP through `GLM5_NCCL_P2P_SYS=1`.
 An explicit custom-all-reduce `0` is preserved after a pass. An explicit
 `NCCL_P2P_LEVEL` wins; `GLM5_NCCL_P2P_SYS=0` suppresses the automatic SYS setting.
@@ -303,9 +305,12 @@ says `not advertised`, `advertised but data check failed`, or `check unavailable
 and gives the reason. TP can use the host-staged all-reduce instead.
 
 **Working P2P on CMP 170HX requires a P2P-capable driver build.**
-The driver build is based on mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker)
-and its maintainer's P2P work. Its documentation will be linked here after publication
-is approved. **TODO: add the approved P2P-capable driver build link.**
+This release uses mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker)
+master, including its 74-SM override, plus the maintainer's P2P changes and
+our minimal TRAP31 Booter PLM patch, gated on `ForceP2P=0x11`. The patch makes
+peer mappings usable on these cards; advertising peer access alone is insufficient.
+The recipe still requires the content check on every new driver/boot identity.
+<!-- link: Morrowmake/cmpunlocker after publication -->
 
 Choose the policy in `.env` or for a single start:
 
@@ -386,7 +391,7 @@ earlier release keeps using it. It needs, in addition to the above:
 | Disk | about 20 GiB for the venv, the engine source and compile caches |
 
 ```bash
-RUNTIME=native ./install.sh    # build ./venv and the pinned vLLM fork (about six minutes)
+RUNTIME=native ./install.sh    # build ./venv and the pinned vLLM fork
 RUNTIME=native ./start.sh      # or set RUNTIME=native in .env
 ```
 
@@ -415,5 +420,4 @@ The install uses upstream's **precompiled** base CUDA extensions, which already
 carry sm_80 code. Those base extensions remain usable: the optional Marlin
 CUDA/C++ extension is distinct and is compiled only with
 `VLLM_BUILD_AMPERE_MARLIN=1`. To compile the base extensions yourself:
-`BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` (full toolkit, ~60 GB of
-scratch, one to two hours).
+`BUILD_FROM_SOURCE=1 MAX_JOBS=16 ./install.sh` (full toolkit and build scratch space required).

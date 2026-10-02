@@ -5,20 +5,20 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%203a2bf16dae-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/{{PIN}}"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20{{PIN}}-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.6.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.7.0-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
-cards in two layouts. Native 1.6.0 tensor-parallel results with peer-to-peer:
-437.4 tok/s for one user and 840.7 tok/s across eight,
-3,061 tok/s cold prefill and a 1,073,093-token KV pool. The weights
+cards in two layouts. Release 1.7.0 tensor-parallel results with verified peer-to-peer at 74 SMs:
+{{NUM:tp4_c1_structured_tps}} tok/s for one user and {{NUM:tp4_c8_structured_tps}} tok/s across eight,
+{{NUM:tp4_prefill_tps}} tok/s cold prefill and a {{NUM:tp4_kv_tokens}}-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
 FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
-outputs were identical across the repeated checks in [Results](docs/results.md).**
+repeatability: {{NUM:tp4_repeatability_passed}}/{{NUM:tp4_repeatability_total}} checks in [Results](docs/results.md).**
 
 This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
 cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
@@ -54,30 +54,30 @@ P2P is enabled automatically after a startup [content check](docs/how-to-use.md#
   (not needed for the [native install](docs/how-to-use.md#native-install-for-developers))
 - `git`, `curl`, `flock`, `setsid`, Python 3 for the boot check, and `jq` for the smoke test
 - about 180 GiB (193 GB) of disk for the two checkpoints, plus the engine image
-  (about 10.3 GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
+  ({{NUM:image_compressed_gb}} GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
 
 ## Headline numbers
 
-Tokens per second, release 1.6.0, 262,144-token context, 180 W per card, PCIe x16 links.
+Tokens per second, release 1.7.0, 262,144-token context, 180 W per card, PCIe x16 links.
 
 | | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) |
 |---|---:|
-| **1 user** · structured | **437** |
-| **1 user** · code | **404** |
-| **1 user** · prose | **199** |
-| **8 users, total** · structured | 841 |
-| **8 users, total** · code | 769 |
-| **8 users, total** · prose | 590 |
-| **Prompt reading** (cold prefill) | 3,061 |
-| **KV pool** (tokens) | 1.07 M |
+| **1 user** · structured | **{{NUM:tp4_c1_structured_tps}}** |
+| **1 user** · code | **{{NUM:tp4_c1_code_tps}}** |
+| **1 user** · prose | **{{NUM:tp4_c1_prose_tps}}** |
+| **8 users, total** · structured | {{NUM:tp4_c8_structured_tps}} |
+| **8 users, total** · code | {{NUM:tp4_c8_code_tps}} |
+| **8 users, total** · prose | {{NUM:tp4_c8_prose_tps}} |
+| **Prompt reading** (cold prefill) | {{NUM:tp4_prefill_tps}} |
+| **KV pool** (tokens) | {{NUM:tp4_kv_tokens}} |
 
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
 they decode fastest; prose least. DFlash2 drafts up to 7 tokens ahead for one
-user and 3 under load. Quality, measured on the 1.6.0 release build (tensor-parallel 4):
-HumanEval pass@1 162/164, GSM8K 1,285/1,319 (97.42 %); pipeline-parallel 4,
-measured on the 1.6.0 decode kernels with draft depth ≤ 5: 162/164 and 97.04 %
-([details](docs/results.md#release-160-faster-decode-for-one-or-two-users)).
+user and 3 under load. Quality on the final release build: TP4 HumanEval
+{{NUM:tp4_humaneval_passed}}/164 and GSM8K {{NUM:tp4_gsm8k_passed}}/1,319
+({{NUM:tp4_gsm8k_pct}}%); PP4 {{NUM:pp4_humaneval_passed}}/164 and
+{{NUM:pp4_gsm8k_passed}}/1,319 ({{NUM:pp4_gsm8k_pct}}%).
 Method and exact figures: [Results](docs/results.md).
 
 ## Quick start
@@ -95,7 +95,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 `./start.sh` skips anything already done, so running it twice is safe; the
-first boot after an install takes about 4–5 minutes longer than later ones.
+cold TP4 boot takes {{NUM:tp4_boot_cold_s}} s; a matching warm-cache seed
+takes {{NUM:tp4_boot_seeded_s}} s ([details](docker/RELEASE.md#compilation-cache-seeds)).
 Any OpenAI-compatible client works with base URL `http://127.0.0.1:8000/v1`
 and model `glm-5.3-flash`. The API listens on this machine only and has no
 API key unless you [change that](docs/how-to-use.md#serving-other-machines).
@@ -112,8 +113,8 @@ for boot checks and default reasoning effort.
 
 Tensor-parallel 4 (`tp4`, the default) gives one or two interactive users the
 fastest answer per request and needs x16 links. Pipeline-parallel 4 (`pp4`)
-suits many parallel users, long prompts and x4 links, with 2.47× the prefill
-and 1.79× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
+suits many parallel users, long prompts and x4 links, with {{NUM:pp4_vs_tp4_prefill_ratio}}× the prefill
+and {{NUM:pp4_vs_tp4_kv_ratio}}× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
 in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 
 ## Documentation
@@ -143,7 +144,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/3a2bf16dae8b97f5ff2c7e9bc5809d24545e6340/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/{{PIN}}/LICENSE).
 
 The downloaded models have separate licences:
 
@@ -183,7 +184,8 @@ The patches are ours; the fork branch is the code —
 
 ## Acknowledgements
 
-- Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work form the basis of the P2P driver build. <!-- link: Morrowmake/cmpunlocker after publication -->
+- Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work, plus our minimal TRAP31 patch, form the basis of the P2P driver build. <!-- link: Morrowmake/cmpunlocker after publication -->
 - Upstream [vLLM](https://github.com/vllm-project/vllm) provides the RecoverSSM state-recovery approach and fixes we build on.
-- [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"`, the startup boot check and cached prompt-boundary reuse.
-- TensorFold provided the idea of confidence-gated draft skipping.
+- [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"` and the startup boot check.
+- MiaAI-Lab also provided the cached prompt-boundary reuse idea. <!-- drop if cached boundary ships off -->
+- TensorFold provided the idea of confidence-gated draft skipping. <!-- drop if draft skip ships off -->

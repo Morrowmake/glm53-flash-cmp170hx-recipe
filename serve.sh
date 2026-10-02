@@ -162,7 +162,7 @@ PP=${PP:-1}; TP=${TP:-4}   # PP*TP must be 4
 # draft layer on the last stage, so the balanced split differs by mode. DFlash's drafter KV rides the
 # MLA tensors, so it uses the non-MTP split.
 if [ "$PP" = "4" ]; then
-  if [ "$MODE" = "mtp" ]; then DEFAULT_PART=14,12,12,7; else DEFAULT_PART=13,11,11,10; fi
+  if [ "$MODE" = "mtp" ]; then DEFAULT_PART=14,12,12,7; else DEFAULT_PART='{{DEFAULT:pp4_partition}}'; fi
   export VLLM_PP_LAYER_PARTITION="${VLLM_PP_LAYER_PARTITION:-$DEFAULT_PART}"
 elif [ -n "${VLLM_PP_LAYER_PARTITION:-}" ]; then export VLLM_PP_LAYER_PARTITION; else unset VLLM_PP_LAYER_PARTITION; fi
 # KV block size under PP with DFlash2. Each stage holds the full 64-head
@@ -234,6 +234,17 @@ if [ "$LAYOUT" = tp4 ]; then
   export VLLM_GLM5_TP4_MARLIN_PREFILL=${VLLM_GLM5_TP4_MARLIN_PREFILL:-1}
   echo "serve.sh: TP4 prefill kernels: KDA=$VLLM_GLM5_TP4_KDA_PREFILL MARLIN=$VLLM_GLM5_TP4_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
 fi
+
+# Release state recovery and peer collective defaults; explicit overrides win.
+export VLLM_GLM5_DECODE_KDA_V2_DEEP=${VLLM_GLM5_DECODE_KDA_V2_DEEP:-1}
+export VLLM_GLM5_DECODE_KDA_STEP_TILE=${VLLM_GLM5_DECODE_KDA_STEP_TILE:-1}
+if [ "$TP" = 4 ] && [ "$PP" = 1 ]; then
+  export VLLM_GLM5_KDA_RECOVER=${VLLM_GLM5_KDA_RECOVER:-1}
+  if [ -z "${VLLM_CUSTOM_ALLREDUCE_FLAGS+x}" ]; then
+    export VLLM_CUSTOM_ALLREDUCE_FLAGS='{{DEFAULT:all_reduce_flags}}'
+  fi
+fi
+echo "serve.sh: [release-features] recover=${VLLM_GLM5_KDA_RECOVER:-0} all_reduce_flags=${VLLM_CUSTOM_ALLREDUCE_FLAGS:-0} kda_deep=$VLLM_GLM5_DECODE_KDA_V2_DEEP step_tile=$VLLM_GLM5_DECODE_KDA_STEP_TILE"
 
 # --- KV accounting --------------------------------------------------------------
 # With prefill chunks in flight, a request can hold more linear-attention state
@@ -493,9 +504,30 @@ if [ "$MODE" = dflash ]; then
   export VLLM_GLM5_DFLASH_ADAPTIVE_K=${VLLM_GLM5_DFLASH_ADAPTIVE_K:-1}
   if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS=7,5; fi
   if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT=1; fi
-  if [ "${PP:-1}" -gt 1 ]; then :; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH=1; fi; fi
-  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS=1.0000,1.1243,1.1729,1.2457,1.1937; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS=1.0000,1.0676,1.1565,1.2258,1.2803; fi; fi
-  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI=1.0000,1.1805,1.2611,1.2457,1.1937; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI=1.0000,1.0787,1.1928,1.2258,1.2803; fi; fi
+  if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH+x}" ]; then
+    if [ "$PP" -gt 1 ]; then
+      export VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH='{{DEFAULT:pp4_drafter_width}}'
+    else
+      export VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH=1
+    fi
+  fi
+  if [ -z "${VLLM_GLM5_DFLASH_SKIP+x}" ]; then
+    if [ "$PP" = 1 ]; then
+      export VLLM_GLM5_DFLASH_SKIP='{{DEFAULT:draft_skip}}'
+    else
+      export VLLM_GLM5_DFLASH_SKIP=0
+    fi
+  fi
+  if [ -z "${VLLM_GLM5_DFLASH_BOUNDARY_CACHE+x}" ]; then
+    export VLLM_GLM5_DFLASH_BOUNDARY_CACHE='{{DEFAULT:cached_boundary}}'
+  fi
+  export VLLM_GLM5_DFLASH_DEPTH2=${VLLM_GLM5_DFLASH_DEPTH2:-1}
+  if [ -z "${VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS+x}" ]; then
+    export VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/draft-skip-coefficients.json"
+  fi
+  echo "serve.sh: [draft-policy] skip=$VLLM_GLM5_DFLASH_SKIP boundary=$VLLM_GLM5_DFLASH_BOUNDARY_CACHE width=$VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH depth2=$VLLM_GLM5_DFLASH_DEPTH2"
+  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='{{NUM:pp4_adaptive_costs}}'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='{{NUM:tp4_adaptive_costs}}'; fi; fi
+  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='{{NUM:pp4_adaptive_costs_multi}}'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='{{NUM:tp4_adaptive_costs_multi}}'; fi; fi
 fi
 SPEC_DEPTH=${SPEC_N:-3}
 if [ "$MODE" = dflash ] && [ "${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0}" = 1 ]; then

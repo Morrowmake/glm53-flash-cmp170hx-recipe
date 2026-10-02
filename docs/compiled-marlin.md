@@ -34,6 +34,13 @@ The compiled decode path is limited to eligible small batches in TP4 and PP4.
 Unsupported shapes use the released paths. This is not a universal kernel
 replacement, and no whole-server speedup is claimed here.
 
+Release 1.7.0 also includes eligible compiled prefill kernels: a TP4 tile
+kernel (`VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED`, default on) and the PP4
+wide-tile path (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`, default on). Shapes outside their gates use the existing split paths.
+The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is ignored. The compiled library
+is rebuilt from `{{PIN}}`; decode entry points retain their established outputs.
+Prefill throughput is recorded in [Results](results.md), on the final library.
+
 The pinned container image includes the optional library. To build it natively,
 use `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.
 Native compilation is opt-in; it is independent of runtime enablement.
