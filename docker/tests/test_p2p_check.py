@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import time
@@ -270,3 +271,50 @@ def test_compose_mounts_shared_gate():
     compose = (ROOT / "docker-compose.yml").read_text()
     for name in ("p2p_check.py", "p2p_check.sh", "p2p_probe.cu"):
         assert f"./{name}:/recipe/{name}:ro" in compose
+
+
+def probe_source():
+    text = (ROOT / "p2p_probe.cu").read_text()
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def test_probe_every_upload_finishes_before_further_cuda_work():
+    text = probe_source()
+    uploads = list(re.finditer(r"ck\(cudaMemcpy\([^;]+cudaMemcpyHostToDevice\)\);", text))
+    assert len(uploads) == 4
+    for upload in uploads:
+        assert re.match(r"\s*ck\(cudaDeviceSynchronize\(\)\);", text[upload.end():])
+
+
+@pytest.mark.parametrize("out,source", [("remote", "local"), ("readback", "remote")])
+def test_probe_peer_kernels_finish_before_read_or_process_exit(out, source):
+    text = probe_source()
+    launches = list(re.finditer(r"peer_copy<<<256, 256>>>\(" + out + ", " + source + r", n\);", text))
+    assert len(launches) == (2 if out == "remote" else 1)
+    for launch in launches:
+        assert re.match(r"\s*ck\(cudaGetLastError\(\)\);\s*ck\(cudaDeviceSynchronize\(\)\);",
+                        text[launch.end():])
+
+
+def test_probe_comparison_waits_on_owner_before_download():
+    text = probe_source().split("static void compare(", 1)[1].split("static void randomize", 1)[0]
+    assert re.search(r"ck\(cudaSetDevice\(owner\)\);\s*ck\(cudaDeviceSynchronize\(\)\);", text)
+    assert text.index("cudaDeviceSynchronize") < text.index("cudaMemcpyDeviceToHost")
+
+
+def test_probe_peer_copy_finishes_before_comparison():
+    assert re.search(r"ck\(cudaMemcpyPeer\(remote, owner, local, actor, n\)\);"
+                     r"\s*ck\(cudaDeviceSynchronize\(\)\);\s*compare\(owner, remote", probe_source())
+
+
+def test_probe_remote_clears_finish_before_peer_writers():
+    text = probe_source()
+    clears = list(re.finditer(r"ck\(cudaMemset\((?:remote|target), 0, (?:n|data.size\(\))\)\);", text))
+    assert len(clears) == 3
+    for clear in clears:
+        assert re.match(r"\s*ck\(cudaDeviceSynchronize\(\)\);", text[clear.end():])
+
+
+def test_probe_ipc_writer_exits_successfully_before_comparison():
+    text = probe_source().split("static void ipc_write(", 1)[1].split("static void identity", 1)[0]
+    assert text.index("waitpid(pid") < text.index("!WIFEXITED(status)") < text.index("compare(owner")

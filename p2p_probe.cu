@@ -1,4 +1,7 @@
 // Validate peer transfers before enabling server collectives.
+// Pageable H2D uploads can return before DMA completes: synchronize the upload
+// device before peer access. Finish every writer before switching devices or
+// processes for a read/compare; each kernel and IPC writer has an explicit fence.
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <cerrno>
@@ -31,6 +34,7 @@ static void exact(int fd, void* p, size_t n, bool writing) {
 static void compare(int owner, unsigned char* ptr,
                     const std::vector<unsigned char>& expected, const char* method) {
     ck(cudaSetDevice(owner));
+    ck(cudaDeviceSynchronize());
     std::vector<unsigned char> actual(expected.size());
     ck(cudaMemcpy(actual.data(), ptr, actual.size(), cudaMemcpyDeviceToHost));
     for (size_t i = 0; i < actual.size(); ++i) {
@@ -60,6 +64,7 @@ static int ipc_child(int actor) {
                            cudaIpcMemLazyEnablePeerAccess));
     ck(cudaMalloc(&local, n));
     ck(cudaMemcpy(local, data.data(), n, cudaMemcpyHostToDevice));
+    ck(cudaDeviceSynchronize());
     peer_copy<<<256, 256>>>(remote, local, n);
     ck(cudaGetLastError()); ck(cudaDeviceSynchronize());
     ck(cudaFree(local)); ck(cudaIpcCloseMemHandle(remote));
@@ -135,12 +140,14 @@ static void check() {
                 std::vector<unsigned char> data(n); randomize(data, rng);
                 ck(cudaSetDevice(actor));
                 ck(cudaMemcpy(local, data.data(), n, cudaMemcpyHostToDevice));
+                ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(owner)); ck(cudaMemset(remote, 0, n));
                 ck(cudaDeviceSynchronize());
                 ck(cudaMemcpyPeer(remote, owner, local, actor, n));
                 ck(cudaDeviceSynchronize()); compare(owner, remote, data, "cudaMemcpyPeer");
                 randomize(data, rng);
                 ck(cudaSetDevice(actor)); ck(cudaMemcpy(local, data.data(), n, cudaMemcpyHostToDevice));
+                ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(owner)); ck(cudaMemset(remote, 0, n)); ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(actor)); peer_copy<<<256, 256>>>(remote, local, n);
                 ck(cudaGetLastError()); ck(cudaDeviceSynchronize());
@@ -148,6 +155,7 @@ static void check() {
                 // Independent owner data prevents a wrong-address write/read from agreeing.
                 randomize(data, rng);
                 ck(cudaSetDevice(owner)); ck(cudaMemcpy(remote, data.data(), n, cudaMemcpyHostToDevice));
+                ck(cudaDeviceSynchronize());
                 ck(cudaSetDevice(actor)); ck(cudaMemset(readback, 0, n));
                 peer_copy<<<256, 256>>>(readback, remote, n);
                 ck(cudaGetLastError()); ck(cudaDeviceSynchronize());
