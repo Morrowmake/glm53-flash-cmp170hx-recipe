@@ -20,7 +20,8 @@ Engine: `{{PIN}}`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_d
   `{{DEFAULT:draft_skip}}`. Cached prompt-boundary reuse retains more of a
   cached prompt; default: `{{DEFAULT:cached_boundary}}`. PP4 drafter width
   follows the verified depth with default `{{DEFAULT:pp4_drafter_width}}`.
-  Adaptive depth includes depth 2 for low-acceptance text.
+  Depth 2 for low-acceptance text: `{{DEFAULT:depth2}}`; deep KDA v2:
+  `{{DEFAULT:kda_v2_deep}}`. Both await calibration and grouped validation.
 - Startup checks the temperature-0 OK reply and nonzero draft acceptance
   after health is ready (`BOOT_CHECK=1`, `0` disables it).
   `DEFAULT_REASONING_EFFORT` defaults to empty, preserving template behaviour;

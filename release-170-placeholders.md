@@ -11,17 +11,19 @@ the final built artifact, not the engine hash. Preserve earlier changelog
 provenance. Step 5 is calibration and deciding A/Bs; step 6 is grouped validation;
 image acceptance covers full fresh/update installs in both layouts.
 
-88 distinct release slots, 171 release occurrences outside this inventory. Runtime template expressions are listed separately by purpose below and are not fill-in slots.
+90 distinct release slots, 177 release occurrences outside this inventory. Runtime template expressions are listed separately by purpose below and are not fill-in slots.
 
 | Placeholder | Fills from | Locations |
 |---|---|---|
 | `{{$k}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `start.sh:448` |
 | `{{.Id}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `start.sh:937` |
 | `{{.State.Running}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `start.sh:833` |
-| `{{DEFAULT:all_reduce_flags}}` | Step 5 decision: TP4 flags-in-data all-reduce A/B; fill 0 or 1. | `CHANGELOG.md:18`, `docs/engine-switches.md:83`, `docs/how-it-works.md:71`, `docs/how-to-use.md:202`, `docs/how-to-use.md:295`, `docs/results.md:13`, `serve.sh:244` |
-| `{{DEFAULT:cached_boundary}}` | Step 5 decision: cached-boundary A/B, then step 6 boundary checks; fill 0 or 1. | `CHANGELOG.md:21`, `docs/engine-switches.md:85`, `docs/how-it-works.md:74`, `docs/how-to-use.md:204`, `docs/results.md:15`, `serve.sh:522` |
-| `{{DEFAULT:draft_skip}}` | Step 5 decision: TP4 confidence-skip A/B; fill 0 or 1. PP4 stays off because the current implementation requires TP-only. | `CHANGELOG.md:20`, `docs/engine-switches.md:84`, `docs/how-it-works.md:73`, `docs/how-to-use.md:203`, `docs/results.md:14`, `serve.sh:516` |
-| `{{DEFAULT:pp4_drafter_width}}` | Step 5 decision: PP4 drafter-width A/B after calibration; fill 0 or 1. | `CHANGELOG.md:22`, `docs/engine-switches.md:82`, `docs/how-it-works.md:75`, `docs/how-to-use.md:205`, `docs/results.md:16`, `serve.sh:509` |
+| `{{DEFAULT:all_reduce_flags}}` | Step 5 decision: TP4 flags-in-data all-reduce A/B; fill 0 or 1. | `CHANGELOG.md:18`, `docs/engine-switches.md:83`, `docs/how-it-works.md:71`, `docs/how-to-use.md:202`, `docs/how-to-use.md:295`, `docs/results.md:13`, `serve.sh:246` |
+| `{{DEFAULT:cached_boundary}}` | Step 5 decision: cached-boundary A/B, then step 6 boundary checks; fill 0 or 1. | `CHANGELOG.md:21`, `docs/engine-switches.md:85`, `docs/how-it-works.md:74`, `docs/how-to-use.md:204`, `docs/results.md:15`, `serve.sh:551` |
+| `{{DEFAULT:depth2}}` | Step 5 decision: depth-2 policy A/B with matching cost tables, then step 6 grouped validation; fill 0 or 1. | `CHANGELOG.md:23`, `docs/engine-switches.md:87`, `serve.sh:554` |
+| `{{DEFAULT:draft_skip}}` | Step 5 decision: TP4 confidence-skip A/B; fill 0 or 1. PP4 stays off because the current implementation requires TP-only. | `CHANGELOG.md:20`, `docs/engine-switches.md:84`, `docs/how-it-works.md:73`, `docs/how-to-use.md:203`, `docs/results.md:14`, `serve.sh:545` |
+| `{{DEFAULT:kda_v2_deep}}` | Step 5 decision: deep KDA v2 A/B, then step 6 grouped validation; fill 0 or 1. | `CHANGELOG.md:24`, `docs/engine-switches.md:97`, `serve.sh:240` |
+| `{{DEFAULT:pp4_drafter_width}}` | Step 5 decision: PP4 drafter-width A/B after calibration; fill 0 or 1. | `CHANGELOG.md:22`, `docs/engine-switches.md:82`, `docs/how-it-works.md:75`, `docs/how-to-use.md:205`, `docs/results.md:16`, `serve.sh:538` |
 | `{{DEFAULT:pp4_partition}}` | Step 5 decision: PP4 partition A/B before calibration; fill the selected comma-separated layer counts. | `docs/engine-switches.md:88`, `serve.sh:165` |
 | `{{NCCL_P2P_DISABLE-unset}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `docker/tests/test_p2p_check.py:183`, `docker/tests/test_p2p_check.py:256` |
 | `{{NCCL_P2P_LEVEL-unset}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `docker/tests/test_p2p_check.py:183`, `docker/tests/test_p2p_check.py:256` |
@@ -33,10 +35,10 @@ image acceptance covers full fresh/update installs in both layouts.
 | `{{NUM:image_digest}}` | Image build + full image acceptance: exact final OCI manifest SHA-256, 64 hex characters without the sha256 prefix. Includes the selected seed layer when shipped. | `.env.advanced.example:34`, `CHANGELOG.md:5`, `docker-compose.yml:21`, `docker/README.md:39`, `docker/README.md:141`, `docker/RELEASE.md:82`, `docs/how-it-works.md:92`, `start.sh:157` |
 | `{{NUM:image_layer_count}}` | Image build: final filesystem layer count including base and seed; must pass the layer-count gate. | `docker/RELEASE.md:81` |
 | `{{NUM:leak_failures}}` | Step 6 validation: cross-request leak leg, failure count. | `docs/results.md:41` |
-| `{{NUM:pp4_adaptive_costs_multi}}` | Step 5 calibration on the chosen PP4 partition and frozen tree: complete comma-separated relative cost table in the depth-2-enabled parser order, multi-request. | `serve.sh:530` |
-| `{{NUM:pp4_adaptive_costs}}` | Step 5 calibration on the chosen PP4 partition and frozen tree: complete comma-separated relative cost table in the depth-2-enabled parser order, single-request. | `serve.sh:529` |
-| `{{NUM:pp4_boot_cold_s}}` | Image build acceptance: PP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:32`, `docker/RELEASE.md:79`, `docs/how-to-use.md:32` |
-| `{{NUM:pp4_boot_seeded_s}}` | Image build acceptance: PP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:33`, `docker/RELEASE.md:79`, `docs/how-to-use.md:33` |
+| `{{NUM:pp4_adaptive_costs_multi}}` | Step 5 calibration on the chosen PP4 partition and frozen tree: complete comma-separated relative cost table in the parser order matching the selected depth-2 setting, multi-request. | `serve.sh:560` |
+| `{{NUM:pp4_adaptive_costs}}` | Step 5 calibration on the chosen PP4 partition and frozen tree: complete comma-separated relative cost table in the parser order matching the selected depth-2 setting, single-request. | `serve.sh:559` |
+| `{{NUM:pp4_boot_cold_s}}` | Image build acceptance: PP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:33`, `docker/RELEASE.md:79`, `docs/how-to-use.md:32` |
+| `{{NUM:pp4_boot_seeded_s}}` | Image build acceptance: PP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:34`, `docker/RELEASE.md:79`, `docs/how-to-use.md:33` |
 | `{{NUM:pp4_c1_code_tps}}` | Step 6 README throughput leg: PP4 one-user streaming decode, code prompt, tok/s; median of five. | `docs/results.md:72` |
 | `{{NUM:pp4_c1_prose_tps}}` | Step 6 README throughput leg: PP4 one-user streaming decode, prose prompt, tok/s; median of five. | `docs/results.md:72` |
 | `{{NUM:pp4_c1_structured_tps}}` | Step 6 README throughput leg: PP4 one-user streaming decode, structured prompt, tok/s; median of five. | `docs/results.md:72` |
@@ -76,10 +78,10 @@ image acceptance covers full fresh/update installs in both layouts.
 | `{{NUM:skip_slope}}` | Step 5 confidence-skip A/B: selected frozen estimator slope from the calibrated version-1 coefficient file; retain the validated 7-position order. If skip ships off, keep the selected calibrated file or remove its unused mount and override together. | `draft-skip-coefficients.json:4` |
 | `{{NUM:skip_threshold}}` | Step 5 confidence-skip A/B: selected frozen estimator threshold from the calibrated version-1 coefficient file; retain the validated 7-position order. If skip ships off, keep the selected calibrated file or remove its unused mount and override together. | `draft-skip-coefficients.json:14` |
 | `{{NUM:state_index_failures}}` | Step 6 validation: state-index-check stress leg, failure count. | `docs/results.md:50` |
-| `{{NUM:tp4_adaptive_costs_multi}}` | Step 5 calibration on the chosen TP4 partition and frozen tree: complete comma-separated relative cost table in the depth-2-enabled parser order, multi-request. | `serve.sh:530` |
-| `{{NUM:tp4_adaptive_costs}}` | Step 5 calibration on the chosen TP4 partition and frozen tree: complete comma-separated relative cost table in the depth-2-enabled parser order, single-request. | `serve.sh:529` |
-| `{{NUM:tp4_boot_cold_s}}` | Image build acceptance: TP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:31`, `README.md:98`, `docker/RELEASE.md:78`, `docs/how-to-use.md:31` |
-| `{{NUM:tp4_boot_seeded_s}}` | Image build acceptance: TP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:32`, `README.md:99`, `docker/RELEASE.md:78`, `docs/how-to-use.md:33` |
+| `{{NUM:tp4_adaptive_costs_multi}}` | Step 5 calibration on the chosen TP4 partition and frozen tree: complete comma-separated relative cost table in the parser order matching the selected depth-2 setting, multi-request. | `serve.sh:560` |
+| `{{NUM:tp4_adaptive_costs}}` | Step 5 calibration on the chosen TP4 partition and frozen tree: complete comma-separated relative cost table in the parser order matching the selected depth-2 setting, single-request. | `serve.sh:559` |
+| `{{NUM:tp4_boot_cold_s}}` | Image build acceptance: TP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:32`, `README.md:98`, `docker/RELEASE.md:78`, `docs/how-to-use.md:31` |
+| `{{NUM:tp4_boot_seeded_s}}` | Image build acceptance: TP4 cold/seeded health + boot-check startup elapsed seconds on the exact image; retain cache identity and smoke evidence. | `CHANGELOG.md:33`, `README.md:99`, `docker/RELEASE.md:78`, `docs/how-to-use.md:33` |
 | `{{NUM:tp4_c1_code_tps}}` | Step 6 README throughput leg: TP4 one-user streaming decode, code prompt, tok/s; median of five. | `README.md:66`, `docs/results.md:62` |
 | `{{NUM:tp4_c1_prose_tps}}` | Step 6 README throughput leg: TP4 one-user streaming decode, prose prompt, tok/s; median of five. | `README.md:67`, `docs/results.md:62` |
 | `{{NUM:tp4_c1_structured_tps}}` | Step 6 README throughput leg: TP4 one-user streaming decode, structured prompt, tok/s; median of five. | `README.md:17`, `README.md:65`, `docs/results.md:62` |
@@ -107,7 +109,7 @@ image acceptance covers full fresh/update installs in both layouts.
 | `{{NUM:tp4_response_23255_s}}` | Step 6 README throughput leg: TP4 nonstreaming one-token elapsed seconds at 23255 prompt tokens, median of three. | `docs/results.md:65` |
 | `{{NUM:tp4_response_6217_s}}` | Step 6 README throughput leg: TP4 nonstreaming one-token elapsed seconds at 6217 prompt tokens, median of three. | `docs/results.md:65` |
 | `{{NUM:validation_xid_delta}}` | Step 6 validation: new Xid-event count across the grouped validation. | `docs/results.md:42` |
-| `{{PIN}}` | Step 6 acceptance on the frozen tree, then the exact full 40-hex fork commit selected for release; run tools/set-pin.sh with it. Historical changelog pins remain unchanged. | `.env.advanced.example:40`, `CHANGELOG.md:5`, `README.md:8`, `README.md:8`, `README.md:147`, `docker/Dockerfile:25`, `docker/Dockerfile:33`, `docker/README.md:10`, `docker/README.md:11`, `docker/README.md:42`, `docker/README.md:100`, `docker/build.sh:20`, `docs/compiled-marlin.md:41`, `docs/how-it-works.md:91`, `docs/how-it-works.md:91`, `docs/results.md:5`, `start.sh:155` |
+| `{{PIN}}` | Step 6 acceptance on the frozen tree, then the exact full 40-hex fork commit selected for release; run tools/set-pin.sh with it. Historical changelog pins remain unchanged. | `.env.advanced.example:40`, `CHANGELOG.md:5`, `README.md:8`, `README.md:8`, `README.md:147`, `docker/Dockerfile:25`, `docker/Dockerfile:33`, `docker/README.md:10`, `docker/README.md:11`, `docker/README.md:42`, `docker/README.md:100`, `docker/build.sh:20`, `docs/compiled-marlin.md:44`, `docs/how-it-works.md:91`, `docs/how-it-works.md:91`, `docs/results.md:5`, `start.sh:155` |
 | `{{end}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `start.sh:448` |
 | `{{index .Config.Labels \"$LABEL\"}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `start.sh:833` |
 | `{{model_name="fixture",engine="0"}}` | Runtime formatting syntax (Docker Go template or test fixture); no release measurement or substitution. Leave unchanged. | `docker/tests/test_boot_check.py:43` |
@@ -125,3 +127,74 @@ settings match step 5, run CPU checks and full image acceptance, review the
 issue reply, then delete this inventory. Nothing in this file authorizes
 publication. The issue reply describes the observed crash path and fixes;
 its exact original trigger remains unconfirmed.
+
+## Switch inventory
+
+Read-only comparison: `3a2bf16dae` (1.6.0) to frozen candidate
+`0954f02db6d6738ce6d57acccf4be19d27caa3a7`, and independently to
+`bundle-1003` at `09ade8b09e5c824f67947ec16d51bde002b2320d`.
+The branch moved during review and was rechecked at this exact newer head. Compared `vllm/envs.py`, all tracked
+Python `os.getenv` / `os.environ` read sites, helper-based reads, and native
+read sites. There are 24 new or changed runtime settings in the frozen candidate,
+and 25 in the newer bundle head (the first 25 rows): it adds PP4 compiled
+prefill, default `1`. No other direct-read changes or `VLLM_MOE_*` default
+changes were found. Remaining rows show existing release policy controls. Explicit user overrides remain supported.
+
+| switch | fork default | release value | where set | decided or placeholder |
+|---|---|---|---|---|
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS` | 0 | TP4: {{DEFAULT:all_reduce_flags}}; PP4: 0 | serve.sh TP4 export; release-features all_reduce_flags | placeholder |
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES` | 262144 | 262144 | serve.sh export; release-features all_reduce_max_bytes | decided |
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR` | None | unset (engine cache fallback) | fork; no export needed; release-features all_reduce_build_dir | decided |
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S` | 60 seconds | 60 seconds (overrun traps) | serve.sh export; release-features all_reduce_wait_s | decided |
+| `VLLM_GLM5_PREFILL_PACK_BF16X2` | 1 | 1 | serve.sh export; release-features pack_bf16x2 | decided |
+| `VLLM_GLM5_INDEXER_DECODE_RAW_K` | 1 | 1 | serve.sh export; release-features indexer_raw_k | decided |
+| `VLLM_GLM5_STATE_INDEX_CHECK` | 0 | 0 (diagnostic off) | serve.sh export; release-features state_index_check | decided |
+| `VLLM_GLM5_DECODE_MHC_V2_FN_BF16` | 1 | 1 | serve.sh export; release-features mhc_fn_bf16 | decided |
+| `VLLM_GLM5_DECODE_MHC_V3` | 1 | 1 | serve.sh export; release-features mhc_v3 | decided |
+| `VLLM_GLM5_DECODE_KDA_V2_DEEP` | 0 | {{DEFAULT:kda_v2_deep}} | serve.sh export; release-features kda_deep | placeholder |
+| `VLLM_GLM5_KDA_RECOVER` | 0 | TP4: 1; PP4: 0 | serve.sh TP4 export; release-features recover | decided |
+| `VLLM_GLM5_DECODE_KDA_STEP_TILE` | 0 | 1 | serve.sh export; release-features step_tile | decided |
+| `VLLM_GLM5_THIN_GEMM_V74` | 1 | 1 | serve.sh export; release-features thin_gemm_v74 | decided |
+| `VLLM_GLM5_TOOL_CHOICE_NONE_MASK` | 1 | 1 | serve.sh export; release-features tool_choice_none_mask | decided |
+| `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` | 0 | {{DEFAULT:cached_boundary}} | serve.sh DFlash export; draft-policy boundary | placeholder |
+| `VLLM_GLM5_DFLASH_DEPTH2` | 0 | {{DEFAULT:depth2}} | serve.sh DFlash export; draft-policy depth2 | placeholder |
+| `VLLM_GLM5_DFLASH_SKIP` | 0 | TP4: {{DEFAULT:draft_skip}}; PP4: 0 | serve.sh DFlash export; draft-policy skip | placeholder |
+| `VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS` | empty string | draft-skip-coefficients.json beside launcher | serve.sh DFlash export; draft-policy skip_coefficients | placeholder (coefficient values) |
+| `VLLM_GLM5_DFLASH_CONFIDENCE_LOG` | empty string | unset (logging off) | fork; no export needed; draft-policy confidence_log | decided |
+| `VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED` | 1 | 1 (eligible TP4 shapes, installed op) | serve.sh export; release-features tp4_marlin_prefill_compiled | decided |
+| `VLLM_GLM5_MARLIN_PREFILL_CUDA` | empty string; was boolean 0 | unset (removed; ignored even if set) | fork; no export needed; release-features removed_marlin_prefill_cuda | decided |
+| `VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS` | 0 | PP4: 1; TP4: 0 | serve.sh per-layout export; release-features pp_marlin_mid_rows | decided |
+| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI` | 0 | PP4: 1; TP4: 0 | serve.sh per-layout export; release-features pp_marlin_multi | decided |
+| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS` | 9-32 | 9-32 | serve.sh export; release-features pp_marlin_multi_rows | decided |
+| `VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED` | absent at frozen; 1 at bundle head | 1 (eligible PP4 shapes, installed op) | serve.sh export; release-features pp4_marlin_prefill_compiled | decided; requires newer tree |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | 0 (unchanged) | TP4: 1; PP4: {{DEFAULT:pp4_drafter_width}} | serve.sh DFlash export; draft-policy width | placeholder at PP4 |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K` | 0 (unchanged) | 1 | serve.sh DFlash export; draft-policy adaptive_k | decided |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | 5,4 (unchanged) | 7,5 | serve.sh DFlash export; draft-policy depths | decided |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | 0 (unchanged) | 1 | serve.sh DFlash export; draft-policy accept | decided |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS` | empty string (unchanged) | {{NUM:tp4_adaptive_costs}} / {{NUM:pp4_adaptive_costs}} | serve.sh per-layout export; draft-policy costs | placeholder |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI` | empty string (unchanged) | {{NUM:tp4_adaptive_costs_multi}} / {{NUM:pp4_adaptive_costs_multi}} | serve.sh per-layout export; draft-policy costs_multi | placeholder |
+| `VLLM_GLM5_MARLIN_DECODE_CUDA` | 0 (unchanged) | 1 if library installed, otherwise 0 | serve.sh discovery/export; release-features marlin_decode | decided |
+| `VLLM_GLM5_MARLIN_DECODE_VARIANT` | orig (unchanged) | orig | serve.sh export; release-features marlin_variant | decided |
+
+`VLLM_MOE_SKIP_PADDING` stays at its unchanged fork default `1`; draft skip
+also activates padding handling in the new tree. `VLLM_GLM5_MOE_MASK_PADDING`
+is exported as `1` by the existing launcher block and is required by skip.
+Existing parent gates still apply to thin GEMM, mHC and prefill kernels;
+compiled PP4 decode row switches require `VLLM_GLM5_MARLIN_DECODE_CUDA=1`.
+
+Frozen-tree differences requiring exports: KDA step tile `0` -> `1`, TP4
+RecoverSSM `0` -> `1`, PP4 compiled decode mid/multi rows `0` -> `1`, and
+DFlash adaptive policy, width, costs and coefficient file. Flags-in-data,
+draft skip, cached boundary, depth 2 and deep KDA v2 remain explicit decision
+slots rather than inheriting the fork's `0`. The 60-second all-reduce wait
+limit is retained. The state-index diagnostic stays off in release defaults;
+its validation leg must opt in. PP4 compiled wide-tile prefill is absent from
+the frozen candidate but present in the newer bundle head, with default `1`
+and a changed optional-library prefill signature. Select the final validated
+tree and rebuild its matching library before release; an export alone does
+not add this path to the older tree. Recheck the inventory if the head moves.
+
+Run `python3 tools/check-release.py` for full-tree wording, per-commit added
+lines, messages, trailers and identity. Its sole wording exception matches
+the exact frozen dependency line in `docker/CONSTRAINTS` (a package name);
+other paths, versions, prefixes and suffixes are rejected.

@@ -52,8 +52,8 @@
 # ===== sm_80 feature flags ==================================================
 # The performance features, the repeatable-output fixes and the KV headroom
 # changes, plus an optional PCIe peer-to-peer switch, measured one by one and
-# then together. All are OFF by default IN THE CODE; the block below is the
-# only thing that turns them on, so each one is a one-variable kill switch --
+# then together. Some default on in the engine; the release defaults below
+# and the engine gates select them. Each feature has a one-variable switch --
 # set it to 0 in the environment and restart, no rebuild and no revert. (Two
 # exceptions: VLLM_SPARSE_INDEXER_MAX_LOGITS_MB is off at 512, and
 # VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY works the other way round, see below.)
@@ -236,7 +236,9 @@ if [ "$LAYOUT" = tp4 ]; then
 fi
 
 # Release state recovery and peer collective defaults; explicit overrides win.
-export VLLM_GLM5_DECODE_KDA_V2_DEEP=${VLLM_GLM5_DECODE_KDA_V2_DEEP:-1}
+if [ -z "${VLLM_GLM5_DECODE_KDA_V2_DEEP+x}" ]; then
+  export VLLM_GLM5_DECODE_KDA_V2_DEEP='{{DEFAULT:kda_v2_deep}}'
+fi
 export VLLM_GLM5_DECODE_KDA_STEP_TILE=${VLLM_GLM5_DECODE_KDA_STEP_TILE:-1}
 if [ "$TP" = 4 ] && [ "$PP" = 1 ]; then
   export VLLM_GLM5_KDA_RECOVER=${VLLM_GLM5_KDA_RECOVER:-1}
@@ -244,7 +246,33 @@ if [ "$TP" = 4 ] && [ "$PP" = 1 ]; then
     export VLLM_CUSTOM_ALLREDUCE_FLAGS='{{DEFAULT:all_reduce_flags}}'
   fi
 fi
-echo "serve.sh: [release-features] recover=${VLLM_GLM5_KDA_RECOVER:-0} all_reduce_flags=${VLLM_CUSTOM_ALLREDUCE_FLAGS:-0} kda_deep=$VLLM_GLM5_DECODE_KDA_V2_DEEP step_tile=$VLLM_GLM5_DECODE_KDA_STEP_TILE"
+# Defaults already on in the fork are explicit here for reproducible banners.
+export VLLM_GLM5_THIN_GEMM_V74=${VLLM_GLM5_THIN_GEMM_V74:-1}
+export VLLM_GLM5_DECODE_MHC_V3=${VLLM_GLM5_DECODE_MHC_V3:-1}
+export VLLM_GLM5_DECODE_MHC_V2_FN_BF16=${VLLM_GLM5_DECODE_MHC_V2_FN_BF16:-1}
+export VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED=${VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED:-1}
+# Present on the newer integrated tree; absent from the earlier frozen snapshot.
+export VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED=${VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED:-1}
+export VLLM_GLM5_PREFILL_PACK_BF16X2=${VLLM_GLM5_PREFILL_PACK_BF16X2:-1}
+export VLLM_GLM5_INDEXER_DECODE_RAW_K=${VLLM_GLM5_INDEXER_DECODE_RAW_K:-1}
+export VLLM_GLM5_TOOL_CHOICE_NONE_MASK=${VLLM_GLM5_TOOL_CHOICE_NONE_MASK:-1}
+# Diagnostic only: release default off; validation may explicitly enable it.
+export VLLM_GLM5_STATE_INDEX_CHECK=${VLLM_GLM5_STATE_INDEX_CHECK:-0}
+# PP4 whole-expert compiled decode: one-request depths 4..6 and 9..32 rows.
+# These switches require the optional decode library; TP4 keeps them off.
+if [ "$PP" = 4 ] && [ "$TP" = 1 ]; then
+  export VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS:-1}
+  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI:-1}
+else
+  export VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS:-0}
+  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI:-0}
+fi
+export VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS:-9-32}
+export VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES=${VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES:-262144}
+export VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S=${VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S:-60}
+echo "serve.sh: [release-features] recover=${VLLM_GLM5_KDA_RECOVER:-0} all_reduce_flags=${VLLM_CUSTOM_ALLREDUCE_FLAGS:-0} all_reduce_max_bytes=$VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES all_reduce_wait_s=$VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S all_reduce_build_dir=${VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR:-unset} kda_deep=$VLLM_GLM5_DECODE_KDA_V2_DEEP step_tile=$VLLM_GLM5_DECODE_KDA_STEP_TILE state_index_check=$VLLM_GLM5_STATE_INDEX_CHECK"
+echo "serve.sh: [release-features] thin_gemm_v74=$VLLM_GLM5_THIN_GEMM_V74 mhc_v3=$VLLM_GLM5_DECODE_MHC_V3 mhc_fn_bf16=$VLLM_GLM5_DECODE_MHC_V2_FN_BF16 tp4_marlin_prefill_compiled=$VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED pack_bf16x2=$VLLM_GLM5_PREFILL_PACK_BF16X2 indexer_raw_k=$VLLM_GLM5_INDEXER_DECODE_RAW_K tool_choice_none_mask=$VLLM_GLM5_TOOL_CHOICE_NONE_MASK"
+echo "serve.sh: [release-features] pp_marlin_mid_rows=$VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS pp_marlin_multi=$VLLM_GLM5_MARLIN_DECODE_PP_MULTI pp_marlin_multi_rows=$VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS removed_marlin_prefill_cuda=${VLLM_GLM5_MARLIN_PREFILL_CUDA:-unset}(ignored) pp4_marlin_prefill_compiled=$VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED"
 
 # --- KV accounting --------------------------------------------------------------
 # With prefill chunks in flight, a request can hold more linear-attention state
@@ -296,6 +324,7 @@ esac
 export VLLM_GLM5_MARLIN_DECODE_VARIANT=${VLLM_GLM5_MARLIN_DECODE_VARIANT-orig}
 case "$VLLM_GLM5_MARLIN_DECODE_VARIANT" in orig|exact) ;; *) echo "serve.sh: VLLM_GLM5_MARLIN_DECODE_VARIANT must be orig or exact" >&2; exit 2 ;; esac
 echo "serve.sh: [ampere-marlin] decode=$VLLM_GLM5_MARLIN_DECODE_CUDA variant=$VLLM_GLM5_MARLIN_DECODE_VARIANT (prebuilt library required when enabled)"
+echo "serve.sh: [release-features] marlin_decode=$VLLM_GLM5_MARLIN_DECODE_CUDA marlin_variant=$VLLM_GLM5_MARLIN_DECODE_VARIANT (prebuilt library required when enabled)"
 if [ "${DRY:-0}" != 1 ] && [ "$VLLM_GLM5_MARLIN_DECODE_CUDA" = 1 ]; then
   CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY' || exit 1
 try:
@@ -521,13 +550,16 @@ if [ "$MODE" = dflash ]; then
   if [ -z "${VLLM_GLM5_DFLASH_BOUNDARY_CACHE+x}" ]; then
     export VLLM_GLM5_DFLASH_BOUNDARY_CACHE='{{DEFAULT:cached_boundary}}'
   fi
-  export VLLM_GLM5_DFLASH_DEPTH2=${VLLM_GLM5_DFLASH_DEPTH2:-1}
+  if [ -z "${VLLM_GLM5_DFLASH_DEPTH2+x}" ]; then
+    export VLLM_GLM5_DFLASH_DEPTH2='{{DEFAULT:depth2}}'
+  fi
   if [ -z "${VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS+x}" ]; then
     export VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/draft-skip-coefficients.json"
   fi
-  echo "serve.sh: [draft-policy] skip=$VLLM_GLM5_DFLASH_SKIP boundary=$VLLM_GLM5_DFLASH_BOUNDARY_CACHE width=$VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH depth2=$VLLM_GLM5_DFLASH_DEPTH2"
   if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='{{NUM:pp4_adaptive_costs}}'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='{{NUM:tp4_adaptive_costs}}'; fi; fi
   if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='{{NUM:pp4_adaptive_costs_multi}}'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='{{NUM:tp4_adaptive_costs_multi}}'; fi; fi
+  echo "serve.sh: [draft-policy] skip=$VLLM_GLM5_DFLASH_SKIP boundary=$VLLM_GLM5_DFLASH_BOUNDARY_CACHE width=$VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH depth2=$VLLM_GLM5_DFLASH_DEPTH2 skip_coefficients=$VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS confidence_log=${VLLM_GLM5_DFLASH_CONFIDENCE_LOG:-unset}"
+  echo "serve.sh: [draft-policy] adaptive_k=$VLLM_GLM5_DFLASH_ADAPTIVE_K depths=$VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS accept=$VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT costs=$VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS costs_multi=$VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI"
 fi
 SPEC_DEPTH=${SPEC_N:-3}
 if [ "$MODE" = dflash ] && [ "${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0}" = 1 ]; then

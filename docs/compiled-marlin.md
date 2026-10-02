@@ -34,9 +34,12 @@ The compiled decode path is limited to eligible small batches in TP4 and PP4.
 Unsupported shapes use the released paths. This is not a universal kernel
 replacement, and no whole-server speedup is claimed here.
 
-Release 1.7.0 also includes eligible compiled prefill kernels: a TP4 tile
-kernel (`VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED`, default on) and the PP4
-wide-tile path (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`, default on). Shapes outside their gates use the existing split paths.
+The frozen preparation tree includes a TP4 compiled prefill tile kernel
+(`VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED`, default on). Shapes outside its
+gates use the existing split paths. The newer integrated tree also includes
+PP4 compiled wide-tile prefill (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`,
+default on), absent from the earlier frozen snapshot. Use a matching final
+engine pin and rebuilt library after validation.
 The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is ignored. The compiled library
 is rebuilt from `{{PIN}}`; decode entry points retain their established outputs.
 Prefill throughput is recorded in [Results](results.md), on the final library.
