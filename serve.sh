@@ -92,22 +92,12 @@
 #   VLLM_GLM5_SPARSE_MLA_DECODE_LEGACY=1  the sparse-attention decode schedule
 #                                 from before 1.2.0 (the retuned one is on in
 #                                 the engine; not set here)
-#   VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1  device-memory custom all-reduce over
-#                                 PCIe peer-to-peer. DEFAULT 0 HERE, because it
-#                                 needs peer-to-peer enabled at the driver level
-#                                 -- see the optional section in docs/how-to-use.md.
-#                                 Historical 1.4.1 results (TP4): step -3.7% at 1
-#                                 user, -4.3% at 4, -7.6% at 6, -9.1% at 8, cold
-#                                 prefill +14.7% (with NCCL over peer-to-peer,
-#                                 below), KV +21,011 with earlier allocator
-#                                 defaults, not a current P2P-only KV gain.
-#                                 0 keeps the host-staged path.
-#   VLLM_CUSTOM_ALLREDUCE_ALGO=   which CustomAllreduce kernel; 2stage here
-#                                 because the built-in crossover is NVLink-tuned
-#                                 and 1stage measured worse on Gen2 x16. Inert
-#                                 unless the switch above is 1. Unset = upstream.
+#   P2P=auto                      verify peer content before enabling CUDA/NCCL P2P
+#   P2P=off                       disable all peer transports (also PP)
+#   P2P=force                     bypass the content check
+#   VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=0  disable custom all-reduce after a pass
 #   GLM5_NCCL_P2P_SYS=0           NCCL over peer-to-peer too (NCCL_P2P_LEVEL=SYS);
-#                                 on by default with the switch above at 1 (TP4).
+#                                 on by default after a content-check pass (TP or PP).
 #   VLLM_GLM5_PREFILL_OVERLAP_BACKEND=  which communicator carries the prefill
 #                                 overlap's split collectives. NOT set here: the
 #                                 code default is nccl, which measured fastest.
@@ -352,27 +342,10 @@ export VLLM_GLM5_THIN_GEMM=${VLLM_GLM5_THIN_GEMM:-1}
 # Set in both layouts, as validated: under PP4 there is no tensor-parallel
 # all-reduce for it to replace, so it has nothing to do there.
 export VLLM_GLM5_HOST_ALLREDUCE=${VLLM_GLM5_HOST_ALLREDUCE:-1}
-# PCIe peer-to-peer switch: device-memory CustomAllreduce over PCIe peer-to-peer, instead
-# of staging every collective through the host.
-#   0 (default here) -- host-staged path serves. This is what the recipe ships,
-#                       because peer-to-peer has to be enabled at the driver
-#                       level first and most cards do not have it.
-#   1                -- CustomAllreduce owns the TP all-reduce over PCIe P2P.
-#                       Only set this if peer-to-peer is actually available:
-#                       `nvidia-smi topo -p2p r` must report OK, not GNS.
-# Under PP4 there is no tensor-parallel all-reduce, so the switch does nothing
-# there; the stage-to-stage hand-off uses peer-to-peer by itself where the
-# driver offers it.
-# Historical 1.4.1 results (TP4), four cards with peer-to-peer available, one
-# boot each, earlier release defaults (allocator True at switch 0, False at 1):
-#   switch 0: decode step at 1 / 4 / 6 / 8 users 15.87 / 29.51 / 38.91 /
-#             44.45 ms, cold prefill 2,670 tok/s, KV 1,156,635
-#   switch 1: decode step at 1 / 4 / 6 / 8 users 15.29 / 28.23 / 35.94 /
-#             40.39 ms, cold prefill 3,062 tok/s, KV 1,177,646
-# These are not remeasurements with the independent False allocator default.
-# Switch 0 uses the host-staged path rather than dropping to NCCL:
-# VLLM_GLM5_HOST_ALLREDUCE stays at 1 and serves.
-# VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE is resolved by the startup check below.
+# P2P=auto (default) enables peer access only after the startup content check.
+# P2P=off disables both CUDA custom all-reduce and NCCL P2P, including PP.
+# P2P=force bypasses verification. An explicit custom-all-reduce 0 is preserved
+# after a pass; it does not disable NCCL peer transfers. Use P2P=off for that.
 # 2stage, not the built-in crossover: that crossover takes one-shot below
 # 512 KiB, which is tuned for NVLink and wrong on Gen2 x16. Forcing 1stage
 # everywhere measured worse than either (16.83 ms at 1 user, 33.00 at 4). Unset it to get
