@@ -14,11 +14,10 @@
 
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
 cards in two layouts. Release 1.7.0 tensor-parallel results with verified peer-to-peer at 74 SMs:
-{{NUM:tp4_c1_structured_tps}} tok/s for one user and {{NUM:tp4_c8_structured_tps}} tok/s across eight,
-{{NUM:tp4_prefill_tps}} tok/s cold prefill and a {{NUM:tp4_kv_tokens}}-token KV pool. The weights
+482.2 tok/s for one user and 948.6 tok/s across eight,
+3,197 tok/s cold prefill and a 1,199,570-token KV pool. The weights
 are W4A16 and nothing else is cut: the KV cache is full precision, there is no
-FP8 anywhere, and nothing is offloaded to CPU or disk. Single-request
-repeatability: {{NUM:tp4_repeatability_passed}}/{{NUM:tp4_repeatability_total}} checks in [Results](docs/results.md).**
+FP8 anywhere, and nothing is offloaded to CPU or disk.**
 
 This repository installs and runs **GLM-5.3-Flash** on **four NVIDIA CMP 170HX
 cards** behind an OpenAI-compatible API, with tool calls, reasoning, images and
@@ -54,22 +53,26 @@ P2P is enabled automatically after a startup [content check](docs/how-to-use.md#
   (not needed for the [native install](docs/how-to-use.md#native-install-for-developers))
 - `git`, `curl`, `flock`, `setsid`, Python 3 for the boot check, and `jq` for the smoke test
 - about 180 GiB (193 GB) of disk for the two checkpoints, plus the engine image
-  ({{NUM:image_compressed_gb}} GB compressed) and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
+  and the kernel compile caches ([details](docs/how-to-use.md#what-you-need))
 
 ## Headline numbers
 
-Tokens per second, release 1.7.0, 262,144-token context, 180 W per card, PCIe x16 links.
+Measured 2026-10-03 on 4× CMP 170HX, 74 SMs per card, mainline cmpunlocker
+with P2P, recipe defaults, 262,144-token context, 180 W per card and PCIe x16 links.
+Decode uses the MiaAI-Lab protocol: 400 tokens, temperature 0, thinking off;
+one user is the median of ten runs (five on each of two boots), eight users the
+median aggregate rate of three runs on one boot.
 
 | | Tensor-parallel 4<br>+ [peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer) (default after verification) |
 |---|---:|
-| **1 user** · structured | **{{NUM:tp4_c1_structured_tps}}** |
-| **1 user** · code | **{{NUM:tp4_c1_code_tps}}** |
-| **1 user** · prose | **{{NUM:tp4_c1_prose_tps}}** |
-| **8 users, total** · structured | {{NUM:tp4_c8_structured_tps}} |
-| **8 users, total** · code | {{NUM:tp4_c8_code_tps}} |
-| **8 users, total** · prose | {{NUM:tp4_c8_prose_tps}} |
-| **Prompt reading** (cold prefill) | {{NUM:tp4_prefill_tps}} |
-| **KV pool** (tokens) | {{NUM:tp4_kv_tokens}} |
+| **1 user** · structured | **482.2** |
+| **1 user** · code | **447.7** |
+| **1 user** · prose | **210.6** |
+| **8 users, total** · structured | 948.6 |
+| **8 users, total** · code | 834.1 |
+| **8 users, total** · prose | 684.6 |
+| **Prompt reading** (cold prefill) | 3,197 |
+| **KV pool** (tokens) | 1,199,570 |
 
 One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
@@ -94,9 +97,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
        "max_tokens": 400}'
 ```
 
-`./start.sh` skips anything already done, so running it twice is safe; the
-cold TP4 boot takes {{NUM:tp4_boot_cold_s}} s; a matching warm-cache seed
-takes {{NUM:tp4_boot_seeded_s}} s ([details](docker/RELEASE.md#compilation-cache-seeds)).
+`./start.sh` skips anything already done, so running it twice is safe. Matching
+warm-cache seeds reuse compilation caches ([details](docker/RELEASE.md#compilation-cache-seeds)).
 Any OpenAI-compatible client works with base URL `http://127.0.0.1:8000/v1`
 and model `glm-5.3-flash`. The API listens on this machine only and has no
 API key unless you [change that](docs/how-to-use.md#serving-other-machines).
@@ -113,8 +115,8 @@ for boot checks and default reasoning effort.
 
 Tensor-parallel 4 (`tp4`, the default) gives one or two interactive users the
 fastest answer per request and needs x16 links. Pipeline-parallel 4 (`pp4`)
-suits many parallel users, long prompts and x4 links, with {{NUM:pp4_vs_tp4_prefill_ratio}}× the prefill
-and {{NUM:pp4_vs_tp4_kv_ratio}}× the KV pool. Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
+suits many parallel users, long prompts and x4 links, with higher cold prefill
+throughput and a larger KV pool ([Results](docs/results.md)). Switch with `LAYOUT=pp4 ./start.sh restart` (or set it
 in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 
 ## Documentation

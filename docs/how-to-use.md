@@ -8,7 +8,7 @@
 | OS and driver | Linux (the commands below are for Ubuntu) with NVIDIA driver **580 or newer**; `nvidia-smi` must list all four cards |
 | Container runtime | Docker with the [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), usable by your user, so that `docker run --rm --gpus all nvidia/cuda:13.3.1-base-ubuntu24.04 nvidia-smi` lists all four cards. Not needed for the [native install](#native-install-for-developers) |
 | Tools | `git`, `curl`, `flock` and `setsid` (util-linux, on most systems already), `jq` for the smoke test |
-| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image ({{NUM:image_compressed_gb}} GB compressed) and the kernel compile caches |
+| Disk | about 180 GiB (193 GB) for the two checkpoints, plus the engine image and the kernel compile caches |
 
 ## Step by step
 
@@ -16,7 +16,7 @@
 done, so running it twice is safe. The same steps one at a time:
 
 ```bash
-./install.sh       # 1. pull the engine image, pinned by digest ({{NUM:image_compressed_gb}} GB compressed)
+./install.sh       # 1. pull the engine image, pinned by digest
 ./download.sh      # 2. fetch the model (~178 GiB) and the drafter (~2.2 GiB) into ./models
 ./start.sh         # 3. start the container, wait for /health, print the KV pool size
 ./start.sh smoke   # 4. one chat request and one tool call against the running server
@@ -28,14 +28,11 @@ entry point, as your user rather than root, with the checkpoints mounted
 read-only and the kernel compile caches in `./cache` (owned by you). It
 publishes the API on `127.0.0.1:8000` only. Its output goes to
 `logs/serve.log`, as a native start's does, and `./start.sh stop` stops only the
-container this checkout started. The cold TP4 / PP4 boot takes {{NUM:tp4_boot_cold_s}} /
-{{NUM:pp4_boot_cold_s}} s; matching warm-cache seeds reduce that to
-{{NUM:tp4_boot_seeded_s}} / {{NUM:pp4_boot_seeded_s}} s.
+container this checkout started.
 
 **The first boot after an install or an update is slower.** FlashInfer 0.7.0
 compiles its kernel modules into an empty cache unless a matching seed is
-available. The cold/seeded measurements above include this work. Later boots reuse
-them. While that build runs, the log can show lines like
+available. Later boots reuse the compiled modules. While that build runs, the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 

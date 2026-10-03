@@ -9,8 +9,7 @@ Engine: `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. Image: `ghcr.io/morrowmake/v
 - P2P is on by default after the content-verified peer-copy check passes.
   An unavailable or failed check disables peer transports. P2P-off numbers
   are no longer published.
-- RecoverSSM increases the TP4 KV pool to {{NUM:tp4_kv_tokens}} tokens
-  ({{NUM:tp4_recover_kv_gain_pct}}% more than without state recovery).
+- RecoverSSM is enabled at TP4, with a measured KV pool of 1,199,570 tokens.
   PP4 keeps its existing state-storage path.
 - Faster kernels: a TP4 KDA step tile sized to the verified tokens, tuned thin
   GEMM and mHC decode, compiled Marlin decode and prefill for eligible TP4
@@ -26,9 +25,7 @@ Engine: `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. Image: `ghcr.io/morrowmake/v
 - The image separates dependencies, native libraries and engine source into
   layers, with parallel compression. Warm-cache seeds are checked against
   the engine, device, driver and dependency identity; a mismatch uses a fresh
-  cache. Cold/seeded TP4 startup: {{NUM:tp4_boot_cold_s}} /
-  {{NUM:tp4_boot_seeded_s}} s; PP4: {{NUM:pp4_boot_cold_s}} /
-  {{NUM:pp4_boot_seeded_s}} s.
+  cache.
 - Fixes related to issue #4's resumed-prefill crash path: correct KDA chunk
   indices when empty sequences precede non-empty ones, validate cached chunk
   metadata, and bound state-index gathers. The reported Xid 31 surfaced in

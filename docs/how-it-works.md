@@ -17,7 +17,7 @@ sparse-attention decode schedule is on in the engine itself.
   cards for the fastest single answer. Pipeline-parallel 4 gives each card a
   quarter of the layers: decoding requests are spread over every in-flight
   micro-batch so no card idles, the hand-off between stages is packed into one
-  transfer without a metadata round trip, and each card has the room for {{NUM:pp4_vs_tp4_kv_ratio}}× the KV.
+  transfer without a metadata round trip, with a larger KV pool than TP4.
 - **Prefill kernels for each layout.** The linear-attention (KDA) prefill, the
   sparse-attention prefill and the MoE prefill each have Ampere kernels for the
   shapes their layout actually runs — 16 heads and quarter-width experts under
@@ -90,7 +90,7 @@ sparse-attention decode schedule is on in the engine itself.
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |
-| KV cache | full precision, **not quantised**; at 262,144 context: TP4 {{NUM:tp4_kv_tokens}} tokens, PP4 {{NUM:pp4_kv_tokens}} tokens, with verified peer-to-peer |
+| KV cache | full precision, **not quantised**; at 262,144 context: TP4 1,199,570 tokens, PP4 1,914,216 tokens, with verified peer-to-peer |
 | Prefill | TP4 3,456-token chunks, PP4 2,304-token chunks; long prompts yield to running requests ([fair prefill](#what-makes-it-fast-and-correct)) |
 | Prefix caching | on |
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |

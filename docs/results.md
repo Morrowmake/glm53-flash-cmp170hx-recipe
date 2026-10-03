@@ -2,12 +2,13 @@
 
 ## Release 1.7.0
 
-All results below belong to the final engine `caaf6afe8ee8c29b32ef3b77284656ca87a0937e` and its release defaults
+Measured 2026-10-03 on 4× CMP 170HX. Release 1.7.0 results use the final
+engine `caaf6afe8ee8c29b32ef3b77284656ca87a0937e` and its release defaults
 on 74 SMs per card, mainline cmpunlocker plus the minimal P2P patch, verified
 P2P, PCIe x16 links, 262,144-token context and 180 W per card.
 P2P-off results are no longer published. PP4 on x4 links is not measured.
 
-RecoverSSM increases TP4 KV by {{NUM:tp4_recover_kv_gain_pct}}%.
+RecoverSSM is enabled at TP4; PP4 keeps its existing state-storage path.
 Compiled Marlin decode and eligible compiled prefill are included; native
 installs must opt into building the optional library to use those paths.
 All-reduce flags and cached-boundary reuse default to `1`; PP4 drafter
@@ -26,59 +27,57 @@ Paired two-sided McNemar p values, TP4 HumanEval/GSM8K:
 {{NUM:tp4_humaneval_p}} / {{NUM:tp4_gsm8k_p}}; PP4:
 {{NUM:pp4_humaneval_p}} / {{NUM:pp4_gsm8k_p}}.
 
-**Long context and repeatability.** Needle retrieval TP4
-{{NUM:tp4_needle_passed}}/{{NUM:tp4_needle_total}}, PP4
-{{NUM:pp4_needle_passed}}/{{NUM:pp4_needle_total}} up to 262K tokens.
-Single-request repeatability TP4 {{NUM:tp4_repeatability_passed}}/
-{{NUM:tp4_repeatability_total}}, PP4 {{NUM:pp4_repeatability_passed}}/
-{{NUM:pp4_repeatability_total}}. Same-batch repeatability mismatches in eager /
-graph mode: TP4 {{NUM:tp4_repeat_eager_mismatches}} /
-{{NUM:tp4_repeat_graph_mismatches}}; PP4 {{NUM:pp4_repeat_eager_mismatches}} /
-{{NUM:pp4_repeat_graph_mismatches}}. Copy-fidelity mismatches TP4/PP4:
-{{NUM:tp4_copy_mismatches}} / {{NUM:pp4_copy_mismatches}};
-cross-request leak failures: {{NUM:leak_failures}}; new Xid events:
-{{NUM:validation_xid_delta}}.
+**KL divergence:** TP4 {{NUM:tp4_kl_divergence}}, PP4 {{NUM:pp4_kl_divergence}}.
 
 Cached and fresh runs of the same prompt can differ at near-ties at TP4
 because prefix hits change the prefill chunk layout, as with batching.
-This is separate from repeating the same request with the same cache and
-batch conditions. Cached-boundary checks passed {{NUM:boundary_passed}}/
-{{NUM:boundary_total}} cases. Resumed-prefill stress passed
-{{NUM:resume_stress_passed}}/{{NUM:resume_stress_total}} cases;
-state-index check failures: {{NUM:state_index_failures}}.
 
 ## Release 1.7.0 throughput
 
 DFlash2 with calibrated adaptive depth. Decode uses structured, code and prose
-prompts, temperature 0, a 400-token cap and the median of five runs.
-One-user throughput measures streaming decode after the first token. Eight-user
-aggregate uses actual completion tokens divided by concurrent batch wall time,
-including prefill and client overhead.
+prompts under the MiaAI-Lab protocol: temperature 0, thinking off and a
+400-token cap. One-user throughput is the median of all ten streaming decode
+rates from five runs on each of two boots, measured after the first token.
+Two-, four- and eight-user aggregate throughput is the median of three runs
+on one boot, using actual completion tokens divided by concurrent batch wall
+time, including prefill and client overhead.
 
 | | TP4, peer-to-peer on |
 |---|---:|
-| Streaming decode, 1 user, structured / code / prose | **{{NUM:tp4_c1_structured_tps}} / {{NUM:tp4_c1_code_tps}} / {{NUM:tp4_c1_prose_tps}} tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **{{NUM:tp4_c8_structured_tps}} / {{NUM:tp4_c8_code_tps}} / {{NUM:tp4_c8_prose_tps}} tok/s** |
-| Cold prefill | **{{NUM:tp4_prefill_tps}} tok/s** |
-| One-token response time, 6,217 / 23,255-token prompt | {{NUM:tp4_response_6217_s}} / {{NUM:tp4_response_23255_s}} s |
-| KV pool at 262,144 context | {{NUM:tp4_kv_tokens}} tokens ({{NUM:tp4_kv_context_ratio}}) |
+| Streaming decode, 1 user, structured / code / prose | **482.2 / 447.7 / 210.6 tok/s** |
+| Decode, 2 users, aggregate, structured / code / prose | **588.0 / 464.6 / 311.3 tok/s** |
+| Decode, 4 users, aggregate, structured / code / prose | **691.2 / 584.9 / 485.8 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **948.6 / 834.1 / 684.6 tok/s** |
+| Cold prefill | **3,197 tok/s** |
+| KV pool at 262,144 context | 1,199,570 tokens (4.58 full-length requests) |
 
 ## Pipeline-parallel 4 throughput
 
 | | PP4, peer-to-peer on |
 |---|---:|
-| Streaming decode, 1 user, structured / code / prose | **{{NUM:pp4_c1_structured_tps}} / {{NUM:pp4_c1_code_tps}} / {{NUM:pp4_c1_prose_tps}} tok/s** |
-| Decode, 8 users, aggregate, structured / code / prose | **{{NUM:pp4_c8_structured_tps}} / {{NUM:pp4_c8_code_tps}} / {{NUM:pp4_c8_prose_tps}} tok/s** |
-| Cold prefill | **{{NUM:pp4_prefill_tps}} tok/s** |
-| One-token response time, 6,217 / 23,255-token prompt | {{NUM:pp4_response_6217_s}} / {{NUM:pp4_response_23255_s}} s |
-| KV pool at 262,144 context | {{NUM:pp4_kv_tokens}} tokens ({{NUM:pp4_kv_context_ratio}}) |
+| Streaming decode, 1 user, structured / code / prose | **231.1 / 212.4 / 99.8 tok/s** |
+| Decode, 2 users, aggregate, structured / code / prose | **331.0 / 277.9 / 189.8 tok/s** |
+| Decode, 4 users, aggregate, structured / code / prose | **392.0 / 363.5 / 301.7 tok/s** |
+| Decode, 8 users, aggregate, structured / code / prose | **649.5 / 600.3 / 486.7 tok/s** |
+| Cold prefill | **7,444 tok/s** |
+| KV pool at 262,144 context | 1,914,216 tokens (7.30 full-length requests) |
 
 Cold prefill is the median of nine rates over the same three real-text
 prompts (23,945, 34,299 and 37,905 tokens), with no prefix-cache hits.
-The one-token response row is nonstreaming elapsed time (median of three),
-including response handling. Early-stopped decode requests / all measured
-requests: {{NUM:decode_early_stopped}} / {{NUM:decode_requests}}; their actual
-token counts remain included without selective reruns.
+
+## Compared with 1.6.0
+
+The published 1.6.0 figures below were measured on the earlier 70-SM driver.
+
+| Metric | Published 1.6.0 | 1.7.0 change |
+|---|---:|---:|
+| TP4, 1 user, structured / code / prose (tok/s) | 437.4 / 404.2 / 198.6 | +10 % / +11 % / +6 % |
+| TP4, 8 users, aggregate, structured / code / prose (tok/s) | 840.7 / 769.4 / 589.5 | +8 to +16 % |
+| PP4, 1 user, structured / code / prose (tok/s) | 235.3 / 207.9 / 100.2 | flat |
+| PP4, 8 users, aggregate, structured / code / prose (tok/s) | 623.1 / 591.0 / 465.8 | +2 to +5 % |
+| TP4 cold prefill (tok/s) | 3,061 | +4 % |
+| PP4 cold prefill (tok/s) | 6,580 | +13 % |
+| TP4 KV pool (tokens) | 1,073,093 | +12 % |
 
 ## Choosing a layout
 
