@@ -154,7 +154,7 @@ VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
 # it), and the container image built from them, pinned by digest.
 RELEASE_VLLM_COMMIT=c1ce6491efe53934119d306d0a0501b475458e9b
 RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}
+RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"

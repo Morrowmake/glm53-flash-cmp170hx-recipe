@@ -14,20 +14,31 @@ installs must opt into building the optional library to use those paths.
 All-reduce flags and cached-boundary reuse default to `1`; PP4 drafter
 width defaults to `0`.
 
-**Quality**, fixed-order batches of up to eight, scored per answer against the
-baseline on the same driver and SM count. HumanEval allows 4,096 reply tokens;
-GSM8K allows 3,072. Length-capped outputs remain in the scores.
-TP4: HumanEval {{NUM:tp4_humaneval_passed}}/164, GSM8K
-{{NUM:tp4_gsm8k_passed}}/1,319 ({{NUM:tp4_gsm8k_pct}}%). PP4:
-{{NUM:pp4_humaneval_passed}}/164 and {{NUM:pp4_gsm8k_passed}}/1,319
-({{NUM:pp4_gsm8k_pct}}%). Net gains in percentage points, TP4 HumanEval/GSM8K:
-{{NUM:tp4_humaneval_net_pp}} / {{NUM:tp4_gsm8k_net_pp}}; PP4:
-{{NUM:pp4_humaneval_net_pp}} / {{NUM:pp4_gsm8k_net_pp}}.
-Paired two-sided McNemar p values, TP4 HumanEval/GSM8K:
-{{NUM:tp4_humaneval_p}} / {{NUM:tp4_gsm8k_p}}; PP4:
-{{NUM:pp4_humaneval_p}} / {{NUM:pp4_gsm8k_p}}.
+**Quality**, fixed-order batches of up to eight. HumanEval allows 4,096
+reply tokens; GSM8K allows 3,072. Length-capped outputs remain in the scores.
+The final release commit `c1ce6491ef` uses the same scorer and contract as
+1.6.0's published quality, except that 1.7.0 requests carry the shipped
+`tool_choice="none"` ban.
 
-**KL divergence:** TP4 {{NUM:tp4_kl_divergence}}, PP4 {{NUM:pp4_kl_divergence}}.
+| Layout | Published 1.6.0 HumanEval | 1.7.0 HumanEval | Published 1.6.0 GSM8K | 1.7.0 GSM8K |
+|---|---:|---:|---:|---:|
+| TP4 | 160/164 | 160/164 | 1,280/1,319 | 1,282/1,319 |
+| PP4 | 162/164 | 163/164 | 1,280/1,319 | 1,284/1,319 |
+
+Neither layout shows a significant change (paired two-sided McNemar p ≥ 0.34).
+
+**KL divergence versus 1.6.0**, measured with `kld_probe`: short probes use
+60 × 2,048 tokens; long probes use 8 × 16,384 tokens. Each cell reports
+mean KL / top-1 agreement.
+
+| Comparison | Short | Long |
+|---|---:|---:|
+| 1.7.0 TP4 vs 1.6.0 TP4 | 0.0169 / 95.3 % | 0.0084 / 97.1 % |
+| 1.7.0 PP4 vs 1.6.0 PP4 | 0.0156 / 95.4 % | 0.0086 / 97.0 % |
+| Reference: 1.6.0 TP4 vs 1.6.0 PP4 | 0.0174 / 95.3 % | 0.0092 / 97.0 % |
+
+The change in output distribution is no larger than the difference between
+1.6.0's two layouts; perplexity is unchanged within 0.002.
 
 Cached and fresh runs of the same prompt can differ at near-ties at TP4
 because prefix hits change the prefill chunk layout, as with batching.
@@ -50,6 +61,8 @@ time, including prefill and client overhead.
 | Decode, 8 users, aggregate, structured / code / prose | **948.6 / 834.1 / 684.6 tok/s** |
 | Cold prefill | **3,197 tok/s** |
 | KV pool at 262,144 context | 1,199,570 tokens (4.58 full-length requests) |
+
+Container TP4 cold first start: 1,198,522 tokens, about 0.1 % fewer than native's 1,199,570; seeded starts match.
 
 ## Pipeline-parallel 4 throughput
 

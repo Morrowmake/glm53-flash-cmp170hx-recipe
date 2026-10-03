@@ -87,7 +87,7 @@ sparse-attention decode schedule is on in the engine itself.
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), adaptive depth: up to 7 draft tokens per step at one request, up to 5 at two, 3 under load, following each request's acceptance |
 | Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`c1ce6491efe53934119d306d0a0501b475458e9b`](https://github.com/Morrowmake/vllm-cmp170hx/commit/c1ce6491efe53934119d306d0a0501b475458e9b), on upstream vLLM `e55d076f89` |
-| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
+| Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |
 | KV cache | full precision, **not quantised**; at 262,144 context: TP4 1,199,570 tokens, PP4 1,914,216 tokens, with verified peer-to-peer |

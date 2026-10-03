@@ -78,9 +78,8 @@ One user is streaming speed per request; eight users is the combined rate of
 eight simultaneous requests. Structured output and code are drafted well, so
 they decode fastest; prose least. DFlash2 drafts up to 7 tokens ahead for one
 user and 3 under load. Quality on the final release build: TP4 HumanEval
-{{NUM:tp4_humaneval_passed}}/164 and GSM8K {{NUM:tp4_gsm8k_passed}}/1,319
-({{NUM:tp4_gsm8k_pct}}%); PP4 {{NUM:pp4_humaneval_passed}}/164 and
-{{NUM:pp4_gsm8k_passed}}/1,319 ({{NUM:pp4_gsm8k_pct}}%).
+160/164 and GSM8K 1,282/1,319; PP4 163/164 and 1,284/1,319.
+Neither layout shows a significant change from 1.6.0 (McNemar p ≥ 0.34).
 Method and exact figures: [Results](docs/results.md).
 
 ## Quick start

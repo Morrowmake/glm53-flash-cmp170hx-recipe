@@ -57,6 +57,10 @@ TileLang, TorchInductor, torch C++ extensions, CUDA driver and vLLM
 compilation caches. Record health, smoke,
 versions, KV, startup banners and cold/seeded startup durations. Require both
 layouts to pass smoke and seeded startup to improve by at least 20 percent.
+
+Rootless measurements of the release image with the warm-cache seed:
+TP4 startup takes 931 s cold and 561 s seeded; PP4 takes 551 s cold and
+416 s seeded. Docker acceptance of this digest is pending.
 Final publication still requires acceptance of the exact seeded image digest.
 
 ```bash
@@ -75,7 +79,7 @@ The coordinator's reserved GPU leg must generate and compare these caches.
 No cache bundle is produced by a CPU build. Do not reuse a cache from a native
 installation with different absolute paths, or claim a startup improvement
 before the cold/seeded comparison. The final manifest digest is
-`sha256:{{NUM:image_digest}}`. Driver differences deliberately reject a
+`sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`. Driver differences deliberately reject a
 seed; users can continue with a cold cache. Seeded files are executable compiler
 artifacts: distribute only trusted, audited release bundles.
 

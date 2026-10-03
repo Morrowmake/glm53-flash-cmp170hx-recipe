@@ -32,7 +32,10 @@ container this checkout started.
 
 **The first boot after an install or an update is slower.** FlashInfer 0.7.0
 compiles its kernel modules into an empty cache unless a matching seed is
-available. Later boots reuse the compiled modules. While that build runs, the log can show lines like
+available. With the warm-cache seed, rootless measurements of the release
+image show TP4 startup falling from 931 s cold to 561 s seeded, and PP4 from
+551 s to 416 s. Later boots reuse the compiled modules. While that build runs,
+the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 

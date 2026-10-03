@@ -2,7 +2,7 @@
 
 ## 1.7.0
 
-Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
+Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`.
 
 - Results use 74 SMs per card via mainline cmpunlocker, with the maintainer's
   P2P work and our minimal patch. See [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer).
@@ -11,6 +11,7 @@ Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/v
   are no longer published.
 - RecoverSSM is enabled at TP4, with a measured KV pool of 1,199,570 tokens.
   PP4 keeps its existing state-storage path.
+  RecoverSSM no longer faults when CUDA graphs are disabled (eager mode).
 - Faster kernels: a TP4 KDA step tile sized to the verified tokens, tuned thin
   GEMM and mHC decode, compiled Marlin decode and prefill for eligible TP4
   and PP4 shapes, and a flags-in-data all-reduce at TP4.
@@ -26,6 +27,8 @@ Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/v
   layers, with parallel compression. Warm-cache seeds are checked against
   the engine, device, driver and dependency identity; a mismatch uses a fresh
   cache.
+- Container compilers now use a writable temporary directory inside the cache,
+  and startup fails loudly if the fast all-reduce falls back.
 - Fixes related to issue #4's resumed-prefill crash path: correct KDA chunk
   indices when empty sequences precede non-empty ones, validate cached chunk
   metadata, and bound state-index gathers. The reported Xid 31 surfaced in
