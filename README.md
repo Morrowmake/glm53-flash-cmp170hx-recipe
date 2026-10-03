@@ -185,7 +185,7 @@ The patches are ours; the fork branch is the code —
 
 ## Acknowledgements
 
-- Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work, plus our minimal TRAP31 patch, form the basis of the P2P driver build. <!-- link: Morrowmake/cmpunlocker after publication -->
+- Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work, plus our minimal TRAP31 patch, form the basis of the P2P driver build. Ready to install: [Morrowmake/cmpunlocker](https://github.com/Morrowmake/cmpunlocker).
 - Upstream [vLLM](https://github.com/vllm-project/vllm) provides the RecoverSSM state-recovery approach and fixes we build on.
 - [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"` and the startup boot check.
 - MiaAI-Lab also provided the cached prompt-boundary reuse idea.

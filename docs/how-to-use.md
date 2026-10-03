@@ -308,7 +308,7 @@ master, including its 74-SM override, plus the maintainer's P2P changes and
 our minimal TRAP31 Booter PLM patch, gated on `ForceP2P=0x11`. The patch makes
 peer mappings usable on these cards; advertising peer access alone is insufficient.
 The recipe still requires the content check on every new driver/boot identity.
-<!-- link: Morrowmake/cmpunlocker after publication -->
+The ready-to-install build is [Morrowmake/cmpunlocker](https://github.com/Morrowmake/cmpunlocker): mainline master with these changes, installed the same way as mainline.
 
 Choose the policy in `.env` or for a single start:
 
