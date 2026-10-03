@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/{{PIN}})
-  pinned at `{{PIN}}` (1.7.0, on upstream `e55d076f89`), installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/caaf6afe8ee8c29b32ef3b77284656ca87a0937e)
+  pinned at `caaf6afe8ee8c29b32ef3b77284656ca87a0937e` (1.7.0, on upstream `e55d076f89`), installed
   the way the native install does it: Python 3.12, torch 2.13.0 (CUDA 13.0
   build), the fork installed editable in `/opt/venv` with upstream's
   precompiled extensions, then the runtime extras the engine pins (FlashInfer
@@ -39,7 +39,7 @@ Release image digest, to be filled after the final image build and full acceptan
 ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}
 ```
 
-Its OCI revision is `{{PIN}}`. The rootless version is `1.7.0-` plus the
+Its OCI revision is `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. The rootless version is `1.7.0-` plus the
 first ten commit characters; the Docker builder labels the version `1.7.0`.
 
 ## Build it
@@ -97,7 +97,7 @@ existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin
 Build the release source with Docker:
 
 ```bash
-bash docker/build-docker.sh vllm-cmp170hx:1.7.0-{{PIN}}
+bash docker/build-docker.sh vllm-cmp170hx:1.7.0-caaf6afe8ee8c29b32ef3b77284656ca87a0937e
 ```
 
 Both build paths print the total filesystem layer count, including the base,
@@ -152,7 +152,6 @@ docker run -d --name glm53-flash --user "$(id -u):$(id -g)" --workdir /cache \
   -v "$PWD/p2p_check.py:/recipe/p2p_check.py:ro" \
   -v "$PWD/p2p_check.sh:/recipe/p2p_check.sh:ro" \
   -v "$PWD/p2p_probe.cu:/recipe/p2p_probe.cu:ro" \
-  -v "$PWD/draft-skip-coefficients.json:/recipe/draft-skip-coefficients.json:ro" \
   -v "$MODELS/GLM-5.3-Flash-W4A16-MTP:/models/GLM-5.3-Flash-W4A16-MTP:ro" \
   -v "$MODELS/GLM-5.3-Flash-DFlash2:/models/GLM-5.3-Flash-DFlash2:ro" \
   -v "$CACHE:/cache" \

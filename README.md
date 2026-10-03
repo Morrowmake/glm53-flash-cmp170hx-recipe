@@ -5,7 +5,7 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/{{PIN}}"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20{{PIN}}-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/caaf6afe8ee8c29b32ef3b77284656ca87a0937e"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20caaf6afe8ee8c29b32ef3b77284656ca87a0937e-4b32c3?style=flat"></a>
   &nbsp;
   <img alt="release" src="https://img.shields.io/badge/release-1.7.0-2ea44f?style=flat">
   &nbsp;
@@ -144,7 +144,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/{{PIN}}/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/caaf6afe8ee8c29b32ef3b77284656ca87a0937e/LICENSE).
 
 The downloaded models have separate licences:
 
@@ -187,5 +187,4 @@ The patches are ours; the fork branch is the code —
 - Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work, plus our minimal TRAP31 patch, form the basis of the P2P driver build. <!-- link: Morrowmake/cmpunlocker after publication -->
 - Upstream [vLLM](https://github.com/vllm-project/vllm) provides the RecoverSSM state-recovery approach and fixes we build on.
 - [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"` and the startup boot check.
-- MiaAI-Lab also provided the cached prompt-boundary reuse idea. <!-- drop if cached boundary ships off -->
-- TensorFold provided the idea of confidence-gated draft skipping. <!-- drop if draft skip ships off -->
+- MiaAI-Lab also provided the cached prompt-boundary reuse idea.

@@ -78,23 +78,20 @@ so it also works before the first install.
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | adaptive draft depth; `0` restores the fixed depth (`SPEC_N`) and the 3460 TP4 token budget |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | `7,5` | deepest verified depth at 1 and 2 requests; `SPEC_N` beyond. The TP4 token budget follows the deepest depth (3456 + 7 = 3463) |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | `1` | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step cost of each depth from 2 to 7, alone and with several requests; set by the launcher from measurements on this hardware |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4; `{{DEFAULT:pp4_drafter_width}}` under PP4 | the drafter computes only the verified depth; `0` always drafts the deepest block |
-| `VLLM_CUSTOM_ALLREDUCE_FLAGS` | `{{DEFAULT:all_reduce_flags}}` | flags-in-data all-reduce at TP4 with verified P2P; `0` disables it |
-| `VLLM_GLM5_DFLASH_SKIP` | `{{DEFAULT:draft_skip}}` | confidence-gated draft skipping at TP4; PP4 remains off; `0` disables it |
-| `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` | `{{DEFAULT:cached_boundary}}` | cached prompt-boundary reuse; `0` disables it |
-| `VLLM_GLM5_DFLASH_SKIP_COEFFICIENTS` | `draft-skip-coefficients.json` beside the launcher | frozen slope, per-position intercepts and threshold; required only when skip is enabled |
-| `VLLM_GLM5_DFLASH_DEPTH2` | `{{DEFAULT:depth2}}` | permit depth 2 for low-acceptance text |
-| `VLLM_PP_LAYER_PARTITION` | `{{DEFAULT:pp4_partition}}` | PP4 layer split chosen before calibration |
-| `VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED` | `1` | eligible PP4 compiled wide-tile prefill on the newer integrated tree; `0` uses the split path |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step cost of each supported depth from 3 to 7, alone and with several requests; set by the launcher from measurements on this hardware |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4; `0` under PP4 | the drafter computes only the verified depth; `0` always drafts the deepest block |
+| `VLLM_CUSTOM_ALLREDUCE_FLAGS` | `1` | flags-in-data all-reduce at TP4 with verified P2P; `0` disables it |
+| `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` | `1` | cached prompt-boundary reuse; `0` disables it |
+| `VLLM_PP_LAYER_PARTITION` | `13,11,11,10` | PP4 layer split |
+| `VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED` | `1` | eligible PP4 compiled wide-tile prefill; `0` uses the split path |
 | `VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS`, `VLLM_GLM5_MARLIN_DECODE_PP_MULTI` | `1` at PP4, `0` at TP4 | eligible compiled PP4 decode at 5–7 rows and multi-request rows; optional library required |
-| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS` | `9-32` | compiled PP4 multi-request row range |
+| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS` | `9-64` | compiled PP4 multi-request row range |
 | `VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES`, `VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S` | `262144`, `60` | flags-in-data byte gate and peer wait limit in seconds; an overrun traps |
 | `VLLM_GLM5_STATE_INDEX_CHECK` | `0` | host state-index diagnostic; off in the release, enabled separately for validation |
 | `VLLM_GLM5_PREFILL_PACK_BF16X2`, `VLLM_GLM5_INDEXER_DECODE_RAW_K` | `1` | packed prefill rounding and raw-K indexer decode |
 | `VLLM_GLM5_DECODE_MHC_V2_FN_BF16`, `VLLM_GLM5_TOOL_CHOICE_NONE_MASK` | `1` | eligible bf16 mHC weights and tool-choice-none mask |
 | `VLLM_GLM5_KDA_RECOVER` | `1` at TP4 | RecoverSSM; `0` restores per-draft-position state storage |
-| `VLLM_GLM5_DECODE_KDA_V2_DEEP` | `{{DEFAULT:kda_v2_deep}}` | KDA v2 for eligible depth-6/7 shapes; `0` restores the earlier dispatch |
+| `VLLM_GLM5_DECODE_KDA_V2_DEEP` | `1` at TP4; unset at PP4 | a deeper KDA decode path for 1–4 requests at TP4; `0` restores the earlier dispatch |
 | `VLLM_GLM5_DECODE_KDA_STEP_TILE` | `1` | KDA v2 step tile; `0` keeps the full window |
 | `VLLM_GLM5_THIN_GEMM_V74` | `1` | tuned thin GEMM; `0` restores the earlier kernel |
 | `VLLM_GLM5_DECODE_MHC_V3` | `1` | tuned mHC decode; `0` restores the earlier kernel |

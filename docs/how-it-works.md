@@ -68,11 +68,9 @@ sparse-attention decode schedule is on in the engine itself.
   position, increasing the available KV pool; PP4 keeps its existing path.
 - **Release 1.7.0 kernels.** KDA step tiles, tuned thin GEMM and mHC decode,
   compiled Marlin decode and prefill, and flags-in-data all-reduce (default
-  `{{DEFAULT:all_reduce_flags}}`) cover eligible shapes.
-- **Drafting and caching.** Confidence-gated skipping at TP4 defaults to
-  `{{DEFAULT:draft_skip}}`, cached prompt-boundary reuse to
-  `{{DEFAULT:cached_boundary}}`, and PP4 drafter width to
-  `{{DEFAULT:pp4_drafter_width}}`.
+  `1`) cover eligible shapes.
+- **Drafting and caching.** Cached prompt-boundary reuse defaults to `1`.
+  Drafter width follows the verified depth at TP4 (`1`); PP4 uses `0`.
 - **A real correctness fix in the key pool** (since 1.3.0): a rejected draft can
   no longer overwrite the tail of the sparse-attention key pool.
 - **64-bit KV row offsets** in the sparse-attention kernels, closing a silent
@@ -88,7 +86,7 @@ sparse-attention decode schedule is on in the engine itself.
 | Weights | [`canada-quant/GLM-5.3-Flash-W4A16-MTP`](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP) — INT4 weights, FP16 activations, group size 128 |
 | Base model | [`zai-org/GLM-5.3-Flash`](https://huggingface.co/zai-org/GLM-5.3-Flash), 320B MoE |
 | Drafter | [`incoai/GLM-5.3-Flash-DFlash2`](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2), adaptive depth: up to 7 draft tokens per step at one request, up to 5 at two, 3 under load, following each request's acceptance |
-| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`{{PIN}}`](https://github.com/Morrowmake/vllm-cmp170hx/commit/{{PIN}}), on upstream vLLM `e55d076f89` |
+| Engine | [Morrowmake/vllm-cmp170hx](https://github.com/Morrowmake/vllm-cmp170hx) `ampere` @ [`caaf6afe8ee8c29b32ef3b77284656ca87a0937e`](https://github.com/Morrowmake/vllm-cmp170hx/commit/caaf6afe8ee8c29b32ef3b77284656ca87a0937e), on upstream vLLM `e55d076f89` |
 | Container image | `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}` — the engine at that pin, no weights ([docker/](../docker/README.md)) |
 | Layout | tensor-parallel 4 (`LAYOUT=tp4`, default; assumes PCIe Gen2 x16) or pipeline-parallel 4 (`LAYOUT=pp4`) — see [Choosing a layout](results.md#choosing-a-layout) |
 | Context | 262,144 tokens |

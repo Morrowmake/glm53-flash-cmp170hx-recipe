@@ -22,7 +22,7 @@
 # mounted and used as the entry point, so the layout (LAYOUT=tp4 or pp4) and
 # every setting are chosen at run time (container.env in this folder).
 #
-#   bash docker/build-docker.sh vllm-cmp170hx:1.7.0-{{PIN}}
+#   bash docker/build-docker.sh vllm-cmp170hx:1.7.0-caaf6afe8ee8c29b32ef3b77284656ca87a0937e
 # The wrapper validates the final layer count; Dockerfile instructions cannot
 # inspect the inherited base image manifest.
 
@@ -30,7 +30,7 @@ ARG BASE=nvidia/cuda:13.3.1-devel-ubuntu24.04@sha256:4ff859525f99de5782aa73607ce
 
 ARG IMAGE_LAYERED=1
 
-ARG VLLM_COMMIT={{PIN}}
+ARG VLLM_COMMIT=caaf6afe8ee8c29b32ef3b77284656ca87a0937e
 
 FROM ${BASE} AS build
 ARG PYTHON_VERSION=3.12

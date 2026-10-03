@@ -1,10 +1,13 @@
 from pathlib import Path
+import re
 import shutil
 import subprocess
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+CURRENT_PIN = re.search(r"^RELEASE_VLLM_COMMIT=(.+)$",
+                        (ROOT / "start.sh").read_text(), re.M)[1].strip("\"' ")
 SLOT = chr(123) * 2 + "PIN" + chr(125) * 2
 
 @pytest.fixture
@@ -15,7 +18,7 @@ def scratch(tmp_path):
         dest = tmp_path / name
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / name, dest)
-    (tmp_path / "extra.md").write_text("another current reference " + SLOT)
+    (tmp_path / "extra.md").write_text("another current reference " + CURRENT_PIN)
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
     return tmp_path
 
@@ -45,7 +48,7 @@ def test_moves_every_reference_and_preserves_history(scratch):
 
 def test_mismatched_defaults_change_nothing(scratch):
     path = scratch / "docker/Dockerfile"
-    path.write_text(path.read_text().replace(SLOT, "c" * 40))
+    path.write_text(path.read_text().replace(CURRENT_PIN, "c" * 40))
     before = (scratch / "start.sh").read_bytes()
     result = run(scratch, "d" * 40)
     assert result.returncode != 0 and "disagree" in result.stderr

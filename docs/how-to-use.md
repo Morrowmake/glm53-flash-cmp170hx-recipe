@@ -199,10 +199,8 @@ remove explicit `IMAGE` / `VLLM_COMMIT` values to follow the new pins.
 P2P defaults to `auto`, enabled only after the content check. RecoverSSM is
 on at TP4. Compiled decode stays on when installed; eligible TP4 and PP4
 prefill kernels use the new layout-specific switches.
-All-reduce flags default to `{{DEFAULT:all_reduce_flags}}`, TP4 draft skip to
-`{{DEFAULT:draft_skip}}`, cached-boundary reuse to
-`{{DEFAULT:cached_boundary}}`, and PP4 drafter width to
-`{{DEFAULT:pp4_drafter_width}}`. Remove explicit old feature overrides to
+All-reduce flags and cached-boundary reuse default to `1`, and PP4 drafter
+width to `0`. Remove explicit old feature overrides to
 follow these defaults; see [Engine switches](engine-switches.md).
 `BOOT_CHECK=1` and empty `DEFAULT_REASONING_EFFORT` are the new defaults.
 `VLLM_BRANCH=ampere` selects the fork branch, while the full commit remains
@@ -292,7 +290,7 @@ advertise peer access while writes land in the wrong memory; NCCL may then
 hang. The startup content check decides whether this recipe uses P2P.
 
 A pass enables `VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE=1` by default, uses the
-release custom all-reduce selection (`{{DEFAULT:all_reduce_flags}}` for flags-in-data), clears `NCCL_P2P_DISABLE`, and sets
+release custom all-reduce selection (`1` for flags-in-data), clears `NCCL_P2P_DISABLE`, and sets
 `NCCL_P2P_LEVEL=SYS` for TP or PP through `GLM5_NCCL_P2P_SYS=1`.
 An explicit custom-all-reduce `0` is preserved after a pass. An explicit
 `NCCL_P2P_LEVEL` wins; `GLM5_NCCL_P2P_SYS=0` suppresses the automatic SYS setting.

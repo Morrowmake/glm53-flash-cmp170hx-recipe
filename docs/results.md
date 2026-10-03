@@ -2,7 +2,7 @@
 
 ## Release 1.7.0
 
-All results below belong to the final engine `{{PIN}}` and its release defaults
+All results below belong to the final engine `caaf6afe8ee8c29b32ef3b77284656ca87a0937e` and its release defaults
 on 74 SMs per card, mainline cmpunlocker plus the minimal P2P patch, verified
 P2P, PCIe x16 links, 262,144-token context and 180 W per card.
 P2P-off results are no longer published. PP4 on x4 links is not measured.
@@ -10,10 +10,8 @@ P2P-off results are no longer published. PP4 on x4 links is not measured.
 RecoverSSM increases TP4 KV by {{NUM:tp4_recover_kv_gain_pct}}%.
 Compiled Marlin decode and eligible compiled prefill are included; native
 installs must opt into building the optional library to use those paths.
-The step-5 decisions are: all-reduce flags `{{DEFAULT:all_reduce_flags}}`,
-TP4 draft skip `{{DEFAULT:draft_skip}}`, cached boundary
-`{{DEFAULT:cached_boundary}}`, and PP4 drafter width
-`{{DEFAULT:pp4_drafter_width}}`.
+All-reduce flags and cached-boundary reuse default to `1`; PP4 drafter
+width defaults to `0`.
 
 **Quality**, fixed-order batches of up to eight, scored per answer against the
 baseline on the same driver and SM count. HumanEval allows 4,096 reply tokens;

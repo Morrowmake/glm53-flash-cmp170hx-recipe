@@ -2,7 +2,7 @@
 
 ## 1.7.0
 
-Engine: `{{PIN}}`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
+Engine: `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
 
 - Results use 74 SMs per card via mainline cmpunlocker, with the maintainer's
   P2P work and our minimal patch. See [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer).
@@ -15,13 +15,10 @@ Engine: `{{PIN}}`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_d
 - Faster kernels: a KDA step tile sized to the verified tokens, tuned thin
   GEMM and mHC decode, compiled Marlin decode and prefill for eligible TP4
   and PP4 shapes, and a flags-in-data all-reduce at TP4.
-  All-reduce flags default: `{{DEFAULT:all_reduce_flags}}`.
-- Confidence-gated draft skipping at TP4 avoids low-confidence draft work; default:
-  `{{DEFAULT:draft_skip}}`. Cached prompt-boundary reuse retains more of a
-  cached prompt; default: `{{DEFAULT:cached_boundary}}`. PP4 drafter width
-  follows the verified depth with default `{{DEFAULT:pp4_drafter_width}}`.
-  Depth 2 for low-acceptance text: `{{DEFAULT:depth2}}`; deep KDA v2:
-  `{{DEFAULT:kda_v2_deep}}`. Both await calibration and grouped validation.
+  All-reduce flags default: `1`.
+  A deeper KDA decode path covers 1–4 requests at TP4.
+- Cached prompt-boundary reuse retains more of a cached prompt and defaults
+  to `1`. Drafter width follows the verified depth at TP4 (`1`); PP4 uses `0`.
 - Startup checks the temperature-0 OK reply and nonzero draft acceptance
   after health is ready (`BOOT_CHECK=1`, `0` disables it).
   `DEFAULT_REASONING_EFFORT` defaults to empty, preserving template behaviour;
@@ -46,7 +43,7 @@ Engine: `{{PIN}}`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_d
 `ampere`; remove an explicit `VLLM_BRANCH=ampere-glm53` to follow it. Remove old
 explicit `VLLM_COMMIT` or `IMAGE` values to follow the new pins. Remove explicit
 `P2P=off` or custom-all-reduce `0` only if you want verified P2P. Review overrides
-for `VLLM_CUSTOM_ALLREDUCE_FLAGS`, `VLLM_GLM5_DFLASH_SKIP`,
+for `VLLM_CUSTOM_ALLREDUCE_FLAGS`,
 `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` and `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH`
 against the defaults above; remove old values to follow them. Compiled decode
 remains enabled when installed. The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is
