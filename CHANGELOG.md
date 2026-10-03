@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.7.0
+## 1.7.0 — 2026-10-03
 
 Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`.
 
