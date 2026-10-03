@@ -12,7 +12,7 @@ Engine: `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. Image: `ghcr.io/morrowmake/v
 - RecoverSSM increases the TP4 KV pool to {{NUM:tp4_kv_tokens}} tokens
   ({{NUM:tp4_recover_kv_gain_pct}}% more than without state recovery).
   PP4 keeps its existing state-storage path.
-- Faster kernels: a KDA step tile sized to the verified tokens, tuned thin
+- Faster kernels: a TP4 KDA step tile sized to the verified tokens, tuned thin
   GEMM and mHC decode, compiled Marlin decode and prefill for eligible TP4
   and PP4 shapes, and a flags-in-data all-reduce at TP4.
   All-reduce flags default: `1`.

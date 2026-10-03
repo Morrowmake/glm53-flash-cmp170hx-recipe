@@ -66,7 +66,7 @@ sparse-attention decode schedule is on in the engine itself.
   return memory to the pool without changing a single output bit.
 - **RecoverSSM at TP4.** Recover KDA state instead of storing every draft
   position, increasing the available KV pool; PP4 keeps its existing path.
-- **Release 1.7.0 kernels.** KDA step tiles, tuned thin GEMM and mHC decode,
+- **Release 1.7.0 kernels.** TP4 KDA step tiles, tuned thin GEMM and mHC decode,
   compiled Marlin decode and prefill, and flags-in-data all-reduce (default
   `1`) cover eligible shapes.
 - **Drafting and caching.** Cached prompt-boundary reuse defaults to `1`.

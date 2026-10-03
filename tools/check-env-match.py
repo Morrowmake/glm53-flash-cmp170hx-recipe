@@ -78,8 +78,25 @@ def check(reference):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("reference", type=Path, help="validation JSON path")
+    parser.add_argument("reference", type=Path, nargs="?", help="validation JSON path")
+    parser.add_argument("--effective", type=Path, help="full effective_env_private.json")
+    parser.add_argument("--layout", choices=("tp4", "pp4"))
+    parser.add_argument("--fork", type=Path,
+                        default=Path.home() / "kernels/vllm-wt-bundle3-caaf",
+                        help="fork checkout containing the pinned source objects")
+    parser.add_argument("--serve-log", type=Path, help="default: serve.log beside effective JSON")
     args = parser.parse_args()
+    if args.effective:
+        if args.reference or not args.layout:
+            parser.error("--effective requires --layout and cannot take reference")
+        from env_effective import check_effective
+        try:
+            return check_effective(ROOT, args.effective, args.layout, args.fork, args.serve_log)
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            print(f"Full environment match: FAIL ({exc})")
+            return 1
+    if not args.reference or args.layout or args.serve_log:
+        parser.error("supply reference or --effective with --layout")
     return check(json.loads(args.reference.read_text()))
 
 

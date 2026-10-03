@@ -85,14 +85,14 @@ so it also works before the first install.
 | `VLLM_PP_LAYER_PARTITION` | `13,11,11,10` | PP4 layer split |
 | `VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED` | `1` | eligible PP4 compiled wide-tile prefill; `0` uses the split path |
 | `VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS`, `VLLM_GLM5_MARLIN_DECODE_PP_MULTI` | `1` at PP4, `0` at TP4 | eligible compiled PP4 decode at 5–7 rows and multi-request rows; optional library required |
-| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS` | `9-64` | compiled PP4 multi-request row range |
+| `VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS` | PP4 `9-64`, TP4 `9-32` | compiled PP4 multi-request row range |
 | `VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES`, `VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S` | `262144`, `60` | flags-in-data byte gate and peer wait limit in seconds; an overrun traps |
 | `VLLM_GLM5_STATE_INDEX_CHECK` | `0` | host state-index diagnostic; off in the release, enabled separately for validation |
 | `VLLM_GLM5_PREFILL_PACK_BF16X2`, `VLLM_GLM5_INDEXER_DECODE_RAW_K` | `1` | packed prefill rounding and raw-K indexer decode |
 | `VLLM_GLM5_DECODE_MHC_V2_FN_BF16`, `VLLM_GLM5_TOOL_CHOICE_NONE_MASK` | `1` | eligible bf16 mHC weights and tool-choice-none mask |
 | `VLLM_GLM5_KDA_RECOVER` | `1` at TP4 | RecoverSSM; `0` restores per-draft-position state storage |
 | `VLLM_GLM5_DECODE_KDA_V2_DEEP` | `1` at TP4; unset at PP4 | a deeper KDA decode path for 1–4 requests at TP4; `0` restores the earlier dispatch |
-| `VLLM_GLM5_DECODE_KDA_STEP_TILE` | `1` | KDA v2 step tile; `0` keeps the full window |
+| `VLLM_GLM5_DECODE_KDA_STEP_TILE` | TP4 `1`, PP4 `0` | KDA v2 step tile; `0` keeps the full window |
 | `VLLM_GLM5_THIN_GEMM_V74` | `1` | tuned thin GEMM; `0` restores the earlier kernel |
 | `VLLM_GLM5_DECODE_MHC_V3` | `1` | tuned mHC decode; `0` restores the earlier kernel |
 | `VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED` | `1` | eligible TP4 compiled prefill; `0` uses the split path |

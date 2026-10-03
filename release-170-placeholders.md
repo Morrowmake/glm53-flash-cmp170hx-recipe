@@ -8,7 +8,12 @@ The engine is pinned to `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`.
 Launcher decisions and calibrated cost tables are filled. Check both layouts
 with `python3 tools/check-env-match.py <validation-json>`; the reference stays
 outside the recipe. The check lists ignored keys and uses a CPU installation
-fixture for optional-library discovery.
+fixture for optional-library discovery. For a full leg comparison, use
+`python3 tools/check-env-match.py --effective <effective-env-json> --layout tp4`
+(or `pp4`), with `serve.log` beside the JSON. `--fork <fork-checkout>` selects a
+checkout containing the pinned fork commit. This mode uses `P2P=force`, checks
+all environment keys and the logged serve arguments, and prints each permitted
+difference with its reason and source evidence for fork defaults.
 
 69 distinct release slots, 114 occurrences outside this inventory.
 
