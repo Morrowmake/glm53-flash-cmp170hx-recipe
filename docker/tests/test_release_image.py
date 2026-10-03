@@ -294,3 +294,139 @@ def test_rootfs_rejects_cleared_driver_search_path(tmp_path, library_path):
     config.write_text(json.dumps({"config": {"Env": ["LD_LIBRARY_PATH=" + library_path]}}))
     with pytest.raises(ValueError, match="OCI LD_LIBRARY_PATH"):
         image_environment(config)
+
+
+def test_seed_exports_all_compiler_caches(tmp_path):
+    import shlex
+    value, _, _ = identity(tmp_path)
+    exports = dict(line.removeprefix('export ').split('=', 1) for line in cache.exports(value).splitlines())
+    root = '/cache/compiled/' + cache.key(value)
+    expected = {'HOME', 'XDG_CACHE_HOME', 'TRITON_CACHE_DIR', 'TORCH_EXTENSIONS_DIR',
+                'VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR', 'VLLM_CACHE_ROOT',
+                'TILELANG_CACHE_DIR', 'TILELANG_TMP_DIR', 'CUDA_CACHE_PATH',
+                'FLASHINFER_WORKSPACE_BASE', 'TORCHINDUCTOR_CACHE_DIR'}
+    assert set(exports) == expected
+    for name, value in exports.items():
+        assert Path(shlex.split(value)[0]).is_relative_to(root), name
+
+
+@pytest.mark.parametrize('layered', [False, True])
+@pytest.mark.parametrize('mode,uid,gid,passed', [(0o755, 0, 0, False), (0o1777, 0, 0, True),
+                                               (0o777, 0, 0, False), (0o1777, 1000, 0, False),
+                                               (0o1777, 0, 1000, False)])
+def test_audit_tmp_tar_entry(tmp_path, layered, mode, uid, gid, passed):
+    import gzip
+    import io
+    from audit_oci import audit
+    b = base(tmp_path)
+    p = tmp_path / 'payload'
+    for name in payload.PARTS:
+        (p / name).mkdir(parents=True)
+    (p / 'engine/tmp').mkdir()
+    (p / 'engine/tmp').chmod(0o1777)
+    out = tmp_path / 'out/oci'
+    oci.assemble(b, p, out, PIN, 'test', layered=layered, parallel=False)
+    manifest, config = oci.image(out)
+    # Mutate real tar metadata and recompute OCI integrity to isolate the mode gate.
+    desc = manifest['layers'][-1]
+    path = out / 'blobs/sha256' / desc['digest'].split(':')[1]
+    data = io.BytesIO()
+    with tarfile.open(path) as source, tarfile.open(fileobj=data, mode='w') as target:
+        for member in source:
+            if member.name.removeprefix('./').rstrip('/') == 'tmp':
+                assert member.mode == 0o1777 and member.uid == member.gid == 0
+                member.mode, member.uid, member.gid = mode, uid, gid
+            target.addfile(member)
+    raw = data.getvalue()
+    manifest['layers'][-1] = oci.put(out, gzip.compress(raw), oci.OCI + 'layer.v1.tar+gzip')
+    config['rootfs']['diff_ids'][-1] = 'sha256:' + hashlib.sha256(raw).hexdigest()
+    manifest['config'] = oci.put(out, oci.encoded(config), oci.OCI + 'config.v1+json')
+    md = oci.put(out, oci.encoded(manifest), manifest['mediaType'])
+    (out / 'index.json').write_text(json.dumps(dict(manifests=[md])))
+    record = audit(out, workers=2)
+    assert record['passed'] == passed and record['tmp']['passed'] == passed
+
+
+@pytest.mark.parametrize('mode', [0o755, 0o777, 0o1777])
+def test_smoke_checks_image_tmp_before_mount(tmp_path, mode):
+    from rootfs_smoke import check_tmp
+    (tmp_path / 'tmp').mkdir(mode=mode)
+    (tmp_path / 'tmp').chmod(mode)
+    if mode == 0o1777:
+        assert check_tmp(tmp_path) == '1777'
+    else:
+        with pytest.raises(ValueError, match='mode 1777'):
+            check_tmp(tmp_path)
+
+
+@pytest.mark.parametrize('seeded', [False, True])
+def test_container_setup_creates_private_tmp_and_writable_caches(tmp_path, seeded):
+    import os
+    import shutil
+    import subprocess
+    if not shutil.which('bwrap'):
+        pytest.skip('Requires rootless namespace support')
+    environment = dict(line.split('=', 1) for line in (ROOT / 'container.env').read_text().splitlines()
+                       if line and not line.startswith('#'))
+    prelude = (ROOT.parent / 'serve.sh').read_text().split('\nREPO_ROOT=', 1)[0]
+    # Seed integrity/identity is tested separately; apply its real exports on CPU.
+    environment['VLLM_IMAGE_CACHE_SEED'] = '0'
+    if seeded:
+        value, _, _ = identity(tmp_path)
+        exports = cache.exports(value)
+        root = '/cache/compiled/' + cache.key(value)
+        prelude = prelude.replace('# Explicit compiler destinations', exports + '\n# Explicit compiler destinations')
+    else:
+        root = '/cache'
+    script = tmp_path / 'setup.sh'
+    script.write_text(prelude + '\nenv -0\n')
+    command = ['bwrap', '--clearenv', '--unshare-all', '--tmpfs', '/',
+               '--dev', '/dev', '--tmpfs', '/tmp', '--bind', str(tmp_path), '/cache']
+    for directory in ('/usr', '/bin', '/lib', '/lib64', '/etc'):
+        if Path(directory).exists():
+            command += ['--ro-bind', directory, directory]
+    for key, value in dict(environment, PATH=os.defpath, CUDA_VISIBLE_DEVICES='').items():
+        command += ['--setenv', key, value]
+    command += ['bash', '/cache/setup.sh']
+    run = subprocess.run(command, capture_output=True)
+    assert run.returncode == 0, run.stderr.decode()
+    # The prelude emits one status line before its environment.
+    data = run.stdout.split(b'\n', 1)[1]
+    resolved = dict(row.decode().split('=', 1) for row in data.split(b'\0') if row)
+    assert resolved['TMPDIR'].startswith('/cache/tmp/run.')
+    assert resolved['TMP'] == resolved['TEMP'] == resolved['TMPDIR']
+    temporary = tmp_path / Path(resolved['TMPDIR']).relative_to('/cache')
+    assert temporary.is_dir() and temporary.stat().st_mode & 0o777 == 0o700
+    assert resolved['HOME'] == root
+    assert resolved['XDG_CACHE_HOME'] == root + '/.cache'
+    assert resolved['HF_HOME'] == '/cache/huggingface'
+    for name in ('HOME', 'TRITON_CACHE_DIR', 'TORCH_EXTENSIONS_DIR',
+                 'VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR', 'TILELANG_CACHE_DIR',
+                 'TILELANG_TMP_DIR', 'CUDA_CACHE_PATH', 'FLASHINFER_WORKSPACE_BASE',
+                 'TORCHINDUCTOR_CACHE_DIR'):
+        assert Path(resolved[name]).is_relative_to(root), name
+        directory = tmp_path / Path(resolved[name]).relative_to('/cache')
+        assert directory.is_dir() and os.access(directory, os.W_OK), name
+
+
+def test_container_environment_matches_start(tmp_path):
+    import os
+    import subprocess
+    rows = [line.split('=', 1) for line in (ROOT / 'container.env').read_text().splitlines()
+            if line and not line.startswith('#')]
+    expected = dict(rows)
+    assert len(rows) == len(expected), 'Duplicate container environment key'
+    source = (ROOT.parent / 'start.sh').read_text().rsplit('main "$@"', 1)[0]
+    script = tmp_path / 'start.sh'
+    (tmp_path / '.env.example').write_text('')
+    script.write_text(source + '\ncontainer_env\n')
+    run = subprocess.run(['bash', str(script)], capture_output=True, text=True,
+                         env=dict(PATH=os.defpath, CUDA_VISIBLE_DEVICES='', HOME=str(tmp_path)))
+    assert run.returncode == 0, run.stderr
+    actual = dict(line.split('=', 1) for line in run.stdout.splitlines() if '=' in line)
+    for key in ('HOME', 'XDG_CACHE_HOME', 'HF_HOME', 'TMPDIR', 'RECIPE_CACHE_ROOT',
+                'PYTHONDONTWRITEBYTECODE', 'TRITON_CACHE_DIR', 'TORCH_EXTENSIONS_DIR',
+                'VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR', 'VLLM_CACHE_ROOT',
+                'TILELANG_CACHE_DIR', 'TILELANG_TMP_DIR', 'CUDA_CACHE_PATH',
+                'FLASHINFER_WORKSPACE_BASE', 'TORCHINDUCTOR_CACHE_DIR'):
+        assert actual[key] == expected[key], key

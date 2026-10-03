@@ -120,6 +120,20 @@ case "$MODE" in
   dflash|mtp|none) ;;
   *) echo "serve.sh: unknown argument '$MODE' (expected dflash, mtp, none or --help)" >&2; exit 2 ;;
 esac
+# Container compilers use a private temporary directory on the cache mount.
+# This runs for start.sh, Compose and direct launches before Python imports.
+if [ -n "${RECIPE_CACHE_ROOT:-}" ] && [ "${DRY:-0}" != 1 ]; then
+    [ "$RECIPE_CACHE_ROOT" = /cache ] || { echo '[boot-check] FAIL: container cache root must be /cache' >&2; exit 1; }
+    temp_base="${TMPDIR:-/cache/tmp}"
+    case "$temp_base/" in /cache/*) ;; *) echo '[boot-check] FAIL: container TMPDIR must be under /cache' >&2; exit 1 ;; esac
+    mkdir -p "$temp_base"
+    temp_base="$(realpath "$temp_base")"
+    case "$temp_base/" in /cache/*) ;; *) echo '[boot-check] FAIL: container TMPDIR resolves outside /cache' >&2; exit 1 ;; esac
+    TMPDIR="$(mktemp -d "$temp_base/run.XXXXXXXX")"
+    export TMPDIR
+    export TMP="$TMPDIR" TEMP="$TMPDIR"
+    unset temp_base
+fi
 # Cache seeds are opt-in until the image's cold/warm acceptance passes.
 if [ "${VLLM_IMAGE_CACHE_SEED:-0}" = 1 ] && [ "${DRY:-0}" = 1 ]; then
     echo "[image-cache] enabled (dry run)"
@@ -132,6 +146,28 @@ else
     echo "[image-cache] disabled"
 fi
 
+# Explicit compiler destinations also cover launches without a seed.
+if [ -n "${RECIPE_CACHE_ROOT:-}" ] && [ "${DRY:-0}" != 1 ]; then
+    export HOME="${HOME:-/cache}" XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+    export HF_HOME="${HF_HOME:-/cache/huggingface}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-$HOME/.triton/cache}"
+    export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-$HOME/.cache/torch_extensions}"
+    export VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR="${VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR:-$HOME/.cache/vllm/custom_all_reduce_flags}"
+    export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-$HOME/.cache/vllm}"
+    export TILELANG_CACHE_DIR="${TILELANG_CACHE_DIR:-$HOME/.tilelang/cache}"
+    export TILELANG_TMP_DIR="${TILELANG_TMP_DIR:-$HOME/.tilelang/cache/tmp}"
+    export CUDA_CACHE_PATH="${CUDA_CACHE_PATH:-$HOME/.nv/ComputeCache}"
+    export FLASHINFER_WORKSPACE_BASE="${FLASHINFER_WORKSPACE_BASE:-$HOME}"
+    export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-$HOME/torchinductor}"
+    for cache_path in "$HOME" "$XDG_CACHE_HOME" "$HF_HOME" "$TMPDIR" "$TRITON_CACHE_DIR" "$TORCH_EXTENSIONS_DIR" "$VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR" "$VLLM_CACHE_ROOT" "$TILELANG_CACHE_DIR" "$TILELANG_TMP_DIR" "$CUDA_CACHE_PATH" "$FLASHINFER_WORKSPACE_BASE" "$TORCHINDUCTOR_CACHE_DIR"; do
+        case "$cache_path/" in /cache/*) ;; *) echo "[boot-check] FAIL: compiler cache outside /cache: $cache_path" >&2; exit 1 ;; esac
+        mkdir -p "$cache_path"
+        cache_path="$(realpath "$cache_path")"
+        case "$cache_path/" in /cache/*) ;; *) echo "[boot-check] FAIL: cache symlink outside /cache: $cache_path" >&2; exit 1 ;; esac
+        [ -w "$cache_path" ] || { echo "[boot-check] FAIL: cache is not writable: $cache_path" >&2; exit 1; }
+    done
+    unset cache_path
+fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="${VENV:-$REPO_ROOT/venv}"
@@ -646,7 +682,9 @@ elif [ "${RECIPE_BOOT_CHECK_OWNER:-}" = start ]; then
 else
   CLIENT_HOST=${HOST:-127.0.0.1}
   case "$CLIENT_HOST" in 0.0.0.0|::|'[::]'|'') CLIENT_HOST=127.0.0.1 ;; esac
-  exec "$VENV/bin/python" "$REPO_ROOT/boot_check.py" \
+  boot_args=()
+  [ -z "${RECIPE_CACHE_ROOT:-}" ] || boot_args+=(--container)
+  exec "$VENV/bin/python" "$REPO_ROOT/boot_check.py" "${boot_args[@]}" \
     --base "http://$CLIENT_HOST:${PORT:-8000}" \
     --model "${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}" \
     --ready-timeout "${READY_TIMEOUT:-1800}" --serve "${CMD[@]}"

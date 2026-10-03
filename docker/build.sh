@@ -170,6 +170,7 @@ layer() {
         "$OUT/payload/engine/cache" "$OUT/payload/engine/dev/shm" \
         "$OUT/payload/engine/proc" "$OUT/payload/engine/tmp" "$OUT/payload/engine/models/GLM-5.3-Flash-W4A16-MTP" \
         "$OUT/payload/engine/models/GLM-5.3-Flash-DFlash2"
+    chmod 1777 "$OUT/payload/engine/tmp"
     python3 "$HERE/p2p_build.py" "$HERE/../p2p_probe.cu" \
         "$OUT/payload/engine/opt/image-tools/p2p" --nvcc "$BUILD_CUDA_HOME/bin/nvcc"
     if [ -n "${IMAGE_CACHE_SEED_DIR:-}" ]; then

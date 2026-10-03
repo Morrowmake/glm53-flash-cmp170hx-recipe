@@ -54,7 +54,7 @@ def inside(model, draft):
     # Discovery and loading exercise the original failure without CUDA init.
     assert DRIVER_DIR in libcuda_dirs()
     ctypes.CDLL(DRIVER_DIR + "/libcuda.so.1")
-    checks = ["no_gpu_nodes", "driver_discovery", "driver_load"]
+    checks = ["rootfs_tmp_1777", "no_gpu_nodes", "driver_discovery", "driver_load"]
     for label, path in (("target", model), ("draft", draft)):
         config = json.loads((path / "config.json").read_text())
         for arch in config["architectures"]:
@@ -115,6 +115,13 @@ def inside(model, draft):
     print("ROOTFS_SMOKE PASS", len(checks), flush=True)
 
 
+def check_tmp(rootfs):
+    path = rootfs / "tmp"
+    if path.is_symlink() or not path.is_dir() or path.stat().st_mode & 0o7777 != 0o1777:
+        raise ValueError("Image /tmp must be a directory with mode 1777")
+    return "1777"
+
+
 def image_environment(config):
     env = dict(e.split("=", 1) for e in
                json.loads(config.read_text())["config"]["Env"])
@@ -145,6 +152,7 @@ def main():
     if any(getattr(args, name) is None for name in
            ("rootfs", "config", "model", "draft", "result")):
         parser.error("rootfs, config, model, draft and result are required")
+    check_tmp(args.rootfs)
     enabled = os.environ.get("IMAGE_ROOTFS_CPU_SMOKE", "1") == "1"
     print("[image-rootfs-cpu] enabled=" + str(int(enabled)), flush=True)
     if not enabled:

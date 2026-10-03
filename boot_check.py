@@ -9,6 +9,9 @@ import signal
 import subprocess
 import sys
 import time
+import tempfile
+import threading
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -29,6 +32,33 @@ class CheckError(RuntimeError):
 
 def banner(message):
     print('[boot-check] ' + message, flush=True)
+
+
+def check_log(path, container=False, offset=0):
+    with Path(path).open('rb') as source:
+        source.seek(offset)
+        text = source.read().decode(errors='replace')
+    p2p = re.search(r'\[p2p\] P2P enabled:', text)
+    requested_off = re.search(
+        r'Custom all-reduce flags-in-data path requested[^\n]*'
+        r'VLLM_CUSTOM_ALLREDUCE_FLAGS=1[^\n]*but off', text)
+    if p2p and requested_off:
+        raise CheckError('P2P enabled but requested flags-in-data all-reduce is off')
+    if not container:
+        return
+    for line in text.splitlines():
+        # Output options only: compiler inputs and system include paths are read-only.
+        outputs = re.findall(
+            r"(?:Could not open output file\s+|(?:^|\s)(?:(?:-o|-MF|-odir)(?:=|\s*)|(?:--output-file|--output-directory)(?:=|\s+)))['\"]?(/[^'\"\s]+)", line)
+        outputs += re.findall(r'FAILED:\s+(/[^\s]+)', line)
+        outputs += re.findall(
+            r"(?:Emitting ninja build file\s+|ninja: Entering directory\s+|ninja\s+-C\s+)['\"`]?(/[^'\"`\s]+)", line)
+        outputs += re.findall(r'Using (/[^\s]+) as PyTorch extensions root', line)
+        for output in outputs:
+            if not Path(output).is_relative_to('/cache') or '..' in Path(output).parts:
+                raise CheckError('JIT compiler output outside /cache: ' + output)
+        if re.search(r'(?:nvcc|ptxas|gcc|g\+\+).*fatal|PermissionError:|Permission denied', line, re.I):
+            raise CheckError('compiler or filesystem failure in container log')
 
 
 class Client:
@@ -80,8 +110,10 @@ def deltas(before, after):
     return tuple(sum(after[k] - before[k] for k in before if k[0] == name) for name in COUNTERS)
 
 
-def check(client, metrics_wait=60):
+def check(client, metrics_wait=60, log_check=None):
     banner('enabled: two temperature-0 requests')
+    if log_check:
+        log_check()
     initial = client.metrics()
     with client.request(OK_PROMPT, max_tokens=128) as response:
         answer = json.load(response)['choices'][0]['message'].get('content')
@@ -121,6 +153,8 @@ def check(client, metrics_wait=60):
     while True:
         drafts, proposed, accepted = deltas(before, client.metrics())
         if drafts >= 64 and proposed >= 64 and accepted > 0:
+            if log_check:
+                log_check()
             banner(f'PASS: OK; drafts={drafts:g} proposed={proposed:g} accepted={accepted:g}')
             return
         if time.monotonic() >= deadline:
@@ -130,8 +164,21 @@ def check(client, metrics_wait=60):
         time.sleep(1)
 
 
-def supervise(client, command, ready_timeout):
-    child = subprocess.Popen(command, start_new_session=True)
+def supervise(client, command, ready_timeout, container=False):
+    log = tempfile.NamedTemporaryFile(prefix='boot-', suffix='.log')
+    child = subprocess.Popen(command, start_new_session=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+    def relay():
+        for line in iter(child.stdout.readline, b''):
+            log.write(line)
+            log.flush()
+            sys.stdout.buffer.write(line)
+            sys.stdout.buffer.flush()
+
+    reader = threading.Thread(target=relay, daemon=True)
+    reader.start()
+    log_check = lambda: check_log(log.name, container)
 
     def interrupted(signum, frame):
         raise CheckError('server supervisor interrupted')
@@ -141,6 +188,7 @@ def supervise(client, command, ready_timeout):
     try:
         deadline = time.monotonic() + ready_timeout
         while True:
+            log_check()
             if child.poll() is not None:
                 raise CheckError('server exited before health')
             try:
@@ -150,7 +198,7 @@ def supervise(client, command, ready_timeout):
                 if time.monotonic() >= deadline:
                     raise CheckError('server health timeout')
                 time.sleep(1)
-        check(client)
+        check(client, log_check=log_check)
         return child.wait()
     finally:
         # This group was created here; it contains only this launch's descendants.
@@ -165,20 +213,35 @@ def supervise(client, command, ready_timeout):
         except subprocess.TimeoutExpired:
             os.killpg(child.pid, signal.SIGKILL)
             child.wait()
+        reader.join(timeout=5)
+        child.stdout.close()
+        log.close()
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--base', required=True)
-    parser.add_argument('--model', required=True)
+    parser.add_argument('--base')
+    parser.add_argument('--model')
+    parser.add_argument('--log', type=Path)
+    parser.add_argument('--log-offset', type=int, default=0)
+    parser.add_argument('--log-only', action='store_true')
+    parser.add_argument('--container', action='store_true')
     parser.add_argument('--ready-timeout', type=int, default=1800)
     parser.add_argument('--serve', nargs=argparse.REMAINDER)
     args = parser.parse_args()
-    client = Client(args.base, args.model, os.getenv('API_KEY', os.getenv('VLLM_API_KEY', '')))
+    if args.log_only and args.log is None:
+        parser.error('--log-only requires --log')
+    if not args.log_only and (not args.base or not args.model):
+        parser.error('--base and --model are required for generation checks')
+    log_check = (lambda: check_log(args.log, args.container, args.log_offset)) if args.log else None
     try:
+        if args.log_only:
+            log_check()
+            return 0
+        client = Client(args.base, args.model, os.getenv('API_KEY', os.getenv('VLLM_API_KEY', '')))
         if args.serve:
-            return supervise(client, args.serve, args.ready_timeout)
-        check(client)
+            return supervise(client, args.serve, args.ready_timeout, args.container)
+        check(client, log_check=log_check)
         return 0
     except Exception as error:
         # HTTP errors must not echo request headers or credentials.

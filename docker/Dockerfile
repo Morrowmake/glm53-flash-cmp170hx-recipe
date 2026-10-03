@@ -125,6 +125,7 @@ LABEL org.opencontainers.image.title="vllm-cmp170hx" \
       org.opencontainers.image.base.name="docker.io/nvidia/cuda:13.3.1-devel-ubuntu24.04" \
       org.opencontainers.image.base.digest="sha256:4ff859525f99de5782aa73607ce24219b07dddd48d12b97c1c301d7e1cfb0a87"
 RUN mkdir -p /opt/cache-seed /recipe /cache /dev/shm /proc /tmp /models/GLM-5.3-Flash-W4A16-MTP \
-    /models/GLM-5.3-Flash-DFlash2
+    /models/GLM-5.3-Flash-DFlash2 \
+ && chown 0:0 /tmp && chmod 1777 /tmp
 EXPOSE 8000
 ENTRYPOINT ["/opt/venv/bin/vllm"]

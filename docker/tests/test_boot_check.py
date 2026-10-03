@@ -205,3 +205,66 @@ def test_supervisor_success_and_signal_cleanup(tmp_path):
                 proc.wait()
     with pytest.raises(ProcessLookupError):
         os.kill(int(pidfile.read_text()), 0)
+
+
+@pytest.mark.parametrize('p2p,off,container,output,fail', [
+    (True, True, False, '', True),
+    (False, True, True, '', False),
+    (True, False, True, '', False),
+    (True, False, True, "nvcc fatal: Could not open output file '/tmp/tmpxft_test'", True),
+    (True, False, True, 'Using /models/target as model source', False),
+    (True, False, True, 'nvcc -I/opt/include /opt/source.cu -o /cache/tmp/run/kernel.o', False),
+    (True, False, True, 'nvcc -o /opt/extension/kernel.o /opt/source.cu', True),
+    (True, False, True, 'g++ --output-file=/root/kernel.so /opt/source.cpp', True),
+    (True, False, True, 'nvcc -o /cache/../tmp/kernel.o', True),
+    (True, False, True, 'nvcc -o/tmp/kernel.o', True),
+    (True, False, True, 'Emitting ninja build file /root/extensions/build.ninja...', True),
+    (True, False, True, 'ninja: Entering directory `/tmp/build`', True),
+    (True, False, True, 'Using /cache/compiled/key/.cache/torch_extensions as PyTorch extensions root', False),
+    (True, False, True, 'FAILED: /tmp/kernel.o', True),
+    (True, False, True, 'PermissionError: [Errno 13] Permission denied', True),
+])
+def test_boot_log_gates(tmp_path, p2p, off, container, output, fail):
+    log = tmp_path / 'serve.log'
+    text = '[p2p] P2P enabled: content check passed\n' if p2p else '[p2p] P2P disabled\n'
+    if off:
+        text += ('Custom all-reduce flags-in-data path requested '
+                 '(VLLM_CUSTOM_ALLREDUCE_FLAGS=1) but off: extension did not build on every rank\n')
+    log.write_text(text + output)
+    if fail:
+        with pytest.raises(boot.CheckError):
+            boot.check_log(log, container)
+    else:
+        boot.check_log(log, container)
+
+
+def test_boot_log_ignores_previous_launch(tmp_path):
+    log = tmp_path / 'serve.log'
+    old = b'nvcc -o /tmp/old.o\n'
+    log.write_bytes(old + b'nvcc -o /cache/tmp/new.o\n')
+    boot.check_log(log, container=True, offset=len(old))
+
+
+@pytest.mark.parametrize('runtime', ['native', 'container'])
+def test_start_stops_log_failure_before_health(tmp_path, runtime):
+    (tmp_path / '.env.example').write_text('')
+    log = tmp_path / 'serve.log'
+    log.write_text('[p2p] P2P enabled: content check passed\n'
+                   'Custom all-reduce flags-in-data path requested '
+                   '(VLLM_CUSTOM_ALLREDUCE_FLAGS=1) but off: fixture\n')
+    source = (ROOT / 'start.sh').read_text().rsplit('main "$@"', 1)[0]
+    script = tmp_path / 'start.sh'
+    script.write_text(source + '''
+SCRIPT_DIR="$TEST_RECIPE"
+SERVE_LOG="$TEST_LOG"
+LAUNCHED=1
+health_ok() { echo contacted > "$HEALTH_RECORD"; return 0; }
+do_stop() { echo stopped > "$STOP_RECORD"; }
+wait_ready
+''')
+    run = subprocess.run(['bash', str(script)], capture_output=True, text=True,
+                         env=dict(os.environ, CUDA_VISIBLE_DEVICES='', RUNTIME=runtime,
+                                  TEST_RECIPE=str(ROOT), TEST_LOG=str(log), BOOT_CHECK='1',
+                                  HEALTH_RECORD=str(tmp_path / 'health'), STOP_RECORD=str(tmp_path / 'stop')))
+    assert run.returncode == 1 and '[boot-check] FAIL' in run.stdout + run.stderr
+    assert (tmp_path / 'stop').exists() and not (tmp_path / 'health').exists()

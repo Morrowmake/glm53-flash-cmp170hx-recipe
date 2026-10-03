@@ -78,9 +78,15 @@ def runtime_identity(opt=Path("/opt")):
 def exports(identity):
     root = "/cache/compiled/" + key(identity)
     values = dict(HOME=root, XDG_CACHE_HOME=root + "/.cache",
-                  TRITON_CACHE_DIR=root + "/.triton/cache",
                   FLASHINFER_WORKSPACE_BASE=root,
-                  TORCHINDUCTOR_CACHE_DIR=root + "/torchinductor")
+                  TORCHINDUCTOR_CACHE_DIR=root + "/torchinductor",
+                  TRITON_CACHE_DIR=root + "/.triton/cache",
+                  TORCH_EXTENSIONS_DIR=root + "/.cache/torch_extensions",
+                  VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR=root + "/.cache/vllm/custom_all_reduce_flags",
+                  VLLM_CACHE_ROOT=root + "/.cache/vllm",
+                  TILELANG_CACHE_DIR=root + "/.tilelang/cache",
+                  TILELANG_TMP_DIR=root + "/.tilelang/cache/tmp",
+                  CUDA_CACHE_PATH=root + "/.nv/ComputeCache")
     return "\n".join("export " + n + "=" + shlex.quote(v) for n, v in values.items())
 
 def allowed(name):

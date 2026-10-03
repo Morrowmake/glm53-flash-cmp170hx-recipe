@@ -32,6 +32,8 @@ services:
       - docker/container.env
     environment:
       LAYOUT: ${LAYOUT:-tp4}
+      RECIPE_CACHE_ROOT: /cache
+      TMPDIR: /cache/tmp
     volumes:
       - ./serve.sh:/recipe/serve.sh:ro
       - ./boot_check.py:/recipe/boot_check.py:ro

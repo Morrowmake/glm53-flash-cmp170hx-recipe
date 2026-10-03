@@ -9,6 +9,7 @@ import os
 import re
 from pathlib import Path
 import sys
+import tarfile
 
 from oci_layers import digest_file, image
 from runtime_tree import scan_stream
@@ -29,11 +30,20 @@ def layer_check(job):
         raise ValueError("Layer diff ID mismatch")
     with path.open("rb") as f:
         scan_stream(f, forbidden, desc["digest"], credential_patterns=patterns)
-    return desc["digest"]
+    tmp = None
+    with tarfile.open(path, mode="r|gz") as archive:
+        for member in archive:
+            name = member.name.removeprefix("./").rstrip("/")
+            if name == "tmp":
+                tmp = dict(mode=member.mode, uid=member.uid, gid=member.gid,
+                           directory=member.isdir())
+            elif name in (".wh.tmp", ".wh..wh..opq"):
+                tmp = dict(directory=False)
+    return dict(digest=desc["digest"], passed=True, tmp=tmp)
 
 def checked_layer(job):
     try:
-        return dict(digest=layer_check(job), passed=True)
+        return layer_check(job)
     except ValueError as error:
         return dict(digest=job[1]["digest"], passed=False, reason=str(error))
 
@@ -52,7 +62,13 @@ def audit(root, workers=8):
             zip(manifest["layers"], config["rootfs"]["diff_ids"])]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         checked = list(pool.map(checked_layer, jobs))
-    record = dict(passed=all(r["passed"] for r in checked), layers=len(checked), checked=checked,
+    tmp = None
+    for row in checked:
+        if row.get("tmp") is not None:
+            tmp = row["tmp"]
+    tmp_passed = tmp == dict(mode=0o1777, uid=0, gid=0, directory=True)
+    record = dict(passed=all(r["passed"] for r in checked) and tmp_passed,
+                  tmp=dict(passed=tmp_passed, entry=tmp), layers=len(checked), checked=checked,
                   reviewed_byte_matches=reviews,
                   formats=["OCI JSON", "gzip", "bzip2", "xz", "tar", "zip"],
                   gaps=["Embedded ELF fatbins and nonstandard compression (including zstd) require separate inspection",

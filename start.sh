@@ -867,6 +867,9 @@ container_env() {
     # FlashInfer, TileLang, torch, vLLM, Hugging Face) goes under the mounted
     # cache directory, owned by you. USER and LOGNAME give Python a user name
     # for a uid the image does not know.
+    echo "PYTHONDONTWRITEBYTECODE=1"
+    echo "RECIPE_CACHE_ROOT=/cache"
+    echo "TMPDIR=/cache/tmp"
     echo "HOME=/cache"
     echo "USER=$(id -un)"
     echo "LOGNAME=$(id -un)"
@@ -874,6 +877,13 @@ container_env() {
     echo "HF_HOME=/cache/huggingface"
     echo "FLASHINFER_WORKSPACE_BASE=/cache"
     echo "TORCHINDUCTOR_CACHE_DIR=/cache/torchinductor"
+    echo "TRITON_CACHE_DIR=/cache/.triton/cache"
+    echo "TORCH_EXTENSIONS_DIR=/cache/.cache/torch_extensions"
+    echo "VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR=/cache/.cache/vllm/custom_all_reduce_flags"
+    echo "VLLM_CACHE_ROOT=/cache/.cache/vllm"
+    echo "TILELANG_CACHE_DIR=/cache/.tilelang/cache"
+    echo "TILELANG_TMP_DIR=/cache/.tilelang/cache/tmp"
+    echo "CUDA_CACHE_PATH=/cache/.nv/ComputeCache"
     echo "VLLM_IMAGE_CACHE_SEED=${VLLM_IMAGE_CACHE_SEED:-0}"
     for k in $CONTAINER_KEYS; do
         [ -n "${!k+x}" ] && printf '%s=%s\n' "$k" "${!k}"
@@ -945,6 +955,8 @@ container_launch() {
     log "launch: container, $SPEC_MODE, layout $LAYOUT (TP=$TP PP=$PP), ctx ${MAX_LEN:-262144}, $(publish_addr)"
     log "  image: $IMAGE"
     log "  log: $SERVE_LOG"
+    BOOT_LOG_OFFSET=0
+    [ ! -f "$SERVE_LOG" ] || BOOT_LOG_OFFSET="$(wc -c < "$SERVE_LOG")"
     local envfile="$LOGDIR/container.env.run"
     ( umask 077; container_env >"$envfile" )
     container_args "$envfile"
@@ -1022,6 +1034,8 @@ launch() {
     # 9>&- : the server must not inherit the lifecycle lock (fd 9). serve.sh
     # execs vllm, so an inherited fd would hold the lock for the server's whole
     # life and block every later stop, restart and update.
+    BOOT_LOG_OFFSET=0
+    [ ! -f "$SERVE_LOG" ] || BOOT_LOG_OFFSET="$(wc -c < "$SERVE_LOG")"
     RECIPE_BOOT_CHECK_OWNER=start setsid nohup "$SCRIPT_DIR/serve.sh" "$SPEC_MODE" 9>&- >>"$SERVE_LOG" 2>&1 < /dev/null &
     local pid=$!
     echo "$pid" >"$PIDFILE"
@@ -1039,13 +1053,22 @@ wait_ready() {
     local url="http://$CLIENT_HOST:$PORT/health" elapsed=0 pid
     pid="$(read_pid)"
     log "waiting for $url (weight load and graph capture on a 320B MoE are slow; timeout ${READY_TIMEOUT}s)"
+    local log_args=(--log "$SERVE_LOG" --log-offset "${BOOT_LOG_OFFSET:-0}")
+    [ "$RUNTIME" != container ] || log_args+=(--container)
     while [ "$elapsed" -lt "$READY_TIMEOUT" ]; do
+        if [ "$LAUNCHED" = 1 ] && [ "$BOOT_CHECK" != 0 ] && [ -f "$SERVE_LOG" ]; then
+            if ! python3 "$SCRIPT_DIR/boot_check.py" "${log_args[@]}" --log-only; then
+                warn "[boot-check] FAIL: stopping this checkout's failed launch"
+                do_stop
+                return 1
+            fi
+        fi
         if health_ok; then
             log "healthy after ${elapsed}s"
             if [ "$LAUNCHED" = 1 ]; then
                 if [ "$BOOT_CHECK" = 0 ]; then
                     log "[boot-check] disabled (BOOT_CHECK=0)"
-                elif ! python3 "$SCRIPT_DIR/boot_check.py" --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME"; then
+                elif ! python3 "$SCRIPT_DIR/boot_check.py" --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME" "${log_args[@]}"; then
                     warn "[boot-check] FAIL: stopping this checkout's failed launch"
                     do_stop
                     return 1
