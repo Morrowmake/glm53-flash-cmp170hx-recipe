@@ -41,7 +41,7 @@ PP4 compiled wide-tile prefill (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`,
 default on), absent from the earlier frozen snapshot. Use a matching final
 engine pin and rebuilt library after validation.
 The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is ignored. The compiled library
-is rebuilt from `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`; decode entry points retain their established outputs.
+is rebuilt from `c1ce6491efe53934119d306d0a0501b475458e9b`; decode entry points retain their established outputs.
 Prefill throughput is recorded in [Results](results.md), on the final library.
 
 The pinned container image includes the optional library. To build it natively,

@@ -4,7 +4,7 @@ Temporary release preparation file; delete before release. Only GSM8K/HumanEval 
 and the final image digest remain. Use measurements from this release's
 engine, driver and SM count for pending results.
 
-The engine is pinned to `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`.
+The engine is pinned to `c1ce6491efe53934119d306d0a0501b475458e9b`.
 Launcher decisions and calibrated cost tables are filled. Check both layouts
 with `python3 tools/check-env-match.py <validation-json>`; the reference stays
 outside the recipe. The check lists ignored keys and uses a CPU installation

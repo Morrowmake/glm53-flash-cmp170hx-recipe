@@ -3,7 +3,7 @@
 ## Release 1.7.0
 
 Measured 2026-10-03 on 4× CMP 170HX. Release 1.7.0 results use the final
-engine `caaf6afe8ee8c29b32ef3b77284656ca87a0937e` and its release defaults
+engine `c1ce6491efe53934119d306d0a0501b475458e9b` and its release defaults
 on 74 SMs per card, mainline cmpunlocker plus the minimal P2P patch, verified
 P2P, PCIe x16 links, 262,144-token context and 180 W per card.
 P2P-off results are no longer published. PP4 on x4 links is not measured.

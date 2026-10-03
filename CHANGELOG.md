@@ -2,7 +2,7 @@
 
 ## 1.7.0
 
-Engine: `caaf6afe8ee8c29b32ef3b77284656ca87a0937e`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
+Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:{{NUM:image_digest}}`.
 
 - Results use 74 SMs per card via mainline cmpunlocker, with the maintainer's
   P2P work and our minimal patch. See [PCIe peer-to-peer](docs/how-to-use.md#pcie-peer-to-peer).
