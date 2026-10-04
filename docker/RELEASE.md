@@ -78,8 +78,8 @@ CUDA_VISIBLE_DEVICES="" STEP=assemble IMAGE_CACHE_SEED_DIR=/path/to/new-seed \
 The coordinator's reserved GPU leg must generate and compare these caches.
 No cache bundle is produced by a CPU build. Do not reuse a cache from a native
 installation with different absolute paths, or claim a startup improvement
-before the cold/seeded comparison. The final manifest digest is
-`sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`. Driver differences deliberately reject a
+before the cold/seeded comparison. The 1.7.0 build manifest digest is
+`sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`; 1.7.1 republishes it with one added notice layer as `sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62`. Driver differences deliberately reject a
 seed; users can continue with a cold cache. Seeded files are executable compiler
 artifacts: distribute only trusted, audited release bundles.
 

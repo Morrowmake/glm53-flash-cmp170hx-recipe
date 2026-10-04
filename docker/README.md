@@ -33,10 +33,10 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 - **Seed mount:** `/opt/cache-seed` exists even when no seed is included.
 - **No weights.** The two checkpoints are mounted from the host.
 
-Release image digest (Docker acceptance pending):
+Release image digest (1.7.1: the accepted 1.7.0 image with one added layer carrying the licence notices; its other 19 layers are byte-identical):
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e
+ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62
 ```
 
 Its OCI revision is `c1ce6491efe53934119d306d0a0501b475458e9b`. The rootless version is `1.7.0-` plus the
@@ -138,7 +138,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"

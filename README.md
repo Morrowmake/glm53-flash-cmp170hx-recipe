@@ -7,7 +7,7 @@
   &nbsp;
   <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/c1ce6491efe53934119d306d0a0501b475458e9b"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20c1ce6491efe53934119d306d0a0501b475458e9b-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.7.0-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.7.1-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
