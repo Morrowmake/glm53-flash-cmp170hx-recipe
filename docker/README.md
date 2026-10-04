@@ -193,3 +193,17 @@ to bypass verification. The allocator default stays `expandable_segments:False`.
 
 The [engine switches](../docs/engine-switches.md) work the
 same way: set the variable in `container.env` or add `-e NAME=0`.
+
+## Component licences
+
+The OCI Apache-2.0 label describes the vLLM engine, not a blanket licence for
+every file in the image. CUDA/NVIDIA components, Python dependencies and
+upstream third-party code retain their respective licences and notices.
+
+The image build retains the recipe's MIT grant at `/opt/image-tools/LICENSE`
+and the DeepGEMM derivative-reference notice at
+`/opt/image-tools/THIRD_PARTY_NOTICES`; image smoke checks the complete bytes.
+The bundled FLA MIT grant remains in the engine source. These additions take
+effect in newly built images; the already published image is not changed.
+Model weights are downloaded separately and have
+[their own licences](../docs/model-licences.md).

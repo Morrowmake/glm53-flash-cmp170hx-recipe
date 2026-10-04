@@ -122,6 +122,15 @@ def check_tmp(rootfs):
     return "1777"
 
 
+def check_recipe_license(rootfs):
+    recipe = Path(__file__).resolve().parents[1]
+    for name, source in (("LICENSE", recipe / "LICENSE"),
+                         ("THIRD_PARTY_NOTICES", recipe / "docker/THIRD_PARTY_NOTICES")):
+        notice = rootfs / "opt/image-tools" / name
+        if not notice.is_file() or notice.read_bytes() != source.read_bytes():
+            raise ValueError(f"Image /opt/image-tools/{name} must match recipe notice bytes")
+
+
 def image_environment(config):
     env = dict(e.split("=", 1) for e in
                json.loads(config.read_text())["config"]["Env"])
@@ -153,6 +162,8 @@ def main():
            ("rootfs", "config", "model", "draft", "result")):
         parser.error("rootfs, config, model, draft and result are required")
     check_tmp(args.rootfs)
+    check_recipe_license(args.rootfs)
+    print("[image-rootfs] recipe LICENSE bytes match", flush=True)
     enabled = os.environ.get("IMAGE_ROOTFS_CPU_SMOKE", "1") == "1"
     print("[image-rootfs-cpu] enabled=" + str(int(enabled)), flush=True)
     if not enabled:

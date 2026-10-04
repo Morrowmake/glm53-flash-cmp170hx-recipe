@@ -127,6 +127,8 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 - [How it works](docs/how-it-works.md): what makes it fast and correct, and what runs
 - [Engine switches](docs/engine-switches.md): the engine's internal switches, for troubleshooting
 - [Status and known limits](docs/known-limits.md)
+- [Model licences](docs/model-licences.md): complete target-model MIT notice,
+  drafter restrictions and method citations
 - [Examples](examples/README.md): curl, Python, streaming, tool calls, layout `.env` files
 - [Container image](docker/README.md) and [CHANGELOG.md](CHANGELOG.md)
 - Found a problem? [Open an issue](https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe/issues/new/choose);
@@ -160,8 +162,10 @@ The downloaded models have separate licences:
   attribution, prohibits commercial use, and prohibits distributing modified material.
 
 DFlash2 is the only supported speculative mode; every figure on this page uses
-it. Because its licence is non-commercial, commercial users need to make their
-own evaluation ([Known limits](docs/known-limits.md)).
+it. Its default checkpoint does not grant commercial-use permission: commercial
+use requires a separate licence from incoai ([Known limits](docs/known-limits.md)).
+The [model-licence reference](docs/model-licences.md) preserves the target's
+complete inherited MIT notice and describes the separate checkpoint terms.
 
 **The benchmark prompts** come from MiaAI-Lab's repository (AGPL-3.0) and
 their sparkDash prompt constants (MIT), used as data with attribution. No code from their repositories is included here.
@@ -171,7 +175,9 @@ their sparkDash prompt constants (MIT), used as data with attribution. No code f
 - **[MiaAI-Lab](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks)**
   for publishing the benchmark prompts used in the decode tables.
 - **[incoai](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)** for the
-  DFlash2 drafter checkpoint.
+  DFlash2 drafter checkpoint and [DFlash 2](https://inco.ai/blog/dflash2/).
+  The original [DFlash](https://github.com/z-lab/dflash) method is by
+  Jian Chen, Yesheng Liang and Zhijian Liu (ICML 2026).
 - **[canada-quant](https://huggingface.co/canada-quant/GLM-5.3-Flash-W4A16-MTP)**
   for the W4A16 quantisation.
 - **[Z.ai](https://huggingface.co/zai-org/GLM-5.3-Flash)** for GLM-5.3-Flash,
@@ -180,12 +186,35 @@ their sparkDash prompt constants (MIT), used as data with attribution. No code f
 
 ## Source
 
-The patches are ours; the fork branch is the code —
+The fork contains our maintained changes, inherited upstream code and the
+adaptations credited below —
 [Morrowmake/vllm-cmp170hx @ `ampere`](https://github.com/Morrowmake/vllm-cmp170hx/tree/ampere).
 
 ## Acknowledgements
 
 - Mainline [cmpunlocker](https://github.com/amoghmunikote/cmpunlocker) and its maintainer's P2P work, plus our minimal TRAP31 patch, form the basis of the P2P driver build. Ready to install: [Morrowmake/cmpunlocker](https://github.com/Morrowmake/cmpunlocker).
-- Upstream [vLLM](https://github.com/vllm-project/vllm) provides the RecoverSSM state-recovery approach and fixes we build on.
-- [MiaAI-Lab's GLM-5.3-Flash DGX Spark recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks) provided ideas for tool-call masking with `tool_choice="none"` and the startup boot check.
-- MiaAI-Lab also provided the cached prompt-boundary reuse idea.
+- Upstream [vLLM](https://github.com/vllm-project/vllm) provides the
+  [RecoverSSM implementation](https://github.com/vllm-project/vllm/commit/70afdedc1081d28c3eaae53bece8292298484c86)
+  and fixes we build on.
+- [MiaAI-Lab's GLM-5.3-Flash recipe](https://github.com/MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks/tree/6278ecb01034cea9ef6de0f851d09fccafe3e835)
+  provided ideas for tool-call masking, the startup boot check, cached
+  prompt-boundary reuse and scheduler back-off, Mamba in-flight reservation,
+  the image layer-count guard and the default reasoning-effort setting.
+  These are idea credits, not a claim that we imported its AGPL implementation.
+- [wtdcode/vllm-backport](https://github.com/wtdcode/vllm-backport/commit/9925c45ab4c0740dfc8e77b4715f665e8b205447)
+  and lazymio provided the shared-expert stream-reordering implementation
+  adapted in the engine (Apache-2.0).
+- [JJ48](https://github.com/JJ48/glm53-flash-170hx-serving) published the
+  acceptance/step-cost approach that informed acceptance-adaptive draft depth.
+- [TensorFold](https://github.com/ashhart/TensorFold/tree/17c73e1) informed
+  confidence-gated draft skipping; that optional engine path is disabled by
+  this release, but remains in its source.
+- [kindlingai's GX10 recipe](https://github.com/kindlingai/glm-5.3-flash-gx10)
+  provided ideas for GLM KDA state recovery, unused-draft work and
+  exact BF16 mHC weight storage. No code from that unlicensed recipe was used.
+- The engine builds on [Marlin](https://github.com/IST-DASLab/marlin)
+  (Elias Frantar and subsequent Neural Magic contributors),
+  [Flash Linear Attention](https://github.com/fla-org/flash-linear-attention)
+  (Songlin Yang, Yu Zhang and contributors), and DeepSeek's
+  [DeepGEMM](https://github.com/deepseek-ai/DeepGEMM) reference implementation.
+  Original source notices and component licences apply separately.

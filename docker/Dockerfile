@@ -74,7 +74,7 @@ RUN VLLM_BUILD_AMPERE_MARLIN=0 VLLM_USE_PRECOMPILED=1 VLLM_PRECOMPILED_WHEEL_COM
     VLLM_PRECOMPILED_WHEEL_VARIANT=cu130 \
     uv pip install --no-deps -e /opt/vllm-src \
  && uv pip freeze > /opt/venv/requirements.lock.txt
-COPY docker/runtime_tree.py docker/payload.py docker/cache_seed.py docker/rootfs_smoke.py docker/bwrap_targets.py docker/p2p_build.py p2p_probe.cu /tmp/
+COPY docker/runtime_tree.py docker/payload.py docker/cache_seed.py docker/rootfs_smoke.py docker/bwrap_targets.py docker/p2p_build.py docker/THIRD_PARTY_NOTICES p2p_probe.cu LICENSE /tmp/
 RUN test -f /opt/vllm-src/csrc/libtorch_stable/moe/ampere_marlin/build_standalone.py \
     || (echo "Set VLLM_REPO, VLLM_BRANCH and VLLM_COMMIT to a source with optional Marlin support" >&2; exit 1)
 RUN cd /opt/vllm-src && CUDA_VISIBLE_DEVICES= VLLM_BUILD_AMPERE_MARLIN=1 \
@@ -94,7 +94,7 @@ RUN IMAGE_P2P_PREBUILD=${IMAGE_P2P_PREBUILD} /opt/venv/bin/python /tmp/p2p_build
 RUN /opt/venv/bin/python /tmp/payload.py /opt /payload /tmp/CONSTRAINTS \
  && mkdir -p /payload/engine/opt/image-tools \
  && cp -a /tmp/image-p2p /payload/engine/opt/image-tools/p2p \
- && cp /tmp/cache_seed.py /tmp/rootfs_smoke.py /tmp/bwrap_targets.py /payload/engine/opt/image-tools/ \
+ && cp /tmp/cache_seed.py /tmp/rootfs_smoke.py /tmp/bwrap_targets.py /tmp/LICENSE /tmp/THIRD_PARTY_NOTICES /payload/engine/opt/image-tools/ \
  && mkdir -p /payload/engine/opt/cache-seed /payload/engine/recipe /payload/engine/cache \
     /payload/engine/models/GLM-5.3-Flash-W4A16-MTP /payload/engine/models/GLM-5.3-Flash-DFlash2
 

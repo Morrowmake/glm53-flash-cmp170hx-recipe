@@ -359,6 +359,30 @@ def test_smoke_checks_image_tmp_before_mount(tmp_path, mode):
             check_tmp(tmp_path)
 
 
+@pytest.mark.parametrize('notice', ['complete', 'missing', 'truncated', 'changed'])
+def test_smoke_checks_packaged_recipe_license(tmp_path, monkeypatch, notice):
+    import rootfs_smoke
+    (tmp_path / 'tmp').mkdir()
+    (tmp_path / 'tmp').chmod(0o1777)
+    packaged = tmp_path / 'opt/image-tools/LICENSE'
+    packaged.parent.mkdir(parents=True)
+    (packaged.parent / 'THIRD_PARTY_NOTICES').write_bytes((ROOT / 'THIRD_PARTY_NOTICES').read_bytes())
+    source = (ROOT.parent / 'LICENSE').read_bytes()
+    if notice != 'missing':
+        packaged.write_bytes(source if notice == 'complete' else
+                             source[:-1] if notice == 'truncated' else b'X' + source[1:])
+    monkeypatch.setenv('IMAGE_ROOTFS_CPU_SMOKE', '0')
+    command = ['rootfs_smoke.py']
+    for flag in ('rootfs', 'config', 'model', 'draft', 'result'):
+        command += ['--' + flag, str(tmp_path)]
+    monkeypatch.setattr(sys, 'argv', command)
+    if notice == 'complete':
+        rootfs_smoke.main()
+    else:
+        with pytest.raises(ValueError, match='/opt/image-tools/LICENSE'):
+            rootfs_smoke.main()
+
+
 @pytest.mark.parametrize('seeded', [False, True])
 def test_container_setup_creates_private_tmp_and_writable_caches(tmp_path, seeded):
     import os

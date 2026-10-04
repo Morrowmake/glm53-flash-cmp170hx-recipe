@@ -165,7 +165,7 @@ layer() {
     [ ! -e "$OUT/payload" ] || { echo "Choose a new OUT (payload already exists)" >&2; exit 1; }
     python3 "$HERE/payload.py" "$STAGE/opt" "$OUT/payload" "$CONSTRAINTS"
     mkdir -p "$OUT/payload/engine/opt/image-tools"
-    cp "$HERE/cache_seed.py" "$HERE/rootfs_smoke.py" "$HERE/bwrap_targets.py" "$OUT/payload/engine/opt/image-tools/"
+    cp "$HERE/cache_seed.py" "$HERE/rootfs_smoke.py" "$HERE/bwrap_targets.py" "$HERE/../LICENSE" "$HERE/THIRD_PARTY_NOTICES" "$OUT/payload/engine/opt/image-tools/"
     mkdir -p "$OUT/payload/engine/opt/cache-seed" "$OUT/payload/engine/recipe" \
         "$OUT/payload/engine/cache" "$OUT/payload/engine/dev/shm" \
         "$OUT/payload/engine/proc" "$OUT/payload/engine/tmp" "$OUT/payload/engine/models/GLM-5.3-Flash-W4A16-MTP" \

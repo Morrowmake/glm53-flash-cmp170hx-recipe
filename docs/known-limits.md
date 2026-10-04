@@ -29,8 +29,8 @@
   reserves additional memory for a context-filling video.
 - **DFlash2 is the only supported speculative mode.** The launcher still
   accepts other `SPEC_MODE` values, but they are unsupported and untested: no
-  validation, no issue support. The DFlash2 drafter's licence is
-  non-commercial (CC BY-NC-ND 4.0), so commercial users need their own
-  evaluation.
+  validation, no issue support. The DFlash2 drafter is CC BY-NC-ND 4.0;
+  commercial use requires a separate licence from incoai. The recipe's MIT
+  licence and the engine's Apache-2.0 licence do not override that restriction.
 - **Host-staged all-reduce is only for cards without peer access.** Where
   peer-to-peer works, it stands aside for the device-memory path.

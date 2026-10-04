@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Clarify source and idea attribution, including shared-expert reordering,
+  adaptive draft depth, state recovery and recipe robustness features.
+- State explicitly that the default DFlash2 checkpoint requires separate
+  permission for commercial use; add the requested DFlash citations.
+- Retain the recipe's and DeepGEMM's complete MIT notices beside the image
+  utilities and compiled peer-copy probe in both build paths, checking their
+  bytes during image smoke; preserve the inherited target-model grant in docs.
+  Existing published images are unchanged until a new image is released.
+- Include DeepGEMM's MIT notice with the engine's derivative reference and
+  identify modifications to inherited engine and driver source.
+
 ## 1.7.0 — 2026-10-03
 
 Engine: `c1ce6491efe53934119d306d0a0501b475458e9b`. Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:158627a705b6ae24fa63ba6eb454982454c5e6b94b1e32981faf33eb81a7ea3e`.
