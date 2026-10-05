@@ -582,8 +582,84 @@ if [ "$MODE" = dflash ]; then
   export VLLM_GLM5_DFLASH_SKIP=0
   export VLLM_GLM5_DFLASH_DEPTH2=0
   export VLLM_GLM5_DFLASH_BOUNDARY_CACHE=${VLLM_GLM5_DFLASH_BOUNDARY_CACHE:-1}
-  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='1.0000,1.0894,1.1375,1.2001,1.2239'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS='1.0000,1.1009,1.1631,1.2214,1.2718'; fi; fi
-  if [ "${PP:-1}" -gt 1 ]; then if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='1.0000,1.0889,1.1194,1.2001,1.2239'; fi; else if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI='1.0000,1.1132,1.1958,1.2214,1.2718'; fi; fi
+  # Measured launcher defaults cover depths 3..7, not arbitrary table lengths.
+  # Only unset tables belong to this launcher: explicit values (including empty)
+  # stay byte-for-byte intact for the config consumer to validate. Depth 2 uses
+  # its own measured tables or the consumer's forced-depth calibration route.
+  if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ] || [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then
+    DEFAULT_COST_TABLES=$("$VENV/bin/python" - "${SPEC_N:-3}" "$PP" ${EXTRA_ARGS:-} <<'PY'
+import json
+import os
+import sys
+
+try:
+    depth2 = bool(int(os.environ.get("VLLM_GLM5_DFLASH_DEPTH2", "0")))
+except ValueError:
+    depth2 = False  # Preserve malformed-switch validation in the consumer.
+if depth2:
+    sys.exit(0)  # Never present depth-3 measurements as depth-2 measurements.
+base, pp = sys.argv[1:3]
+args = sys.argv[3:]
+config = None
+for i, arg in enumerate(args):
+    if arg == "--speculative-config" and i + 1 < len(args):
+        config = args[i + 1]
+    elif arg.startswith("--speculative-config="):
+        config = arg.split("=", 1)[1]
+    elif arg == "--pipeline-parallel-size" and i + 1 < len(args):
+        pp = args[i + 1]
+    elif arg.startswith("--pipeline-parallel-size="):
+        pp = arg.split("=", 1)[1]
+if int(pp) > 1:
+    single = "1.0000,1.0894,1.1375,1.2001,1.2239"
+    multi = "1.0000,1.0889,1.1194,1.2001,1.2239"
+else:
+    single = "1.0000,1.1009,1.1631,1.2214,1.2718"
+    multi = "1.0000,1.1132,1.1958,1.2214,1.2718"
+try:
+    active = bool(int(os.environ["VLLM_GLM5_DFLASH_ADAPTIVE_K"])) and bool(
+        int(os.environ["VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT"])
+    )
+except ValueError:
+    active = False  # Leave malformed switches to the config consumer.
+if config is not None:
+    try:
+        config = json.loads(config)
+    except (ValueError, TypeError):
+        active = False  # Leave malformed explicit config to the CLI validator.
+    else:
+        if isinstance(config, dict):
+            base = config.get("num_speculative_tokens")
+            active = active and config.get("method") in (None, "dflash") and all(
+                config.get(key) is None
+                for key in ("adaptive_k", "num_speculative_tokens_per_batch_size")
+            ) and not config.get("enable_adaptive_verification", False)
+        else:
+            active = False
+if active:
+    try:
+        base = int(base)
+        depths = [int(x) for x in os.environ["VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS"].replace(" ", "").split(",") if x]
+    except (ValueError, TypeError):
+        depths = []  # Preserve the consumer's explicit-input validation.
+    if depths and base >= 1 and min(depths) >= 1 and max(depths) > base:
+        lo, hi = min(depths + [base]), max(depths + [base])
+        # Outside the measured domain, keep the historical defaults and let
+        # the consumer validate them; do not invent measurements or policy.
+        if 3 <= lo <= hi <= 7:
+            single = ",".join(single.split(",")[lo - 3:hi - 2])
+            multi = ",".join(multi.split(",")[lo - 3:hi - 2])
+print(single, multi)
+PY
+    )
+    if [ -n "$DEFAULT_COST_TABLES" ]; then
+      read -r DEFAULT_COSTS DEFAULT_COSTS_MULTI <<< "$DEFAULT_COST_TABLES"
+      if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS=$DEFAULT_COSTS; fi
+      if [ -z "${VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI+x}" ]; then export VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI=$DEFAULT_COSTS_MULTI; fi
+      unset DEFAULT_COSTS DEFAULT_COSTS_MULTI
+    fi
+    unset DEFAULT_COST_TABLES
+  fi
   echo "serve.sh: [draft-policy] boundary=$VLLM_GLM5_DFLASH_BOUNDARY_CACHE width=$VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH"
   echo "serve.sh: [draft-policy] adaptive_k=$VLLM_GLM5_DFLASH_ADAPTIVE_K depths=$VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS accept=$VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT costs=$VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS costs_multi=$VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI"
 fi
