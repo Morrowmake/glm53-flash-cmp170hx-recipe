@@ -89,9 +89,9 @@ class Client:
                 return self.opener.open(request, timeout=min(timeout, remaining)
                                         if remaining is not None else timeout)
             except urllib.error.HTTPError as error:
-                # /health may explicitly report loading. Only this readiness
-                # endpoint's 503 is transient; auth and API errors stay fatal.
-                if (path != '/health' or error.code != 503 or remaining is None
+                # An explicit unavailable response rejects the request during
+                # warm-up. Auth and other API errors remain fatal.
+                if (error.code != 503 or remaining is None
                         or not self.ready_retry):
                     raise
                 error.close()

@@ -3,11 +3,12 @@
 ## Unreleased
 
 - Keep startup readiness retries inside the existing total timeout. Retry
-  temporary health-check unavailability and refused first-generation
-  connections; authentication, validation and post-readiness failures remain
+  temporary connection failures and HTTP 503 during warm-up; authentication,
+  validation and post-readiness failures remain
   fatal. Do not replay a generation request with an uncertain delivery outcome.
 - Map launcher-owned measured default costs to the configured draft-depth
   range. Preserve explicit cost tables, ordinary defaults and engine validation.
+- Document the GitHub release source for pinned FlashInfer 0.7.0 cubin wheels.
 
 ## 1.7.1 — 2026-10-04
 

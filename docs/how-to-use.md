@@ -39,6 +39,12 @@ the log can show lines like
 `No available shared memory broadcast block found in 60 seconds`; they are
 harmless and stop once the build finishes.
 
+For a native install with slow or offline downloads, get the pinned
+`flashinfer-cubin==0.7.0` wheel from the
+[FlashInfer v0.7.0 GitHub release assets](https://github.com/flashinfer-ai/flashinfer/releases/tag/v0.7.0).
+That cubin version is not hosted on PyPI or the FlashInfer wheel-index pages;
+the `whl/cu130/` index lists JIT-cache packages instead.
+
 The smoke test checks the chat reply, tool call and KV cache; it prints
 `smoke: ok` when those checks pass.
 
