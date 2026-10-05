@@ -68,6 +68,7 @@ class Client:
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         self.ready_deadline = None
         self.ready_guard = None
+        self.ready_retry = True
 
     def open(self, path, body=None, timeout=120):
         headers = {}
@@ -96,7 +97,7 @@ class Client:
                 # connection proves the generation request was not sent.
                 retryable = body is None or (isinstance(reason, OSError)
                                             and reason.errno == errno.ECONNREFUSED)
-                if remaining is None or not retryable:
+                if remaining is None or not self.ready_retry or not retryable:
                     raise
                 if self.ready_guard:
                     self.ready_guard()
@@ -143,6 +144,9 @@ def check(client, metrics_wait=60, log_check=None):
         log_check()
     initial = client.metrics()
     with client.request(OK_PROMPT, max_tokens=128) as response:
+        # A generation response completes the frontend handoff. Later transport
+        # failures are engine/check failures, not startup readiness races.
+        client.ready_retry = False
         answer = json.load(response)['choices'][0]['message'].get('content')
     if not isinstance(answer, str) or answer.strip() != 'OK':
         raise CheckError('expected exactly OK after stripping surrounding whitespace')
