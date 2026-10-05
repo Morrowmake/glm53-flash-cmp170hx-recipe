@@ -78,7 +78,7 @@ so it also works before the first install.
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | adaptive draft depth; `0` restores the fixed depth (`SPEC_N`) and the 3460 TP4 token budget |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | `7,5` | deepest verified depth at 1 and 2 requests; `SPEC_N` beyond. The TP4 token budget follows the deepest depth (3456 + 7 = 3463) |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | `1` | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step cost of each supported depth from 3 to 7, alone and with several requests; set by the launcher from measurements on this hardware |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step costs measured for depths 3–7, alone and with several requests. Unset defaults are sliced by absolute depth when the allowed range is narrowed (for example, `DEPTHS=5,5` with `SPEC_N=3` uses the entries for 3–5). Explicit tables, including empty values, remain unchanged for engine validation |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4; `0` under PP4 | the drafter computes only the verified depth; `0` always drafts the deepest block |
 | `VLLM_CUSTOM_ALLREDUCE_FLAGS` | `1` | flags-in-data all-reduce at TP4 with verified P2P; `0` disables it |
 | `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` | `1` | cached prompt-boundary reuse; `0` disables it |
