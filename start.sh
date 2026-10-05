@@ -1050,12 +1050,13 @@ server_alive() {
 
 wait_ready() {
     [ -z "${DRY:-}" ] || return 0
-    local url="http://$CLIENT_HOST:$PORT/health" elapsed=0 pid
+    local url="http://$CLIENT_HOST:$PORT/health" elapsed=0 pid started=$SECONDS checker status
     pid="$(read_pid)"
     log "waiting for $url (weight load and graph capture on a 320B MoE are slow; timeout ${READY_TIMEOUT}s)"
     local log_args=(--log "$SERVE_LOG" --log-offset "${BOOT_LOG_OFFSET:-0}")
     [ "$RUNTIME" != container ] || log_args+=(--container)
     while [ "$elapsed" -lt "$READY_TIMEOUT" ]; do
+        elapsed=$((SECONDS - started))
         if [ "$LAUNCHED" = 1 ] && [ "$BOOT_CHECK" != 0 ] && [ -f "$SERVE_LOG" ]; then
             if ! python3 "$SCRIPT_DIR/boot_check.py" "${log_args[@]}" --log-only; then
                 warn "[boot-check] FAIL: stopping this checkout's failed launch"
@@ -1068,10 +1069,29 @@ wait_ready() {
             if [ "$LAUNCHED" = 1 ]; then
                 if [ "$BOOT_CHECK" = 0 ]; then
                     log "[boot-check] disabled (BOOT_CHECK=0)"
-                elif ! python3 "$SCRIPT_DIR/boot_check.py" --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME" "${log_args[@]}"; then
-                    warn "[boot-check] FAIL: stopping this checkout's failed launch"
-                    do_stop
-                    return 1
+                else
+                    # Health can briefly precede the metrics/API frontend. Keep
+                    # connection readiness inside the original launch budget.
+                    python3 "$SCRIPT_DIR/boot_check.py" --wait-ready \
+                        --ready-timeout "$((READY_TIMEOUT - (SECONDS - started)))" \
+                        --base "http://$CLIENT_HOST:$PORT" --model "$SERVED_MODEL_NAME" "${log_args[@]}" &
+                    checker=$!
+                    trap 'kill "$checker" 2>/dev/null || true; wait "$checker" 2>/dev/null || true; do_stop; exit 1' INT TERM
+                    while kill -0 "$checker" 2>/dev/null; do
+                        if ! server_alive "$pid"; then
+                            kill "$checker" 2>/dev/null || true
+                            break
+                        fi
+                        sleep 1
+                    done
+                    status=0
+                    wait "$checker" || status=$?
+                    trap - INT TERM
+                    if [ "$status" != 0 ]; then
+                        warn "[boot-check] FAIL: stopping this checkout's failed launch"
+                        do_stop
+                        return 1
+                    fi
                 fi
             else
                 log "[boot-check] existing server: no new requests"
@@ -1089,7 +1109,7 @@ wait_ready() {
             [ "$RUNTIME" = container ] || rm -f "$PIDFILE"
             return 1
         fi
-        sleep 5; elapsed=$((elapsed + 5))
+        sleep 5; elapsed=$((SECONDS - started))
     done
     warn "not healthy after ${READY_TIMEOUT}s; it may still be loading — ./start.sh logs"
     return 1

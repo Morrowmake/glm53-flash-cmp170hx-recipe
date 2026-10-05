@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Two-request startup check; also supervises a directly launched server."""
 import argparse
+import errno
 import json
 import math
 import os
@@ -65,6 +66,8 @@ class Client:
     def __init__(self, base, model, key=''):
         self.base, self.model, self.key = base.rstrip('/'), model, key
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        self.ready_deadline = None
+        self.ready_guard = None
 
     def open(self, path, body=None, timeout=120):
         headers = {}
@@ -73,7 +76,31 @@ class Client:
         if body is not None:
             headers['Content-Type'] = 'application/json'
             body = json.dumps(body).encode()
-        return self.opener.open(urllib.request.Request(self.base + path, body, headers), timeout=timeout)
+        request = urllib.request.Request(self.base + path, body, headers)
+        while True:
+            if self.ready_guard:
+                self.ready_guard()
+            remaining = (self.ready_deadline - time.monotonic()
+                         if self.ready_deadline is not None else None)
+            if remaining is not None and remaining <= 0:
+                raise CheckError('server readiness timeout')
+            try:
+                return self.opener.open(request, timeout=min(timeout, remaining)
+                                        if remaining is not None else timeout)
+            except urllib.error.HTTPError:
+                # An HTTP response is not a frontend connection race.
+                raise
+            except (OSError, urllib.error.URLError) as error:
+                reason = getattr(error, 'reason', error)
+                # Never replay a POST whose delivery is uncertain. Only a refused
+                # connection proves the generation request was not sent.
+                retryable = body is None or (isinstance(reason, OSError)
+                                            and reason.errno == errno.ECONNREFUSED)
+                if remaining is None or not retryable:
+                    raise
+                if self.ready_guard:
+                    self.ready_guard()
+                time.sleep(min(1, max(0, self.ready_deadline - time.monotonic())))
 
     def metrics(self):
         with self.open('/metrics', timeout=5) as response:
@@ -186,19 +213,19 @@ def supervise(client, command, ready_timeout, container=False):
     signal.signal(signal.SIGTERM, interrupted)
     signal.signal(signal.SIGINT, interrupted)
     try:
-        deadline = time.monotonic() + ready_timeout
-        while True:
+        client.ready_deadline = time.monotonic() + ready_timeout
+
+        def ready_guard():
             log_check()
             if child.poll() is not None:
-                raise CheckError('server exited before health')
-            try:
-                with client.open('/health', timeout=5):
-                    break
-            except (OSError, urllib.error.URLError):
-                if time.monotonic() >= deadline:
-                    raise CheckError('server health timeout')
-                time.sleep(1)
+                raise CheckError('server exited before readiness')
+
+        client.ready_guard = ready_guard
+        with client.open('/health', timeout=5):
+            pass
         check(client, log_check=log_check)
+        client.ready_deadline = None
+        client.ready_guard = None
         return child.wait()
     finally:
         # This group was created here; it contains only this launch's descendants.
@@ -227,6 +254,7 @@ def main():
     parser.add_argument('--log-only', action='store_true')
     parser.add_argument('--container', action='store_true')
     parser.add_argument('--ready-timeout', type=int, default=1800)
+    parser.add_argument('--wait-ready', action='store_true')
     parser.add_argument('--serve', nargs=argparse.REMAINDER)
     args = parser.parse_args()
     if args.log_only and args.log is None:
@@ -241,6 +269,11 @@ def main():
         client = Client(args.base, args.model, os.getenv('API_KEY', os.getenv('VLLM_API_KEY', '')))
         if args.serve:
             return supervise(client, args.serve, args.ready_timeout, args.container)
+        if args.wait_ready:
+            client.ready_deadline = time.monotonic() + args.ready_timeout
+            client.ready_guard = log_check
+            with client.open('/health', timeout=5):
+                pass
         check(client, log_check=log_check)
         return 0
     except Exception as error:
