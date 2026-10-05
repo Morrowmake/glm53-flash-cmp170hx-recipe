@@ -994,7 +994,7 @@ container_stop() {
     log "stop: done"
 }
 
-health_ok() { curl -fsS -m 5 "http://$CLIENT_HOST:$PORT/health" >/dev/null 2>&1; }
+health_ok() { curl -fsS -m "${1:-5}" "http://$CLIENT_HOST:$PORT/health" >/dev/null 2>&1; }
 
 # First "id" in /v1/models. A plain greedy sed would pick up the permission id
 # further down the same line, so match the field and take the first one.
@@ -1055,8 +1055,9 @@ wait_ready() {
     log "waiting for $url (weight load and graph capture on a 320B MoE are slow; timeout ${READY_TIMEOUT}s)"
     local log_args=(--log "$SERVE_LOG" --log-offset "${BOOT_LOG_OFFSET:-0}")
     [ "$RUNTIME" != container ] || log_args+=(--container)
-    while [ "$elapsed" -lt "$READY_TIMEOUT" ]; do
+    while true; do
         elapsed=$((SECONDS - started))
+        [ "$elapsed" -lt "$READY_TIMEOUT" ] || break
         if [ "$LAUNCHED" = 1 ] && [ "$BOOT_CHECK" != 0 ] && [ -f "$SERVE_LOG" ]; then
             if ! python3 "$SCRIPT_DIR/boot_check.py" "${log_args[@]}" --log-only; then
                 warn "[boot-check] FAIL: stopping this checkout's failed launch"
@@ -1064,7 +1065,7 @@ wait_ready() {
                 return 1
             fi
         fi
-        if health_ok; then
+        if health_ok "$((READY_TIMEOUT - elapsed < 5 ? READY_TIMEOUT - elapsed : 5))"; then
             log "healthy after ${elapsed}s"
             if [ "$LAUNCHED" = 1 ]; then
                 if [ "$BOOT_CHECK" = 0 ]; then

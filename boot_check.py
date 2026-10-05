@@ -88,9 +88,14 @@ class Client:
             try:
                 return self.opener.open(request, timeout=min(timeout, remaining)
                                         if remaining is not None else timeout)
-            except urllib.error.HTTPError:
-                # An HTTP response is not a frontend connection race.
-                raise
+            except urllib.error.HTTPError as error:
+                # /health may explicitly report loading. Only this readiness
+                # endpoint's 503 is transient; auth and API errors stay fatal.
+                if (path != '/health' or error.code != 503 or remaining is None
+                        or not self.ready_retry):
+                    raise
+                error.close()
+                time.sleep(min(1, max(0, self.ready_deadline - time.monotonic())))
             except (OSError, urllib.error.URLError) as error:
                 reason = getattr(error, 'reason', error)
                 # Never replay a POST whose delivery is uncertain. Only a refused
