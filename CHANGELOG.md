@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Keep startup readiness retries inside the existing total timeout. Retry
+  temporary health-check unavailability and refused first-generation
+  connections; authentication, validation and post-readiness failures remain
+  fatal. Do not replay a generation request with an uncertain delivery outcome.
+- Map launcher-owned measured default costs to the configured draft-depth
+  range. Preserve explicit cost tables, ordinary defaults and engine validation.
+
 ## 1.7.1 — 2026-10-04
 
 Engine: unchanged, `c1ce6491efe53934119d306d0a0501b475458e9b`; the same source with modification notices is fork commit `2a533cf80bab694bdbacb68119017905ece7ed5d` (comments only). Image: `ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62`, the 1.7.0 image with one added layer holding `/opt/image-tools/LICENSE` and `/opt/image-tools/THIRD_PARTY_NOTICES`; the other 19 layers are byte-identical, so nothing that runs has changed. No `.env` setting changed; `./start.sh update` only pulls the new image.
