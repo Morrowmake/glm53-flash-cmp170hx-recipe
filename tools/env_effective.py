@@ -184,11 +184,40 @@ def compare_commands(actual, expected, defaults):
             print(f"command: MATCH {key}={actual[key]!r}")
     return failures
 
+def resolve_launcher_aliases(actual, expected, command, defaults):
+    """Resolve launch-only variables; the full command comparison remains strict."""
+    fields = {
+        "FAIR_CHUNK": "prefill_chunk_with_decodes",
+        "FAIR_PARTIAL": "max_num_partial_prefills",
+        "PREFILL_CAP": "long_prefill_token_threshold",
+    }
+    for key, field in fields.items():
+        if key in expected:
+            if field in command or field in defaults:
+                actual[key] = str(command.get(field, defaults.get(field)))
+                print(f"environment: {key} resolved from --{field.replace('_', '-')}")
+    if "FAIR_PREFILL" in expected:
+        flags = ("prefill_chunk_with_decodes", "max_num_partial_prefills")
+        present = [field in command for field in flags]
+        if any(present) != all(present):
+            raise ValueError("inconsistent fair-prefill command arguments")
+        actual["FAIR_PREFILL"] = "1" if all(present) else "0"
+        print("environment: FAIR_PREFILL resolved from both fair-prefill command arguments")
+
+
 
 def compare_environment(actual, expected, getters, source, layout):
     failures = []
     matched = allowed = 0
     for key in sorted(set(actual) | set(expected)):
+        if key == "CUDA_DEVICE_ORDER":
+            if key not in actual and expected.get(key) == "PCI_BUS_ID":
+                print("environment: allowed CUDA_DEVICE_ORDER (validation harness; four identical cards; "
+                      "the recipe's P2P content check validates the order it gets)")
+                allowed += 1
+            else:
+                failures.append(f"environment: {key}: validation={expected.get(key)!r}, recipe={actual.get(key)!r}")
+            continue
         if key in actual and key in expected and actual[key] == expected[key]:
             print(f"environment: MATCH {key}" + (" (path)" if key in PATH_KEYS else f"={actual[key]!r}"))
             matched += 1
@@ -200,6 +229,14 @@ def compare_environment(actual, expected, getters, source, layout):
             reason = "validation tokens-details flag; ignored in command comparison"
         if key == "VLLM_ALLOW_PCIE_P2P_CUSTOM_ALLREDUCE" and layout == "pp4":
             reason = "PP4 has TP=1 and no tensor-parallel all-reduce"
+        if (key == "VLLM_GLM5_TP4_MARLIN_PREFILL" and layout == "pp4"
+                and key not in actual and expected.get(key) == "1"
+                and actual.get("VLLM_GLM5_PP_MARLIN_PREFILL") == "1"
+                and expected.get("VLLM_GLM5_PP_MARLIN_PREFILL") == "1"):
+            # The selector adds only intermediate N=512. PP whole experts
+            # have N=2048; warmup uses intermediate_size / TP, not all entries.
+            reason = ("PP4 whole experts use intermediate N=2048, not the TP4 selector's N=512; "
+                      f"vllm/ampere_prefill/pp_marlin_prefill.py:152-162,280-284,473-499 at {PIN[:10]}")
         # Missing exports can be equivalent only through the pinned fork getter.
         if reason is None and ((key in actual) != (key in expected)) and key in getters:
             value = actual[key] if key in actual else expected[key]
@@ -240,6 +277,7 @@ def check_effective(root, path, layout, fork, serve_log=None):
     if "GLM5_PP4_DRAFT_WIDTH" in expected:
         actual["GLM5_PP4_DRAFT_WIDTH"] = actual["VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH"]
         print("environment: GLM5_PP4_DRAFT_WIDTH resolved from adaptive draft width")
+    resolve_launcher_aliases(actual, expected, command, defaults)
     print(f"Full environment: layout={layout}; DRY=1; P2P=force; fork={PIN}")
     print("CPU fixture: optional Marlin module discoverable; no runtime imports")
     print("Capture excludes checker controls DRY/P2P/CUDA_VISIBLE_DEVICES and shell bookkeeping _")

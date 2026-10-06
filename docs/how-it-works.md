@@ -101,3 +101,24 @@ sparse-attention decode schedule is on in the engine itself.
 | Tools and reasoning | `--enable-auto-tool-choice`, glm47 tool-call and reasoning parsers |
 | Vision | images and video on |
 | Memory target | `--gpu-memory-utilization 0.95` |
+
+## Comparing launch configuration
+
+`tools/check-env-match.py --effective <saved-environment.json> --layout tp4|pp4
+--fork <engine-checkout>` compares a saved complete server environment and its
+adjacent `serve.log` with this recipe's CPU-only launch configuration.
+It checks the resolved command as well as feature settings: fair-prefill
+selectors (`FAIR_PREFILL`, `FAIR_CHUNK`, `FAIR_PARTIAL`) and `PREFILL_CAP`
+are compared with their actual command arguments, not silently ignored.
+
+The validation-only `CUDA_DEVICE_ORDER=PCI_BUS_ID` is allowed only when the
+recipe leaves the setting unset: the four identical cards' actual ordering
+is checked by the recipe's P2P content test. Other values, or a recipe export,
+are rejected. In PP4, a validation-only TP4 Marlin-prefill selector is allowed
+only when the whole-expert PP prefill path is enabled on both sides:
+its intermediate width is 2048, whereas that selector adds only width 512.
+Warmup uses the model's actual intermediate width divided by TP, so it does
+not compile or allocate an extra TP4 shape in PP4. The selector remains
+strictly compared in TP4. The checker prints the pinned source locations
+supporting this narrowly scoped exception.
+

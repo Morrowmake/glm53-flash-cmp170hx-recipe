@@ -134,3 +134,58 @@ def test_step_tile_defaults_banners_and_explicit_overrides(layout, default, over
     assert result.returncode == 0, result.stderr
     assert f"step_tile={override}" in result.stdout
     assert f"  VLLM_GLM5_DECODE_KDA_STEP_TILE={override}" in result.stdout
+
+
+@pytest.mark.parametrize("key,value,changed", [
+    ("FAIR_CHUNK", "384", "385"),
+    ("FAIR_PARTIAL", "2", "3"),
+    ("FAIR_PREFILL", "1", "0"),
+    ("PREFILL_CAP", "0", "1"),
+])
+def test_launcher_aliases_are_resolved_and_changed_values_fail(leg, key, value, changed):
+    leg[1][key] = value
+    assert run(leg) == 0
+    leg[1][key] = changed
+    assert run(leg) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("prefill_chunk_with_decodes", 385),
+    ("max_num_partial_prefills", 3),
+    ("long_prefill_token_threshold", 1),
+])
+def test_matching_alias_does_not_hide_changed_live_command(leg, field, value):
+    leg[1].update(FAIR_CHUNK="384", FAIR_PARTIAL="2", FAIR_PREFILL="1", PREFILL_CAP="0")
+    leg[2][field] = value
+    assert run(leg) == 1
+
+
+def test_only_harness_pci_bus_id_is_allowed(leg):
+    leg[1]["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    assert run(leg) == 0
+    leg[1]["CUDA_DEVICE_ORDER"] = "FASTEST_FIRST"
+    assert run(leg) == 1
+
+
+def test_recipe_cuda_device_order_is_not_allowlisted(leg, monkeypatch):
+    original = effective.dry_run
+    def with_order(*args):
+        actual, command, stdout = original(*args)
+        actual["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+        return actual, command, stdout
+    monkeypatch.setattr(effective, "dry_run", with_order)
+    leg[1]["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+    assert run(leg) == 1
+
+
+def test_tp4_selector_is_inert_only_with_pp4_whole_expert_path(leg):
+    leg[1]["VLLM_GLM5_TP4_MARLIN_PREFILL"] = "1"
+    assert run(leg) == 0
+    leg[1]["VLLM_GLM5_PP_MARLIN_PREFILL"] = "0"
+    assert run(leg) == 1
+
+
+def test_tp4_selector_mismatch_still_fails_tp4():
+    actual = {"VLLM_GLM5_TP4_MARLIN_PREFILL": "0", "VLLM_GLM5_PP_MARLIN_PREFILL": "1"}
+    expected = {"VLLM_GLM5_TP4_MARLIN_PREFILL": "1", "VLLM_GLM5_PP_MARLIN_PREFILL": "1"}
+    assert effective.compare_environment(actual, expected, {}, "", "tp4")
