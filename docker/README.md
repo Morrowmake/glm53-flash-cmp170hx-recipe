@@ -36,7 +36,7 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 Release 1.7.2 image tag (digest pending validation):
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>
+ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-ab60b723ad
 ```
 
 Its OCI revision is `ab60b723ada254a442a4ba5ff27bf837aa27ef83`. The rootless version is `1.7.2-` plus the
@@ -138,7 +138,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-ab60b723ad
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"
