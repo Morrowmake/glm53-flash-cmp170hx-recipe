@@ -3,6 +3,8 @@
 ## 1.7.2 — Unreleased
 
 Engine: `ab60b723ada254a442a4ba5ff27bf837aa27ef83`. Image: `ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>`;
+final digest: `<TBD from validation>`.
+
 - **TP4: lost context and endless repetition in long generations** (#7). With state
   recovery on (the TP4 default), a speculative step that ended exactly on a 1152-token
   block boundary with every draft token accepted wrote the recurrent state one block
