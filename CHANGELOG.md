@@ -43,6 +43,7 @@ final digest: `<TBD from validation>`.
   work with it (acceptance control, TP4 draft width) when you have not set them, so
   no "set but off" warnings appear. Behaviour is unchanged.
 - Docs: where to get the pinned FlashInfer 0.7.0 cubin wheels (GitHub release assets).
+
 Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
 `<TBD from validation>`. Existing results tables remain labelled 1.7.0
 until measurements for this release are available.
