@@ -44,9 +44,18 @@ digest `sha256:0d249835cb8502316403350a3cad9d531b46e5249e4076ecb70faa42067b5b7a`
   no "set but off" warnings appear. Behaviour is unchanged.
 - Docs: where to get the pinned FlashInfer 0.7.0 cubin wheels (GitHub release assets).
 
-Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
-`<TBD from validation>`. Existing results tables remain labelled 1.7.0
-until measurements for this release are available.
+Validation (4× CMP 170HX, P2P on, against 1.7.1 with alternating restarts): decode speed
+unchanged within noise at 1, 4, 6 and 8 users on TP4 and PP4 (e.g. TP4 1 user 178.5 → 177.8,
+8 users 508.1 → 507.7 tok/s); KV capacity unchanged (TP4 1,199,570 tokens); quality
+unchanged (TP4 HumanEval 162/164, GSM8K 1,284/1,319; PP4 HumanEval 161/164, GSM8K
+1,285/1,319, no significant change). New release checks pass on both layouts: long
+generations across many 1152-token boundaries, GPU memory flat over 200 prompt lengths,
+and 20 minutes of agent-style traffic without a stall. The results tables keep the 1.7.0
+measurements, which still hold.
+
+**Image:** this image carries no warm compilation-cache seed. The seed is off by default
+(`VLLM_IMAGE_CACHE_SEED=0`); if you turned it on, the first start compiles from cold, as
+on a default install.
 
 **Updating:** `./start.sh update` preserves `.env`. Remove explicit
 `VLLM_COMMIT` and `IMAGE` values to follow the new engine and image pins.
