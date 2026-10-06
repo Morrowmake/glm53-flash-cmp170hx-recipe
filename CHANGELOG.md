@@ -26,6 +26,9 @@ final digest: `<TBD from validation>`.
   cost table with the wrong number of entries and fail at startup. Select the
   measured default costs by absolute depth; explicit cost tables remain
   unchanged. Thanks to @liumorrisclaw (#5).
+- Setting `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` now also defaults the acceptance
+  controller and adaptive draft width to `0` when they are unset, rather than
+  leaving parts of adaptive drafting on. Explicit values are preserved.
 - Document the GitHub release source for pinned FlashInfer 0.7.0 cubin wheels.
 
 Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
@@ -34,9 +37,14 @@ until measurements for this release are available.
 
 **Updating:** `./start.sh update` preserves `.env`. Remove explicit
 `VLLM_COMMIT` and `IMAGE` values to follow the new engine and image pins.
-No new launcher switch or `.env` default is introduced. Narrower draft-depth
-ranges now select the matching default costs automatically; remove old
-explicit `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS` and
+No new launcher switch is introduced; ordinary adaptive-on defaults are
+unchanged. When `VLLM_GLM5_DFLASH_ADAPTIVE_K=0`, unset
+`VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` now defaults to `0` (was `1`), and unset
+`VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` defaults to `0` at TP4 (was `1`; PP4
+was already `0`). Remove explicit acceptance or draft-width lines only if
+you want them to follow that disable setting. Narrower draft-depth ranges
+select the matching default costs automatically; remove old explicit
+`VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS` and
 `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI` lines only if you want these defaults.
 
 ## 1.7.1 — 2026-10-04
