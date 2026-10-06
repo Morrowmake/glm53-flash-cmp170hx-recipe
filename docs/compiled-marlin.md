@@ -34,15 +34,16 @@ The compiled decode path is limited to eligible small batches in TP4 and PP4.
 Unsupported shapes use the released paths. This is not a universal kernel
 replacement, and no whole-server speedup is claimed here.
 
-The frozen preparation tree includes a TP4 compiled prefill tile kernel
-(`VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED`, default on). Shapes outside its
-gates use the existing split paths. The newer integrated tree also includes
-PP4 compiled wide-tile prefill (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`,
-default on), absent from the earlier frozen snapshot. Use a matching final
-engine pin and rebuilt library after validation.
+The release includes TP4 compiled prefill tiles
+(`VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED`, default on) and PP4 compiled
+wide-tile prefill (`VLLM_GLM5_PP_MARLIN_PREFILL_COMPILED`, default on).
+Shapes outside their gates use the existing split paths. In 1.7.2, prefill
+work blocks start in dependency order to avoid stalls; use the matching
+engine pin and rebuilt library.
 The old `VLLM_GLM5_MARLIN_PREFILL_CUDA` switch is ignored. The compiled library
-is rebuilt from `c1ce6491efe53934119d306d0a0501b475458e9b`; decode entry points retain their established outputs.
-Prefill throughput is recorded in [Results](results.md), on the final library.
+is rebuilt from `ab60b723ada254a442a4ba5ff27bf837aa27ef83`; decode entry points retain their established outputs.
+The published [Results](results.md) remain the 1.7.0 measurements until
+1.7.2 validation is complete.
 
 The pinned container image includes the optional library. To build it natively,
 use `RUNTIME=native VLLM_BUILD_AMPERE_MARLIN=1 ./start.sh install`.

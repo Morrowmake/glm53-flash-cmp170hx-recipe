@@ -1,14 +1,43 @@
 # Changelog
 
-## Unreleased
+## 1.7.2 — Unreleased
 
-- Keep startup readiness retries inside the existing total timeout. Retry
-  temporary connection failures and HTTP 503 during warm-up; authentication,
-  validation and post-readiness failures remain
-  fatal. Do not replay a generation request with an uncertain delivery outcome.
-- Map launcher-owned measured default costs to the configured draft-depth
-  range. Preserve explicit cost tables, ordinary defaults and engine validation.
+Engine: `ab60b723ada254a442a4ba5ff27bf837aa27ef83`. Image: `ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>`;
+final digest: `<TBD from validation>`.
+
+- Long prompts and reused prefixes could stall in compiled Marlin prefill.
+  Start its work blocks in dependency order so waiting blocks cannot prevent
+  the blocks they need from running. Thanks to @cibernox and @snoby (#4).
+- TP4 recovery could select the wrong KDA state when a reused prefix ended
+  exactly on a cache-block boundary. Select the matching boundary state and
+  keep the null-block marker fixed during kernel compilation. Thanks to
+  @YulHeon (#7) and @seanphan for confirming the report.
+- Overlapping prompt processing could retain oversized scratch buffers or
+  reuse storage still owned by earlier work. Bound scratch storage and retain
+  buffer ownership until that work completes. Thanks to @dfmcintosh-hash (#9).
+- Requests restoring a cached prefix could pad the remaining prompt to a
+  block boundary, changing which tokens were processed. Preserve the original
+  prompt tail with every boundary-cache policy. Thanks to @YulHeon (#10).
+- Startup checks could fail while the API was still warming up. Retry temporary
+  connection failures and HTTP 503 only within the original readiness timeout;
+  do not retry authentication or validation errors, or replay a generation
+  request whose delivery is uncertain. Thanks to @dfmcintosh-hash (#9).
+- Users choosing a narrower adaptive draft-depth range could inherit a default
+  cost table with the wrong number of entries and fail at startup. Select the
+  measured default costs by absolute depth; explicit cost tables remain
+  unchanged. Thanks to @liumorrisclaw (#5).
 - Document the GitHub release source for pinned FlashInfer 0.7.0 cubin wheels.
+
+Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
+`<TBD from validation>`. Existing results tables remain labelled 1.7.0
+until measurements for this release are available.
+
+**Updating:** `./start.sh update` preserves `.env`. Remove explicit
+`VLLM_COMMIT` and `IMAGE` values to follow the new engine and image pins.
+No new launcher switch or `.env` default is introduced. Narrower draft-depth
+ranges now select the matching default costs automatically; remove old
+explicit `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS` and
+`VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS_MULTI` lines only if you want these defaults.
 
 ## 1.7.1 — 2026-10-04
 

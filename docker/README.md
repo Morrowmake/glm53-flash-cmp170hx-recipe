@@ -7,8 +7,8 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 
 ## What the image contains
 
-- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/c1ce6491efe53934119d306d0a0501b475458e9b)
-  pinned at `c1ce6491efe53934119d306d0a0501b475458e9b` (1.7.0, on upstream `e55d076f89`), installed
+- **Engine:** the [vLLM fork](https://github.com/Morrowmake/vllm-cmp170hx/tree/ab60b723ada254a442a4ba5ff27bf837aa27ef83)
+  pinned at `ab60b723ada254a442a4ba5ff27bf837aa27ef83` (1.7.2, on upstream `e55d076f89`), installed
   the way the native install does it: Python 3.12, torch 2.13.0 (CUDA 13.0
   build), the fork installed editable in `/opt/venv` with upstream's
   precompiled extensions, then the runtime extras the engine pins (FlashInfer
@@ -33,14 +33,14 @@ image, how to build it, and how to run it by hand without `./start.sh`.
 - **Seed mount:** `/opt/cache-seed` exists even when no seed is included.
 - **No weights.** The two checkpoints are mounted from the host.
 
-Release image digest (1.7.1: the accepted 1.7.0 image with one added layer carrying the licence notices; its other 19 layers are byte-identical):
+Release 1.7.2 image tag (digest pending validation):
 
 ```
-ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62
+ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>
 ```
 
-Its OCI revision is `c1ce6491efe53934119d306d0a0501b475458e9b`. The rootless version is `1.7.0-` plus the
-first ten commit characters; the Docker builder labels the version `1.7.0`.
+Its OCI revision is `ab60b723ada254a442a4ba5ff27bf837aa27ef83`. The rootless version is `1.7.2-` plus the
+first ten commit characters; the Docker builder labels the version `1.7.2`.
 
 ## Build it
 
@@ -97,7 +97,7 @@ existing toolkit. Validate real-image startup before selecting a new `IMAGE` pin
 Build the release source with Docker:
 
 ```bash
-bash docker/build-docker.sh vllm-cmp170hx:1.7.0-c1ce6491efe53934119d306d0a0501b475458e9b
+bash docker/build-docker.sh vllm-cmp170hx:1.7.2-ab60b723ad
 ```
 
 Both build paths print the total filesystem layer count, including the base,
@@ -138,7 +138,7 @@ You need:
 From the root of this repository:
 
 ```bash
-IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62
+IMAGE=ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>
 MODELS=$PWD/models                  # holds GLM-5.3-Flash-W4A16-MTP and GLM-5.3-Flash-DFlash2
 CACHE=$PWD/cache                    # kernel compile caches, kept between starts
 mkdir -p "$CACHE"

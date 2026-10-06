@@ -5,9 +5,9 @@
   <br><br>
   <a href="https://x.com/Morrowmake"><img alt="Follow on X" src="https://img.shields.io/badge/Follow-%40Morrowmake-000000?style=flat&logo=x&logoColor=white"></a>
   &nbsp;
-  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/c1ce6491efe53934119d306d0a0501b475458e9b"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20c1ce6491efe53934119d306d0a0501b475458e9b-4b32c3?style=flat"></a>
+  <a href="https://github.com/Morrowmake/vllm-cmp170hx/tree/ab60b723ada254a442a4ba5ff27bf837aa27ef83"><img alt="engine" src="https://img.shields.io/badge/engine-vLLM%20fork%20%40%20ab60b723ada254a442a4ba5ff27bf837aa27ef83-4b32c3?style=flat"></a>
   &nbsp;
-  <img alt="release" src="https://img.shields.io/badge/release-1.7.1-2ea44f?style=flat">
+  <img alt="release" src="https://img.shields.io/badge/release-1.7.2-2ea44f?style=flat">
   &nbsp;
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
@@ -147,7 +147,7 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 **This recipe** — the scripts and the documentation — is MIT, © 2026 Morrowmake.
 See [LICENSE](LICENSE).
 
-**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/c1ce6491efe53934119d306d0a0501b475458e9b/LICENSE).
+**The vLLM fork** is [Apache-2.0](https://github.com/Morrowmake/vllm-cmp170hx/blob/ab60b723ada254a442a4ba5ff27bf837aa27ef83/LICENSE).
 
 The downloaded models have separate licences:
 

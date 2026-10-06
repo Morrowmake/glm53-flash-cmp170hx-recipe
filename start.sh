@@ -151,10 +151,10 @@ VLLM_BRANCH="${VLLM_BRANCH:-ampere}"
 # This release's engine: the fork commit, the upstream nightly wheel whose
 # compiled extensions match that commit's upstream base (e55d076f89 has no
 # wheel of its own; b6761e8ded's C++, CUDA and Rust sources are identical to
-# it), and the container image built from them, pinned by digest.
-RELEASE_VLLM_COMMIT=c1ce6491efe53934119d306d0a0501b475458e9b
+# it), and the container image built from them. The image pin below awaits validation.
+RELEASE_VLLM_COMMIT=ab60b723ada254a442a4ba5ff27bf837aa27ef83
 RELEASE_WHEEL_COMMIT=b6761e8ded57ef85b708f34af8cab1649eae1069
-RELEASE_IMAGE=ghcr.io/morrowmake/vllm-cmp170hx@sha256:343a15f5d60fe4f00898391efd5998109ff90ecdb9a242bac44f42332d176a62
+RELEASE_IMAGE='ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>'
 VLLM_COMMIT="${VLLM_COMMIT:-$RELEASE_VLLM_COMMIT}"
 IMAGE="${IMAGE:-$RELEASE_IMAGE}"
 MODELS_DIR="${MODELS_DIR:-$SCRIPT_DIR/models}"
