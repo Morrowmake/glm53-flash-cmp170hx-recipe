@@ -3,36 +3,44 @@
 ## 1.7.2 — Unreleased
 
 Engine: `ab60b723ada254a442a4ba5ff27bf837aa27ef83`. Image: `ghcr.io/morrowmake/vllm-cmp170hx:1.7.2-<short sha>`;
-final digest: `<TBD from validation>`.
-
-- Long prompts and reused prefixes could stall in compiled Marlin prefill.
-  Start its work blocks in dependency order so waiting blocks cannot prevent
-  the blocks they need from running. Thanks to @cibernox and @snoby (#4).
-- TP4 recovery could select the wrong KDA state when a reused prefix ended
-  exactly on a cache-block boundary. Select the matching boundary state and
-  keep the null-block marker fixed during kernel compilation. Thanks to
-  @YulHeon (#7) and @seanphan for confirming the report.
-- Overlapping prompt processing could retain oversized scratch buffers or
-  reuse storage still owned by earlier work. Bound scratch storage and retain
-  buffer ownership until that work completes. Thanks to @dfmcintosh-hash (#9).
-- Requests restoring a cached prefix could pad the remaining prompt to a
-  block boundary, changing which tokens were processed. Preserve the original
-  prompt tail with every boundary-cache policy. Thanks to @YulHeon (#10).
-- Startup checks could fail while the API was still warming up. Retry temporary
-  connection failures and HTTP 503 only within the original readiness timeout;
-  do not retry authentication or validation errors, or replay a generation
-  request whose delivery is uncertain. Thanks to @dfmcintosh-hash (#9).
-- Users choosing a narrower adaptive draft-depth range could inherit a default
-  cost table with the wrong number of entries and fail at startup. Select the
-  measured default costs by absolute depth; explicit cost tables remain
-  unchanged. Thanks to @liumorrisclaw (#5).
-- Setting `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` now also defaults the acceptance
-  controller and adaptive draft width to `0` when they are unset, rather than
-  leaving parts of adaptive drafting on. Explicit values are preserved.
-- Document the GitHub release source for pinned FlashInfer 0.7.0 cubin wheels.
-- Keep slow-readiness and depth/kill-switch regression checks in the recipe's
-  CPU test suite, including real native configuration checks when installed.
-
+- **TP4: lost context and endless repetition in long generations** (#7). With state
+  recovery on (the TP4 default), a speculative step that ended exactly on a 1152-token
+  block boundary with every draft token accepted wrote the recurrent state one block
+  too far, and the next step read stale state: the text broke off mid-word and looped
+  until `max_tokens`. The state now goes to the block that holds the last accepted
+  token. In our test, 16 long generations crossing 142 boundaries looped 5 times on
+  1.7.1 and never on 1.7.2. Thanks to @YulHeon for the diagnosis and patch, and to
+  @seanphan for confirming it on a second machine.
+- **GPU memory grew over hours of serving until out-of-memory** (#9). A prefill
+  scratch buffer was kept for every distinct prompt length and never freed (hundreds
+  of MB per card after a few hundred lengths, several GB over a day of agent
+  traffic). It is now one reusable buffer per card; outputs are byte-identical.
+  Thanks to @dfmcintosh-hash for finding it and proposing the fix.
+- **Garbage output after a cached prefix that was not a local GPU hit** (#10). When a
+  prompt had exactly one token left after its cached prefix and that prefix came from
+  a KV connector, or the request had been preempted before its first output token,
+  the last prompt token ran as a speculative step and the output was garbage from
+  the first token. Such steps now run as a normal prompt step, with the boundary
+  cache on or off. Thanks to @YulHeon for the diagnosis and patch.
+- **Compiled Marlin MoE prefill no longer needs the whole GPU to itself** (#4). Its
+  work blocks waited for each other in an order that could stall if another kernel
+  held part of the GPU. They now start in dependency order. Outputs are
+  bit-identical and prefill cost is unchanged within 0.5 %. We could not reproduce
+  the hangs reported in #4 and cannot say this fix explains them; see the issue.
+  Thanks to @cibernox and @snoby.
+- **The startup check no longer stops a healthy launch that is slow to warm up** (#5).
+  Connection errors and HTTP 503 while the engine initialises are retried within
+  `READY_TIMEOUT`; wrong output and authentication errors still fail. Thanks to
+  @liumorrisclaw.
+- **Narrowing the draft-depth limits keeps acceptance-aware depth on** (#9). Setting
+  `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` below the defaults used to turn it off with a
+  warning, because the default cost tables did not match; the launcher now picks the
+  matching entries. Explicit cost tables are used as given. Thanks to
+  @dfmcintosh-hash.
+- Setting `VLLM_GLM5_DFLASH_ADAPTIVE_K=0` now also turns off the settings that only
+  work with it (acceptance control, TP4 draft width) when you have not set them, so
+  no "set but off" warnings appear. Behaviour is unchanged.
+- Docs: where to get the pinned FlashInfer 0.7.0 cubin wheels (GitHub release assets).
 Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
 `<TBD from validation>`. Existing results tables remain labelled 1.7.0
 until measurements for this release are available.
