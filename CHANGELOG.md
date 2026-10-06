@@ -30,6 +30,10 @@ final digest: `<TBD from validation>`.
   controller and adaptive draft width to `0` when they are unset, rather than
   leaving parts of adaptive drafting on. Explicit values are preserved.
 - Document the GitHub release source for pinned FlashInfer 0.7.0 cubin wheels.
+- Keep unset acceptance and draft-width switches off when adaptive depth is
+  explicitly disabled; preserve explicit switches and ordinary defaults.
+- Keep slow-readiness and depth/kill-switch regression checks in the recipe's
+  CPU test suite, including real native configuration checks when installed.
 
 Validation: TP4 / PP4 throughput, KV capacity, quality and startup measurements:
 `<TBD from validation>`. Existing results tables remain labelled 1.7.0

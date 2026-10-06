@@ -2,14 +2,23 @@
 import errno
 import importlib.util
 import io
+import http.server
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+import threading
+import time
 from pathlib import Path
 import urllib.error
 from unittest.mock import Mock
 
 import pytest
 
-spec = importlib.util.spec_from_file_location(
-    'recipe_boot_check', Path(__file__).resolve().parents[2] / 'boot_check.py')
+ROOT = Path(os.environ.get('RECIPE_TEST_ROOT', Path(__file__).resolve().parents[2]))
+spec = importlib.util.spec_from_file_location('recipe_boot_check', ROOT / 'boot_check.py')
 boot = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(boot)
 
@@ -85,3 +94,84 @@ def test_without_startup_mode_503_is_fatal(client):
     with pytest.raises(urllib.error.HTTPError):
         client.open('/metrics')
     assert client.opener.open.call_count == 1
+
+
+@pytest.mark.parametrize('runtime', ['native', 'container'])
+@pytest.mark.parametrize('failure', ['transport', '503'])
+def test_slow_frontend_handoff(runtime, failure, tmp_path):
+    """Run the actual owner and boot-check CLI against a warming HTTP frontend."""
+    state = {'ready_at': None, 'errors': 0, 'posts': 0, 'counts': [0, 0, 0, 0]}
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def send(self, text, status=200):
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(text.encode())
+
+        def do_GET(self):
+            if self.path == '/health':
+                self.send('{}')
+                return
+            if state['ready_at'] is None:
+                state['ready_at'] = time.monotonic() + 1.2
+            if time.monotonic() < state['ready_at']:
+                state['errors'] += 1
+                if failure == '503':
+                    self.send('{}', 503)
+                else:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                    self.connection.close()
+                return
+            names = ('spec_decode_num_drafts_total', 'spec_decode_num_draft_tokens_total',
+                     'spec_decode_num_accepted_tokens_total', 'request_success_total')
+            self.send('\n'.join(f'vllm:{key} {value}'
+                                for key, value in zip(names, state['counts'])))
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            state['posts'] += 1
+            if body.get('stream'):
+                state['counts'] = [64, 64, 1, 2]
+                self.send('data: {"choices":[{"delta":{"content":"code"}}]}\n\n'
+                          'data: [DONE]\n\n')
+            else:
+                state['counts'][3] += 1
+                self.send('{"choices":[{"message":{"content":"OK"}}]}')
+
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    function = re.search(r'^wait_ready\(\) \{\n.*?^\}',
+                         (ROOT / 'start.sh').read_text(), re.M | re.S).group()
+    log = tmp_path / 'serve.log'
+    log.touch()
+    script = '''set -euo pipefail
+SCRIPT_DIR="$1"; PORT="$2"; PID="$3"; RUNTIME="$4"; SERVE_LOG="$5"; STOPFILE="$6"
+CLIENT_HOST=127.0.0.1; HOST=127.0.0.1; SERVED_MODEL_NAME=test
+LAUNCHED=1; BOOT_CHECK=1; READY_TIMEOUT=8; PIDFILE=/dev/null; DRY=""
+log() { echo "$*"; }; warn() { echo "$*" >&2; }
+read_pid() { echo "$PID"; }
+health_ok() { curl -fsS -m 1 "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; }
+server_alive() { kill -0 "$PID" 2>/dev/null; }
+do_stop() { echo stopped >> "$STOPFILE"; }
+kv_line() { :; }; served_id() { echo test; }
+''' + function + '\nwait_ready\n'
+    stop = tmp_path / 'stop'
+    try:
+        result = subprocess.run(
+            ['bash', '-c', script, 'owner', str(ROOT), str(server.server_port),
+             str(os.getpid()), runtime, str(log), str(stop)],
+            env={**os.environ, 'API_KEY': 'readiness-test'},
+            capture_output=True, text=True, timeout=15)
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert 'PASS:' in result.stdout
+        assert state['errors'] > 0
+        assert state['posts'] == 2
+        assert not stop.exists()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

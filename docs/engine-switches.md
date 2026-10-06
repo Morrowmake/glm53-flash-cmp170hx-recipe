@@ -67,6 +67,13 @@ would get, so you can check what is on. It runs the preflight and says whether
 a real start would pull or download, but pulls, downloads and launches nothing,
 so it also works before the first install.
 
+CPU regression checks live in `tools/tests`: run `python -m pytest -q tools/tests`.
+They exercise slow frontend readiness and the launcher's depth/kill-switch
+combinations. With the native fork installed, they also consume the effective
+environment through its real configuration methods without loading a model or
+initialising CUDA; those engine-contract cases are skipped before installation.
+`RECIPE_TEST_ENGINE=/path/to/fork` selects a specific installed source tree.
+
 ## Other engine settings
 
 | Variable | Default | What it does |
@@ -77,9 +84,9 @@ so it also works before the first install.
 | `VLLM_GLM5_MARLIN_DECODE_VARIANT` | `orig` | compiled decode reduction order: `orig` (faster) or `exact` (released order) |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K` | `1` | adaptive draft depth; `0` restores the fixed depth (`SPEC_N`) and the 3460 TP4 token budget |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_DEPTHS` | `7,5` | deepest verified depth at 1 and 2 requests; `SPEC_N` beyond. The TP4 token budget follows the deepest depth (3456 + 7 = 3463) |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | `1` | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_K_ACCEPT` | follows `ADAPTIVE_K` if unset | within those limits, each request's depth follows its own acceptance and the per-depth step costs below; `0` always uses the deepest allowed depth. Explicit values are preserved |
 | `VLLM_GLM5_DFLASH_ADAPTIVE_K_COSTS`, `_COSTS_MULTI` | measured, per layout | relative step costs measured for depths 3–7, alone and with several requests. Unset defaults are sliced by absolute depth when the allowed range is narrowed (for example, `DEPTHS=5,5` with `SPEC_N=3` uses the entries for 3–5). Explicit tables, including empty values, remain unchanged for engine validation |
-| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4; `0` under PP4 | the drafter computes only the verified depth; `0` always drafts the deepest block |
+| `VLLM_GLM5_DFLASH_ADAPTIVE_DRAFT_WIDTH` | `1` under TP4 with `ADAPTIVE_K=1`; otherwise `0` | the drafter computes only the verified depth; `0` always drafts the deepest block. Explicit values are preserved |
 | `VLLM_CUSTOM_ALLREDUCE_FLAGS` | `1` | flags-in-data all-reduce at TP4 with verified P2P; `0` disables it |
 | `VLLM_GLM5_DFLASH_BOUNDARY_CACHE` | `1` | cached prompt-boundary reuse; `0` disables it |
 | `VLLM_PP_LAYER_PARTITION` | `13,11,11,10` | PP4 layer split |
