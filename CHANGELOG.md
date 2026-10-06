@@ -15,7 +15,7 @@ digest `sha256:0d249835cb8502316403350a3cad9d531b46e5249e4076ecb70faa42067b5b7a`
   @seanphan for confirming it on a second machine.
 - **GPU memory grew over hours of serving until out-of-memory** (#9). A prefill
   scratch buffer was kept for every distinct prompt length and never freed (hundreds
-  of MB per card after a few hundred lengths, several GB over a day of agent
+  of MB per card after a few hundred lengths, several GB over a day of multi-turn
   traffic). It is now one reusable buffer per card; outputs are byte-identical.
   Thanks to @dfmcintosh-hash for finding it and proposing the fix.
 - **Garbage output after a cached prefix that was not a local GPU hit** (#10). When a
@@ -50,7 +50,7 @@ unchanged within noise at 1, 4, 6 and 8 users on TP4 and PP4 (e.g. TP4 1 user 17
 unchanged (TP4 HumanEval 162/164, GSM8K 1,284/1,319; PP4 HumanEval 161/164, GSM8K
 1,285/1,319, no significant change). New release checks pass on both layouts: long
 generations across many 1152-token boundaries, GPU memory flat over 200 prompt lengths,
-and 20 minutes of agent-style traffic without a stall. The results tables keep the 1.7.0
+and 20 minutes of long multi-turn conversations without a stall. The results tables keep the 1.7.0
 measurements, which still hold.
 
 **Image:** this image carries no warm compilation-cache seed. The seed is off by default
