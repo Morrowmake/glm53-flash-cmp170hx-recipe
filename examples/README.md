@@ -13,6 +13,7 @@ server on another machine ([Serving other machines](../docs/how-to-use.md#servin
 | [`tool_call.py`](tool_call.py) | a full tool-call round trip |
 | [`tp4.env`](tp4.env) | the default layout, tensor-parallel 4 |
 | [`pp4.env`](pp4.env) | pipeline-parallel 4 |
+| [`tp2pp2.env`](tp2pp2.env) | hybrid: two PP stages of TP=2 each (scaffold; retune before trusting numbers) |
 
 The Python examples need `pip install openai`. The `.env` files are starting
 points for the repository's `.env`; every setting is described in

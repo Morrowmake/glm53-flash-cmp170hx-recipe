@@ -47,6 +47,15 @@
 #                  of the layers and passes activations on: much faster
 #                  prefill, about twice the KV, many parallel users, and far
 #                  less traffic between the cards. Measured on x16 links.
+#   tp2pp2         two pipeline stages, each a TP=2 pair (PP=2, TP=2). First-
+#                  class scaffold: all PP>1 and TP>1 optimisations engage
+#                  (prefill overlap, host-staged all-reduce, local logits,
+#                  packed hop, spread decodes, drafter tail stage, PP block
+#                  size, both prefill-kernel families -- the engine's own
+#                  shape gates decide which fire for 2-rank shards). The
+#                  layer partition and chunk defaults are not independently
+#                  measured here; override via VLLM_PP_LAYER_PARTITION and
+#                  MAX_BATCHED if you tune.
 #   An explicit PP/TP still wins over LAYOUT.
 #
 # ===== sm_80 feature flags ==================================================
@@ -191,7 +200,8 @@ LAYOUT=${LAYOUT:-tp4}
 case "$LAYOUT" in
   tp4) ;;
   pp4) PP=${PP:-4}; TP=${TP:-1} ;;
-  *) echo "serve.sh: unknown LAYOUT '$LAYOUT' (expected tp4 or pp4)" >&2; exit 2 ;;
+  tp2pp2) PP=${PP:-2}; TP=${TP:-2} ;;   # two PP stages, each a TP=2 pair
+  *) echo "serve.sh: unknown LAYOUT '$LAYOUT' (expected tp4, pp4 or tp2pp2)" >&2; exit 2 ;;
 esac
 PP=${PP:-1}; TP=${TP:-4}   # PP*TP must be 4
 # Under PP the balanced layer split is 3 dense + 42 MoE (~3.8 GiB each). MTP keeps a 13.8 GiB BF16
@@ -199,6 +209,14 @@ PP=${PP:-1}; TP=${TP:-4}   # PP*TP must be 4
 # MLA tensors, so it uses the non-MTP split.
 if [ "$PP" = "4" ]; then
   if [ "$MODE" = "mtp" ]; then DEFAULT_PART=14,12,12,7; else DEFAULT_PART='13,11,11,10'; fi
+  export VLLM_PP_LAYER_PARTITION="${VLLM_PP_LAYER_PARTITION:-$DEFAULT_PART}"
+elif [ "$PP" = "2" ]; then
+  # Two stages. With TP=2 inside each stage, per-rank weight budget is half
+  # that of pure PP, so the dflash split only has to balance layer count. MTP
+  # keeps its 13.8 GiB BF16 draft on the last stage, so the last stage holds
+  # fewer MoE layers to compensate. These defaults are not independently
+  # measured on tp2pp2; set VLLM_PP_LAYER_PARTITION to override.
+  if [ "$MODE" = "mtp" ]; then DEFAULT_PART='29,16'; else DEFAULT_PART='23,22'; fi
   export VLLM_PP_LAYER_PARTITION="${VLLM_PP_LAYER_PARTITION:-$DEFAULT_PART}"
 elif [ -n "${VLLM_PP_LAYER_PARTITION:-}" ]; then export VLLM_PP_LAYER_PARTITION; else unset VLLM_PP_LAYER_PARTITION; fi
 # KV block size under PP with DFlash2. Each stage holds the full 64-head
@@ -214,11 +232,14 @@ if [ "$PP" -gt 1 ] && [ "$MODE" = "dflash" ]; then BLOCK_ARGS=(--block-size "${B
 # (-6% KV tokens). Off by default -- the KV is worth more here. Sharded table under PP-only.
 if [ "$TP" -gt 1 ]; then export VLLM_GLM5_REPLICATED_EMBED=${VLLM_GLM5_REPLICATED_EMBED:-0}; fi
 
-# --- pipeline-parallel (PP4) --------------------------------------------------
-# Stage 2 runs the drafter's final step. Outputs identical; paired PP4 runs
-# gained 7.1% at four users and 3.8% at eight. Kill switch: -1.
-if [ "$LAYOUT" = pp4 ]; then
-  export VLLM_PP_DRAFT_TAIL_STAGE=${VLLM_PP_DRAFT_TAIL_STAGE:-2}
+# --- pipeline-parallel (PP>1) -------------------------------------------------
+# The last-ish pipeline stage runs the drafter's final step. Outputs identical;
+# paired PP4 runs gained 7.1% at four users and 3.8% at eight. Default is stage 2
+# in a 4-stage pipeline, stage 1 (the last) in a 2-stage pipeline. Kill switch: -1.
+if [ "$PP" -gt 1 ]; then
+  if [ "$PP" = 4 ]; then DRAFT_TAIL_DEFAULT=2; else DRAFT_TAIL_DEFAULT=$((PP - 1)); fi
+  export VLLM_PP_DRAFT_TAIL_STAGE=${VLLM_PP_DRAFT_TAIL_STAGE:-$DRAFT_TAIL_DEFAULT}
+  unset DRAFT_TAIL_DEFAULT
   echo "serve.sh: pipeline: DRAFT_TAIL_STAGE=$VLLM_PP_DRAFT_TAIL_STAGE"
 fi
 
@@ -249,40 +270,115 @@ fi
 # 8.2K-token prompt; TP4 (16 heads): the first chunk's kernel 1.58x faster.
 # Kill switch: 0.
 export VLLM_GLM5_SMLA_PREFILL_PRED_LOAD=${VLLM_GLM5_SMLA_PREFILL_PRED_LOAD:-1}
-# PP4 prefill kernels (LAYOUT=pp4 only; each gated in the engine to 64 heads /
-# whole experts on sm_80): linear-attention (KDA) chunked prefill, a new
-# sparse-attention prefill kernel and a split-block Marlin MoE prefill. Each is
-# at least as accurate as the code it replaces against a 64-bit reference on
-# real inputs. With the gather above: cold prefill +19.5%. Kill switches: 0.
-if [ "$LAYOUT" = pp4 ]; then
+# PP prefill kernels (any PP>1; each gated in the engine to 64 heads / whole
+# experts on sm_80, so they only fire where the per-rank shape matches): linear-
+# attention (KDA) chunked prefill, a new sparse-attention prefill kernel and a
+# split-block Marlin MoE prefill. Each is at least as accurate as the code it
+# replaces against a 64-bit reference on real inputs. With the gather above:
+# cold prefill +19.5% on PP4. Under tp2pp2 the engine's own shape gates decide
+# which actually fire. Kill switches: 0.
+if [ "$PP" -gt 1 ]; then
   export VLLM_GLM5_PP_KDA_PREFILL=${VLLM_GLM5_PP_KDA_PREFILL:-1}
   export VLLM_GLM5_PP_SPARSE_MLA_PREFILL=${VLLM_GLM5_PP_SPARSE_MLA_PREFILL:-1}
   export VLLM_GLM5_PP_MARLIN_PREFILL=${VLLM_GLM5_PP_MARLIN_PREFILL:-1}
-  echo "serve.sh: PP4 prefill kernels: KDA=$VLLM_GLM5_PP_KDA_PREFILL SPARSE_MLA=$VLLM_GLM5_PP_SPARSE_MLA_PREFILL MARLIN=$VLLM_GLM5_PP_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
+  echo "serve.sh: PP prefill kernels: KDA=$VLLM_GLM5_PP_KDA_PREFILL SPARSE_MLA=$VLLM_GLM5_PP_SPARSE_MLA_PREFILL MARLIN=$VLLM_GLM5_PP_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
 fi
-# TP4 prefill kernels (LAYOUT=tp4 only; gated in the engine to sm_80): the
-# KDA chunked prefill at 16 heads (1.42x per prompt per card) and the
-# split-block Marlin MoE prefill at TP4 shards (1.24x; from 384 tokens,
-# VLLM_GLM5_TP4_MARLIN_PREFILL_MIN_TOKENS). Accuracy against a 64-bit reference
-# at least equal to the code they replace. Kill switches: 0.
-if [ "$LAYOUT" = tp4 ]; then
+# TP prefill kernels (any TP>1; gated in the engine to sm_80 and the matching
+# per-rank head count): the KDA chunked prefill at 16 heads (1.42x per prompt
+# per card at TP4) and the split-block Marlin MoE prefill at TP shards (1.24x;
+# from 384 tokens, VLLM_GLM5_TP4_MARLIN_PREFILL_MIN_TOKENS). Accuracy against a
+# 64-bit reference at least equal to the code they replace. Under tp2pp2 the
+# engine's own shape gates decide which actually fire. Kill switches: 0.
+if [ "$TP" -gt 1 ]; then
   export VLLM_GLM5_TP4_KDA_PREFILL=${VLLM_GLM5_TP4_KDA_PREFILL:-1}
   export VLLM_GLM5_TP4_MARLIN_PREFILL=${VLLM_GLM5_TP4_MARLIN_PREFILL:-1}
-  echo "serve.sh: TP4 prefill kernels: KDA=$VLLM_GLM5_TP4_KDA_PREFILL MARLIN=$VLLM_GLM5_TP4_MARLIN_PREFILL PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
+  # tp2pp2 (TP=2): opt into the 32-head KDA prefill path. The fork's kernel
+  # body is head-count-generic; the gate just needs permission for the
+  # 32-head shape. Validate against a baseline (accepted/step rate must
+  # match within noise) before trusting it in production.
+  if [ "$TP" = 2 ]; then
+    export VLLM_GLM5_TP2_KDA_PREFILL=${VLLM_GLM5_TP2_KDA_PREFILL:-1}
+    export VLLM_GLM5_TP2_MARLIN_PREFILL=${VLLM_GLM5_TP2_MARLIN_PREFILL:-1}
+  fi
+  echo "serve.sh: TP prefill kernels: KDA=$VLLM_GLM5_TP4_KDA_PREFILL MARLIN=$VLLM_GLM5_TP4_MARLIN_PREFILL${VLLM_GLM5_TP2_KDA_PREFILL:+ TP2_KDA=$VLLM_GLM5_TP2_KDA_PREFILL}${VLLM_GLM5_TP2_MARLIN_PREFILL:+ TP2_MARLIN=$VLLM_GLM5_TP2_MARLIN_PREFILL} PRED_LOAD=$VLLM_GLM5_SMLA_PREFILL_PRED_LOAD"
 fi
 
-# Release state recovery and peer collective defaults; explicit overrides win.
-if [ "$LAYOUT" = tp4 ]; then
-  export VLLM_GLM5_DECODE_KDA_STEP_TILE=${VLLM_GLM5_DECODE_KDA_STEP_TILE:-1}
-else
-  export VLLM_GLM5_DECODE_KDA_STEP_TILE=${VLLM_GLM5_DECODE_KDA_STEP_TILE:-0}
-fi
-if [ "$TP" = 4 ] && [ "$PP" = 1 ]; then
+# ============================================================================
+# Per-layout orchestration defaults (dispatch model, 1.7.3+)
+#
+# Three guard layers, by job:
+#   1. LAYOUT string:    orchestration defaults that genuinely differ by
+#                        layout (step tile, strict TP=4 state recovery,
+#                        strict PP=4 Marlin decode mid/multi, all-reduce
+#                        max-bytes crossover scaled by TP rank count).
+#   2. TP/PP guards:     kernel-FAMILY enables (TP prefill kernels when
+#                        TP>1; PP prefill kernels when PP>1; prefill
+#                        overlap, local logits, selector shard, host-shm
+#                        all-reduce). Each engine kernel then runs its
+#                        own shape gate (head count, expert slice) and
+#                        picks a tile variant per rank.
+#   3. Engine shape gate: picks the right kernel variant for the actual
+#                        per-rank shape (16/32/64 heads, quarter/half/
+#                        whole expert slice). Lives in the fork; the
+#                        launcher does not need to know.
+#
+# tp2pp2 engages every TP>1 and PP>1 kernel family; the engine shape gate
+# then decides which fire at the 32-head / half-expert shard. New fork
+# kernel variants are picked up automatically.
+# ============================================================================
+case "$LAYOUT" in
+  tp4)
+    # Strict TP=4 state recovery + TP-shaped step tile, measured.
+    VLLM_GLM5_DECODE_KDA_STEP_TILE_DEFAULT=1
+    VLLM_GLM5_DECODE_KDA_V2_DEEP_DEFAULT=1
+    VLLM_GLM5_KDA_RECOVER_DEFAULT=1
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_DEFAULT=1
+    # 262,144 B crossover was tuned at TP=4 ranks on Gen2 x16.
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES_DEFAULT=262144
+    VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS_DEFAULT=0
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_DEFAULT=0
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS_DEFAULT=9-32
+    ;;
+  pp4)
+    # No TP all-reduce to retune; whole-expert Marlin decode fires.
+    VLLM_GLM5_DECODE_KDA_STEP_TILE_DEFAULT=0
+    VLLM_GLM5_DECODE_KDA_V2_DEEP_DEFAULT=0
+    VLLM_GLM5_KDA_RECOVER_DEFAULT=0
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_DEFAULT=0
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES_DEFAULT=262144
+    VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS_DEFAULT=1
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_DEFAULT=1
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS_DEFAULT=9-64
+    ;;
+  tp2pp2)
+    # 2 TP ranks share each stage: all-reduce is cheaper per call, so the
+    # custom-all-reduce crossover goes smaller. KDA step tile stays off
+    # until a 2-rank step tile is measured. KDA v2 DEEP admits 32 heads
+    # since the fork patch landed the shape (VLLM_GLM5_DECODE_KDA_V2_DEEP
+    # was previously strict TP=4+PP=1; the 32-head admit unlocks it for
+    # 1u and 2u decode where tokens_per_seq exceeds the shallow cap of 5).
+    # Whole-expert Marlin decode skips (half-expert shard).
+    VLLM_GLM5_DECODE_KDA_STEP_TILE_DEFAULT=0
+    VLLM_GLM5_DECODE_KDA_V2_DEEP_DEFAULT=1
+    VLLM_GLM5_KDA_RECOVER_DEFAULT=0
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_DEFAULT=1
+    # 2 ranks halves per-call payload; drop the crossover accordingly.
+    # 131,072 B is an untuned starting point; sweep if you measure.
+    VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES_DEFAULT=131072
+    VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS_DEFAULT=0
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_DEFAULT=0
+    VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS_DEFAULT=9-32
+    ;;
+esac
+export VLLM_GLM5_DECODE_KDA_STEP_TILE=${VLLM_GLM5_DECODE_KDA_STEP_TILE:-$VLLM_GLM5_DECODE_KDA_STEP_TILE_DEFAULT}
+if [ "$VLLM_GLM5_DECODE_KDA_V2_DEEP_DEFAULT" = 1 ]; then
   export VLLM_GLM5_DECODE_KDA_V2_DEEP=${VLLM_GLM5_DECODE_KDA_V2_DEEP:-1}
+fi
+if [ "$VLLM_GLM5_KDA_RECOVER_DEFAULT" = 1 ]; then
   export VLLM_GLM5_KDA_RECOVER=${VLLM_GLM5_KDA_RECOVER:-1}
-  if [ -z "${VLLM_CUSTOM_ALLREDUCE_FLAGS+x}" ]; then
-    export VLLM_CUSTOM_ALLREDUCE_FLAGS='1'
-  fi
+fi
+if [ "$VLLM_CUSTOM_ALLREDUCE_FLAGS_DEFAULT" = 1 ] && [ -z "${VLLM_CUSTOM_ALLREDUCE_FLAGS+x}" ]; then
+  export VLLM_CUSTOM_ALLREDUCE_FLAGS='1'
 fi
 # Defaults already on in the fork are explicit here for reproducible banners.
 export VLLM_GLM5_THIN_GEMM_V74=${VLLM_GLM5_THIN_GEMM_V74:-1}
@@ -297,17 +393,12 @@ export VLLM_GLM5_TOOL_CHOICE_NONE_MASK=${VLLM_GLM5_TOOL_CHOICE_NONE_MASK:-1}
 # Diagnostic only: release default off; validation may explicitly enable it.
 export VLLM_GLM5_STATE_INDEX_CHECK=${VLLM_GLM5_STATE_INDEX_CHECK:-0}
 # PP4 whole-expert compiled decode: one-request depths 4..6 and 9..64 rows.
-# These switches require the optional decode library; TP4 keeps them off.
-if [ "$PP" = 4 ] && [ "$TP" = 1 ]; then
-  export VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS:-1}
-  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI:-1}
-  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS:-9-64}
-else
-  export VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS:-0}
-  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI:-0}
-  export VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS:-9-32}
-fi
-export VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES=${VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES:-262144}
+# Half-expert shards (tp2pp2) and quarter-expert shards (tp4) skip. Values
+# come from the per-layout defaults table at the top of this block.
+export VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS:-$VLLM_GLM5_MARLIN_DECODE_PP_MID_ROWS_DEFAULT}
+export VLLM_GLM5_MARLIN_DECODE_PP_MULTI=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI:-$VLLM_GLM5_MARLIN_DECODE_PP_MULTI_DEFAULT}
+export VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS=${VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS:-$VLLM_GLM5_MARLIN_DECODE_PP_MULTI_ROWS_DEFAULT}
+export VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES=${VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES:-$VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES_DEFAULT}
 export VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S=${VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S:-60}
 echo "serve.sh: [release-features] recover=${VLLM_GLM5_KDA_RECOVER:-0} all_reduce_flags=${VLLM_CUSTOM_ALLREDUCE_FLAGS:-0} all_reduce_max_bytes=$VLLM_CUSTOM_ALLREDUCE_FLAGS_MAX_BYTES all_reduce_wait_s=$VLLM_CUSTOM_ALLREDUCE_FLAGS_WAIT_S all_reduce_build_dir=${VLLM_CUSTOM_ALLREDUCE_FLAGS_BUILD_DIR:-unset} kda_deep=${VLLM_GLM5_DECODE_KDA_V2_DEEP:-0} step_tile=$VLLM_GLM5_DECODE_KDA_STEP_TILE state_index_check=$VLLM_GLM5_STATE_INDEX_CHECK"
 echo "serve.sh: [release-features] thin_gemm_v74=$VLLM_GLM5_THIN_GEMM_V74 mhc_v3=$VLLM_GLM5_DECODE_MHC_V3 mhc_fn_bf16=$VLLM_GLM5_DECODE_MHC_V2_FN_BF16 tp4_marlin_prefill_compiled=$VLLM_GLM5_TP4_MARLIN_PREFILL_COMPILED pack_bf16x2=$VLLM_GLM5_PREFILL_PACK_BF16X2 indexer_raw_k=$VLLM_GLM5_INDEXER_DECODE_RAW_K tool_choice_none_mask=$VLLM_GLM5_TOOL_CHOICE_NONE_MASK"
@@ -335,7 +426,7 @@ echo "serve.sh: KV accounting: MAMBA_INFLIGHT_STATES=$VLLM_KV_MAMBA_INFLIGHT_STA
 # Explicit values (including invalid empty values) are never replaced.
 if [ "${VLLM_GLM5_MARLIN_DECODE_CUDA+x}" != x ]; then
   VLLM_GLM5_MARLIN_DECODE_CUDA=0
-  if { [ "$PP" = 4 ] && [ "$TP" = 1 ]; } || { [ "$TP" = 4 ] && [ "$PP" = 1 ]; }; then
+  if { [ "$PP" = 4 ] && [ "$TP" = 1 ]; } || { [ "$TP" = 4 ] && [ "$PP" = 1 ]; } || { [ "$PP" = 2 ] && [ "$TP" = 2 ]; }; then
     VLLM_GLM5_MARLIN_DECODE_CUDA="$(CUDA_VISIBLE_DEVICES= "$VENV/bin/python" - <<'PY'
 import importlib.machinery
 import importlib.util
@@ -673,7 +764,11 @@ if [ "$MODE" = dflash ] && [ "${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0}" = 1 ]; then
 fi
 echo "serve.sh: [adaptive-depth] ADAPTIVE_K=${VLLM_GLM5_DFLASH_ADAPTIVE_K:-0} draft slots=$SPEC_DEPTH"
 # TP4 keeps 3,456-token chunks for any draft depth: 3456 + max(4, depth).
-if [ "$TP" -gt 1 ]; then
+# PP>1 (pp4 and tp2pp2) uses the 2,304-token chunks the PP KV accounting was
+# validated with, since BLOCK_ARGS forces --block-size 4608 for them.
+if [ "$PP" -gt 1 ]; then
+  MAX_BATCHED_DEFAULT=2312
+elif [ "$TP" -gt 1 ]; then
   MAX_BATCHED_DEFAULT=$((3456 + (SPEC_DEPTH > 4 ? SPEC_DEPTH : 4)))
 else
   MAX_BATCHED_DEFAULT=2312
