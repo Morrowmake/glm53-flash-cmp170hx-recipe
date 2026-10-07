@@ -172,13 +172,15 @@ HOST="${HOST:-127.0.0.1}"
 PORT="${PORT:-8000}"
 # SERVED_NAME is the older spelling; SERVED_MODEL_NAME wins when both are set.
 SERVED_MODEL_NAME="${SERVED_MODEL_NAME:-${SERVED_NAME:-glm-5.3-flash}}"
-# Layout: tp4 (tensor-parallel 4, the default) or pp4 (pipeline-parallel 4).
+# Layout: tp4 (tensor-parallel 4, the default), pp4 (pipeline-parallel 4) or
+# tp2pp2 (two pipeline stages of two tensor-parallel ranks each).
 # serve.sh reads LAYOUT too; an explicit PP/TP still wins over it.
 LAYOUT="${LAYOUT:-tp4}"
 case "$LAYOUT" in
     tp4) PP="${PP:-1}"; TP="${TP:-4}" ;;
     pp4) PP="${PP:-4}"; TP="${TP:-1}" ;;
-    *) die "LAYOUT must be tp4 or pp4, not '$LAYOUT'" ;;
+    tp2pp2) PP="${PP:-2}"; TP="${TP:-2}" ;;
+    *) die "LAYOUT must be tp4, pp4 or tp2pp2, not '$LAYOUT'" ;;
 esac
 export LAYOUT PP TP
 # DFlash2 in both layouts.
