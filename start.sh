@@ -609,7 +609,13 @@ container_env() {
     # FlashInfer, TileLang, torch, vLLM, Hugging Face) goes under the mounted
     # cache directory, owned by you. USER and LOGNAME give Python a user name
     # for a uid the image does not know.
-    echo "PYTHONDONTWRITEBYTECODE=1"
+    # Bytecode goes to the cache: the image ships the engine source without
+    # .pyc files, so every process (API server, engine core, four workers)
+    # would otherwise recompile vLLM on each start (~8 s per process).
+    echo "PYTHONPYCACHEPREFIX=/cache/pycache"
+    # Reuse the measured KV-cache size on later boots instead of profiling
+    # again (patches/vllm/v1/worker/startup_plan.py makes all ranks agree).
+    echo "VLLM_ENABLE_STARTUP_PLAN=${VLLM_ENABLE_STARTUP_PLAN:-1}"
     echo "RECIPE_CACHE_ROOT=/cache"
     echo "TMPDIR=/cache/tmp"
     echo "HOME=/cache"
@@ -649,6 +655,11 @@ container_args() {
         -v "$MODEL:/models/$(basename "$MODEL"):ro")
     if [ "$SPEC_MODE" = dflash ]; then
         CRUN+=(-v "$DFLASH_MODEL:/models/$(basename "$DFLASH_MODEL"):ro")
+    fi
+    if [ "${ENGINE_PATCHES:-1}" != 0 ]; then
+        # Two engine files replaced for faster starts; see patches/README.md.
+        CRUN+=(-v "$SCRIPT_DIR/patches/vllm/v1/executor/multiproc_executor.py:/opt/vllm-src/vllm/v1/executor/multiproc_executor.py:ro"
+            -v "$SCRIPT_DIR/patches/vllm/v1/worker/startup_plan.py:/opt/vllm-src/vllm/v1/worker/startup_plan.py:ro")
     fi
     CRUN+=(-v "$CACHE_DIR:/cache"
         --entrypoint /bin/bash "$IMAGE" /recipe/serve.sh "$SPEC_MODE")

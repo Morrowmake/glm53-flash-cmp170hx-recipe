@@ -326,6 +326,18 @@ Read the last `[p2p]` line in `logs/serve.log`. For TP, a serving custom
 all-reduce appears as `['CUSTOM', 'PYNCCL']`; the host-staged path appears as
 `['HOSTSHM', 'PYNCCL']`. Then run `./start.sh smoke`.
 
+**AMD hosts: P2P that passes once, then fails after every stop.** If the
+content check passes on a fresh boot but fails after any server stop or crash
+(`cudaMemcpyPeer mismatch`, NCCL hangs in `_init_comm`) and only a reboot
+helps, look for `AMD-Vi: Event logged [IO_PAGE_FAULT` from the GPUs in
+`dmesg`. With the IOMMU in translated mode (`DMA-FQ` domains, lazy
+invalidation), peer DMA goes through IOMMU mappings that a process exit tears
+down. Put the GPUs in identity domains with the kernel parameter `iommu=pt`
+(for GRUB: add it to `GRUB_CMDLINE_LINUX_DEFAULT`, run `update-grub`,
+reboot; `cat /sys/kernel/iommu_groups/*/type` then shows `identity`). Seen on
+EPYC 7003 under a Proxmox kernel; after the change, stops, crashes and
+restarts leave P2P working and `IO_PAGE_FAULT` stays at zero.
+
 ### Kill switches
 
 Every performance feature can be switched off on its own with one variable,

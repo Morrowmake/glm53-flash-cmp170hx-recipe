@@ -1,5 +1,29 @@
 # Changelog
 
+## Fork: faster restarts — 2026-11-10
+
+Same engine and image as 1.8.0. Changes only how the server starts.
+
+- **Workers start in parallel.** `patches/vllm/v1/executor/multiproc_executor.py`
+  starts the four workers from threads instead of one after another
+  (~45 s per start).
+- **Startup plan on, and fixed.** `VLLM_ENABLE_STARTUP_PLAN=1` by default with
+  `patches/vllm/v1/worker/startup_plan.py`: all ranks agree before skipping
+  memory profiling (the unpatched engine hangs when only some ranks can use
+  their plan), and plans are saved with a 512 MiB margin
+  (`VLLM_STARTUP_PLAN_MARGIN_MB`) so a restart can use them.
+- **Bytecode cache.** `PYTHONDONTWRITEBYTECODE=1` replaced by
+  `PYTHONPYCACHEPREFIX=/cache/pycache`; vLLM is no longer compiled from source
+  by every process on every start.
+- `ENGINE_PATCHES=0` turns the two file mounts off.
+- **Docs.** AMD IOMMU note for P2P that breaks after every stop (`iommu=pt`);
+  fork measurements in `docs/results.md`, including 16 users.
+- **LMCache measurements** in `docs/lmcache.md`: RAM and NVMe KV tiers outside
+  vLLM (0.36 s instead of 18 s for a 47.7k-token prompt, kept across restarts),
+  their prefill cost and how they were wired. Optional, not in the default start.
+
+Measured restart: 252 s → ~150 s (TP4, base model). Decode is unchanged.
+
 ## 1.8.0 — 2026-10-16
 
 Engine: `819146023facb31c04f1f8512e52464835a10d40` (fork branch `ampere`, tag
