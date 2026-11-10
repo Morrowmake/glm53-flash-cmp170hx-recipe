@@ -71,6 +71,49 @@ tokens), with no prefix-cache hits.
 One-user prose varies most between runs (208.8–234.5 tok/s across the five
 TP4 samples).
 
+## Fork measurements (2026-11-10)
+
+Same engine and image as 1.8.0 (`819146023f`, digest `sha256:18a2f262…`),
+4× CMP 170HX at 200 W, PCIe Gen2 x16, verified P2P, TP4, DFlash2,
+`MAX_SEQS=16`, `GPU_UTIL=0.95`. Decode uses the MiaAI-Lab script
+(`tests/bench_decode.py`, unmodified apart from host and model name): 400
+tokens, temperature 0, thinking off; one user is the median streaming decode
+rate of five runs, N users the median aggregate rate of three. Measured with
+an LMCache KV connector attached (it does not change decode). The 16-user row
+is new. The base model is the release checkpoint; the LoRA rows add a rank-1
+adapter on `o_proj`, `down_proj` and the experts.
+
+| tok/s, structured / code / prose | 1.8.0 (Morrowmake) | Fork run, base model | Same, with a LoRA adapter |
+|---|---:|---:|---:|
+| 1 user | 482.6 / 442.1 / 232.1 | 530.0 / 408.5 / 212.1 | 431.2 / 329.5 / 191.4 |
+| 2 users | 606.5 / 460.3 / 314.7 | 631.3 / 503.7 / 358.1 | 537.6 / 431.7 / 311.5 |
+| 4 users | 717.7 / 618.7 / 501.4 | 818.0 / 685.3 / 548.6 | 680.4 / 567.6 / 443.0 |
+| 8 users | 943.7 / 835.0 / 667.2 | 1,158.0 / 1,007.1 / 729.5 | 975.9 / 804.5 / 624.3 |
+| 16 users | — | 1,200.9 / 1,020.6 / 777.4 | 1,124.1 / 939.4 / 731.9 |
+| Cold prefill | 3,161 | 3,141 without LMCache, 2,565 with | 2,554 with LMCache |
+
+The decode rows are within run-to-run variation of 1.8.0 or above it; the
+engine and its settings are the same, so the difference is the host (power
+limit, CPU, P2P path), not the fork's patches, which only change startup.
+From 8 to 16 users the aggregate grows little (+4 % structured): decode is
+compute-bound at that point. Cold prefill here uses three synthetic prompts of
+~67k tokens with a fresh prefix each (the release's real-text prompts are not
+published), median of nine; the LMCache connector costs ~19 % of cold prefill
+because it writes every prefilled chunk to its CPU tier.
+
+### Restart time
+
+Measured on the same host with the same image and `serve.sh`, from
+`systemctl restart` to `/health` 200, model already in the page cache:
+
+| | Release behaviour | With the fork's start changes |
+|---|---:|---:|
+| TP4, base model, `MAX_SEQS=16` | 252 s | 147–155 s |
+
+Breakdown of the saving: workers started together (~45 s), bytecode cache
+(~8 s for each of API server, engine core and workers), startup plan
+(engine init 63 s → 39 s; the KV pool is 7 % smaller on such starts). See [patches/README.md](../patches/README.md).
+
 ## Choosing a layout
 
 PP4 passes activations between stages; TP4 exchanges data after each layer.

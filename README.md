@@ -12,6 +12,12 @@
   <img alt="licence" src="https://img.shields.io/badge/recipe-MIT-blue?style=flat">
 </p>
 
+> **Fork of [Morrowmake/glm53-flash-cmp170hx-recipe](https://github.com/Morrowmake/glm53-flash-cmp170hx-recipe)
+> with faster restarts** (252 s → ~150 s on TP4) and measurements up to 16 users,
+> with a LoRA adapter and with an LMCache KV tier in RAM and on NVMe. Everything
+> this fork found is in [Fork findings](#fork-findings); the rest of this README
+> is the upstream text and its 1.8.0 numbers.
+
 **A 320B-parameter MoE with a 262,144-token context, served on four CMP 170HX
 cards in two layouts. Release 1.8.0 tensor-parallel results with verified peer-to-peer at 74 SMs:
 482.6 tok/s for one user and 943.7 tok/s across eight,
@@ -151,6 +157,114 @@ links. Quality on the final release build, scored on the answer after the
 reasoning: TP4 HumanEval 151/164 and GSM8K 1,286/1,319.
 Method and exact figures: [Results](docs/results.md).
 
+## Fork findings
+
+Measured 2026-11-10 on 4× CMP 170HX at 200 W per card, PCIe Gen2 x16,
+verified P2P, TP4, DFlash2, `MAX_SEQS=16`, `GPU_UTIL=0.95`, with the same
+engine and image as 1.8.0. Decode uses the same MiaAI-Lab script and protocol
+as the table above (400 tokens, temperature 0, thinking off; one user is the
+median streaming rate of five runs, N users the median aggregate of three).
+
+### Throughput, up to 16 users
+
+| tok/s · structured / code / prose | 1.8.0 (table above) | This fork's run, base model | Same, with a LoRA adapter |
+|---|---:|---:|---:|
+| **1 user** | 482.6 / 442.1 / 232.1 | **530.0** / 408.5 / 212.1 | 431.2 / 329.5 / 191.4 |
+| **2 users, total** | 606.5 / 460.3 / 314.7 | **631.3 / 503.7 / 358.1** | 537.6 / 431.7 / 311.5 |
+| **4 users, total** | 717.7 / 618.7 / 501.4 | **818.0 / 685.3 / 548.6** | 680.4 / 567.6 / 443.0 |
+| **8 users, total** | 943.7 / 835.0 / 667.2 | **1,158.0 / 1,007.1 / 729.5** | 975.9 / 804.5 / 624.3 |
+| **16 users, total** | — | **1,200.9 / 1,020.6 / 777.4** | 1,124.1 / 939.4 / 731.9 |
+| **Cold prefill** | 3,161 | 3,141 (2,565 with LMCache) | 2,554 with LMCache |
+
+- The fork changes only how the server starts, so decode differences against
+  1.8.0 come from the host (power limit, CPU), not from the patches.
+- **16 users add only ~4 % over 8** (structured): the cards are compute-bound
+  by 8 users. More concurrency mostly adds latency per request.
+- **A LoRA adapter costs 10–20 % of decode** (rank 1 on `o_proj`, `down_proj`
+  and the experts); prefill is unchanged.
+- Cold prefill here uses three synthetic ~67k-token prompts with fresh
+  prefixes (the release's real-text prompts are not published), median of nine.
+
+### Restarts: 252 s → ~150 s
+
+| From `restart` to `/health` 200 (TP4, base model, weights in page cache) | Time |
+|---|---:|
+| Release behaviour | 252 s |
+| With this fork | **147–155 s** |
+
+| Change | Saves per start |
+|---|---:|
+| Four workers started together instead of one after another ([patch](patches/README.md)) | ~45 s |
+| Bytecode cache (`PYTHONPYCACHEPREFIX=/cache/pycache`): the image ships vLLM without `.pyc`, so every process compiled it on every start | ~8 s per process stage |
+| Startup plan on (`VLLM_ENABLE_STARTUP_PLAN=1`), fixed so all ranks agree and with a 512 MiB margin | engine init 63 s → 39 s |
+
+- **Startup plan bug in the release engine:** each rank decided alone whether
+  to use its saved plan. When free memory differed slightly between cards, one
+  rank skipped profiling while the others profiled and **the engine hung**.
+  The patch makes the ranks agree; tested with one rank's plan made unusable.
+- **Cost:** a start that uses a plan has a 7 % smaller KV pool (992,941 instead
+  of 1,066,492 tokens). `VLLM_ENABLE_STARTUP_PLAN=0` keeps the full pool;
+  `ENGINE_PATCHES=0` removes both patches.
+- Still in the ~150 s: weight loading (~35 s from page cache, ~100 s cold),
+  profiling and CUDA-graph capture (~40 s), Python start-up of three process
+  stages (~9 s each) and the P2P check.
+
+### LMCache: KV cache in RAM and on NVMe that survives restarts
+
+Optional, not in the default start; setup in [docs/lmcache.md](docs/lmcache.md).
+Same ~47,700-token prompt asked again:
+
+```mermaid
+xychart-beta horizontal
+    title "Time to first token, 47.7k-token prompt (s)"
+    x-axis ["Cold", "NVMe", "RAM, restart", "RAM", "GPU cache"]
+    y-axis "seconds (lower is better)" 0 --> 20
+    bar [18.09, 2.68, 0.76, 0.36, 0.38]
+```
+
+Cold: nothing cached · NVMe: LMCache server and vLLM both restarted ·
+RAM, restart: vLLM restarted, LMCache kept running · RAM: GPU cache cleared ·
+GPU cache: prefix still in vLLM's GPU cache.
+
+| Situation | Time to first token | vs cold |
+|---|---:|---:|
+| Cold, nothing cached | 18.09 s | 1× |
+| Prefix still in vLLM's GPU cache | 0.38 s | 48× |
+| GPU cache cleared, served from LMCache RAM | **0.36 s** | **50×** |
+| vLLM restarted, LMCache server kept running | **0.76 s** | **24×** |
+| LMCache server and vLLM both restarted (NVMe only) | **2.68 s** | **6.8×** |
+
+- **Cost:** −18 % cold prefill (every prefilled chunk is also written to RAM);
+  decode unchanged (1 / 16 users: 175 / 628 vs 170 / 633 tok/s on our own
+  prompts); host RAM for the RAM tier (64–128 GB here) plus ~16 GB.
+- Compared with vLLM's built-in CPU offload, the RAM belongs to a separate
+  server, so it survives vLLM restarts and vLLM no longer pins it at every
+  start (~100 s for 128 GiB on our host).
+- Must use `LMCacheMPConnector`: the in-process `LMCacheConnectorV1` fails on
+  this hybrid KDA + MLA model. `--chunk-size` must be a multiple of 1,152.
+  `--l2-prefetch-policy retain` keeps NVMe reads in RAM (the default drops them).
+- **LoRA:** LMCache keys the cache by tokens only. Serving a base model and a
+  LoRA adapter from one server shares their KV unless the adapter name is
+  added to the cache salt (see [docs/lmcache.md](docs/lmcache.md)).
+
+### P2P on AMD hosts: `iommu=pt`
+
+If P2P passes on a fresh boot but **fails after every server stop or crash**
+(`cudaMemcpyPeer mismatch`, NCCL hangs) and only a reboot helps, check
+`dmesg` for `AMD-Vi ... IO_PAGE_FAULT` from the GPUs. With the IOMMU in
+translated mode, peer DMA uses mappings that a process exit tears down. The
+kernel parameter **`iommu=pt`** fixes it: after the change, stops, crashes and
+restarts keep P2P working with zero `IO_PAGE_FAULT`
+([details](docs/how-to-use.md#pcie-peer-to-peer)). Seen on EPYC 7003.
+
+### Tried and not usable on this model
+
+| Idea | Result |
+|---|---|
+| **Decode context parallel** (`--decode-context-parallel-size 4`) | Refused at start: no sparse-MLA attention backend supports DCP on sm80. Little to gain anyway: only 11 of 45 layers are MLA, the KV pool is not the limit, and the extra collectives would run over PCIe. |
+| **CacheBlend** (reusing KV of non-prefix chunks) | Not applicable: 34 of 45 layers are recurrent KDA, whose state depends on the whole prefix. Blending only the 11 attention layers would still recompute every token through the KDA and MoE layers. |
+| **LMCache in-process connector** (`LMCacheConnectorV1`) | Fails on the hybrid model (no HMA support); the multi-process connector works. |
+
 ## Settings
 
 Settings live in `.env`; see [Settings](docs/how-to-use.md#settings)
@@ -167,6 +281,8 @@ in `.env`); details in [Choosing a layout](docs/results.md#choosing-a-layout).
 ## Documentation
 
 - [Results](docs/results.md): throughput, quality, decode and prefill in detail
+- Fork: [engine patches for faster restarts](patches/README.md), [LMCache in RAM and on NVMe](docs/lmcache.md),
+  [fork measurements](docs/results.md#fork-measurements-2026-11-10)
 - [How to use this repo](docs/how-to-use.md): install, settings, peer-to-peer,
   kill switches, day to day, updates, Docker Compose, containers
 - [Optional compiled Marlin](docs/compiled-marlin.md): defaults, switches, building it
